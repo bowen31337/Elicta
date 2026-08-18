@@ -18,7 +18,10 @@ Once classification completes, `run_bmad_analyst_chain` runs a BMAD Analyst
 chain over the full classified transcript and persists the full artifact
 set — open questions, the decision log, the draft project brief, and the
 draft follow-up email — every claim grounded in a citation back to the
-classified utterances (PRD FR-4.1, FR-8).
+classified utterances (PRD FR-4.1, FR-8). Once the chain completes,
+`persist_citation_table` binds every one of those claims to a citations-table
+row of utterance_id, timestamp, and speaker, failing the run rather than
+persisting a claim with no row for it (PRD FR-8.7).
 """
 
 from __future__ import annotations
@@ -29,6 +32,11 @@ from app.modules.debrief.pipeline.bmad_analyst import (
     normalize_provenance,
     resolve_citations,
     run_bmad_analyst_chain,
+)
+from app.modules.debrief.pipeline.citations import (
+    SaveSessionCitationTable,
+    build_citation_rows,
+    persist_citation_table,
 )
 from app.modules.debrief.pipeline.classification import (
     ClassifyUtterances,
@@ -56,6 +64,9 @@ from app.modules.debrief.pipeline.models import (
     BmadFollowUpEmailDraft,
     BmadOpenQuestionDraft,
     BmadProjectBriefDraft,
+    CitationRow,
+    CitationTableStatus,
+    ClaimKind,
     ClaimProvenance,
     ClassifiedUtterance,
     CleanedUtterance,
@@ -69,6 +80,7 @@ from app.modules.debrief.pipeline.models import (
     ProjectBriefDraft,
     SectionClassificationStatus,
     SessionBmadAnalystChain,
+    SessionCitationTable,
     SessionDiarization,
     SessionSectionClassification,
     SessionTranscriptCleaning,
@@ -99,6 +111,9 @@ __all__ = [
     "BmadFollowUpEmailDraft",
     "BmadOpenQuestionDraft",
     "BmadProjectBriefDraft",
+    "CitationRow",
+    "CitationTableStatus",
+    "ClaimKind",
     "ClaimProvenance",
     "ClassifiedUtterance",
     "ClassifyUtterances",
@@ -117,11 +132,13 @@ __all__ = [
     "ProjectBriefDraft",
     "RunBmadAnalystChain",
     "SaveSessionBmadAnalystChain",
+    "SaveSessionCitationTable",
     "SaveSessionDiarization",
     "SaveSessionSectionClassification",
     "SaveSessionTranscriptCleaning",
     "SectionClassificationStatus",
     "SessionBmadAnalystChain",
+    "SessionCitationTable",
     "SessionDiarization",
     "SessionSectionClassification",
     "SessionTranscriptCleaning",
@@ -130,11 +147,13 @@ __all__ = [
     "TranscriptCleaningStatus",
     "TranscriptSpan",
     "Utterance",
+    "build_citation_rows",
     "compute_slot_fill_states",
     "destroy_retained_audio",
     "is_ready_for_audio_destruction",
     "normalize_provenance",
     "normalize_section_key",
+    "persist_citation_table",
     "resolve_citations",
     "run_bmad_analyst_chain",
     "run_diarization",

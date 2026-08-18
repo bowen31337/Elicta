@@ -421,3 +421,65 @@ class AudioDestructionEvent(BaseModel):
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
+
+
+class ClaimKind(str, Enum):
+    """Which BMAD analyst artifact category a persisted citation row's claim belongs to (PRD FR-8.7)."""
+
+    OPEN_QUESTION = "open_question"
+    DECISION = "decision"
+    PROJECT_BRIEF = "project_brief"
+    FOLLOW_UP_EMAIL = "follow_up_email"
+
+
+class CitationRow(BaseModel):
+    """One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7).
+
+    `build_citation_rows` in `citations.py` is the only place these are
+    built, one per `ArtifactCitation` already nested on a `BmadArtifactSet`
+    claim — never re-derived from anything the chain reported directly, the
+    same grounding-in-persisted-data reasoning `resolve_citations` uses. A
+    claim with more than one citation gets one row per citation, all sharing
+    the same `claim_kind`/`claim_index`; a claim with none is a vendor
+    contract violation `build_citation_rows` raises on rather than silently
+    producing zero rows for it (PRD FR-8.7 requires a row for every claim).
+    `claim_index` is the claim's position within its own category's list —
+    always `0` for the singular `project_brief` and `follow_up_email`
+    claims, and the list index for `open_questions`/`decisions`.
+    """
+
+    session_id: str
+    claim_kind: ClaimKind
+    claim_index: int = Field(ge=0)
+    utterance_id: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    speaker_tag: str
+    quoted_text: str
+
+
+class CitationTableStatus(str, Enum):
+    """Terminal state of one attempt to persist a session's BMAD analyst claims as citation rows."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class SessionCitationTable(BaseModel):
+    """Durable record of one citation-row persistence run over a session's BMAD analyst chain output (PRD FR-8.7).
+
+    Persisted whether the run succeeded or failed, mirroring
+    `SessionBmadAnalystChain`: a session with no citation-table record at all
+    would be indistinguishable from one that simply hasn't had its claims
+    bound to citation rows yet, so `status` and `error` make a failed run
+    visible instead of silent. `rows` is empty on a `FAILED` run — the
+    resolved `ArtifactCitation`s still live on in `SessionBmadAnalystChain`,
+    so nothing is lost.
+    """
+
+    session_id: str
+    status: CitationTableStatus
+    rows: list[CitationRow]
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
