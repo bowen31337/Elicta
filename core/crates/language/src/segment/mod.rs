@@ -26,14 +26,17 @@
 //! `segment → match`, not `match`, and the segmenter is per-language. This
 //! module's job stops at handing each language its own token set; it does
 //! not own the segmenters or lexicons themselves (those register against
-//! [`segmenter::SegmenterRouter`]) and it does not own merging spans back
-//! into utterance order (the `index` on [`PositionedToken`] carries what a
-//! merge step needs, but performing the merge is downstream of routing).
+//! [`segmenter::SegmenterRouter`]). It does own merging spans back into
+//! utterance order ([`merge::merge_spans`]): the `index` on
+//! [`PositionedToken`] carries what that step needs, and it is what makes
+//! the merge possible without re-deriving order from anything else.
 
+pub mod merge;
 pub mod segmenter;
 
 use std::collections::HashMap;
 
+pub use merge::merge_spans;
 pub use segmenter::{CharSegmenter, Segmenter, SegmenterRouter, Span, WhitespaceSegmenter};
 
 /// A single ASR output token carrying its own per-token language tag

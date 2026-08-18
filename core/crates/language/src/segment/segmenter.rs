@@ -140,6 +140,19 @@ impl SegmenterRouter {
             })
             .collect()
     }
+
+    /// [`Self::route`] followed by [`super::merge::merge_spans`]: groups,
+    /// segments per language, then merges back into the single ordered span
+    /// list per utterance the architecture §3.5 pipeline's "merge spans" box
+    /// calls for — so callers that don't need the intermediate per-language
+    /// breakdown don't have to chain both steps themselves.
+    pub fn route_merged(
+        &self,
+        tokens: &[super::TaggedToken],
+        min_tag_confidence: f32,
+    ) -> Vec<Span> {
+        super::merge::merge_spans(self.route(tokens, min_tag_confidence))
+    }
 }
 
 fn primary_subtag(language: &str) -> String {
