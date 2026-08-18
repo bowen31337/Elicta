@@ -5,6 +5,7 @@ mod asr_auto_restart;
 mod asr_backend_crash;
 mod capture_stream;
 mod device_route;
+mod inference_degraded;
 mod language_panel;
 mod preflight;
 mod question_bank;
@@ -24,6 +25,9 @@ pub use capture_stream::{
 pub use device_route::{
     handle_device_route_change, DeviceId, DeviceRouteChange, DeviceRouteChangeAlert,
     RouteChangeResponse,
+};
+pub use inference_degraded::{
+    badge_for_outcome, InferenceEndpointOutcome, InferenceHealthBadge, InferenceHealthMonitor,
 };
 pub use language_panel::{
     check_language_panel_health, DetectedLanguageState, LanguagePanelDivergence,
