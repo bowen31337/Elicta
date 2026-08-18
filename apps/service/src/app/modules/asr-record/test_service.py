@@ -273,6 +273,7 @@ def test_starting_a_job_persists_it_as_queued_and_returns_without_waiting():
     assert job.meeting_id == "meeting-1"
     assert job.status == TranscriptionJobStatus.QUEUED
     assert job.created_at == fixed
+    assert job.engine_lineages == ["engine-a", "engine-b"]
     assert deps["saved_jobs"] == [job]
     assert len(deps["scheduled"]) == 1
     # The batch run itself has not happened yet — only scheduled.
@@ -323,6 +324,7 @@ def test_running_the_scheduled_work_completes_the_job_and_saves_one_transcript_p
     )
     assert deps["saved_jobs"][-1].job_id == job.job_id
     assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.COMPLETE
+    assert deps["saved_jobs"][-1].engine_lineages == ["engine-a", "engine-b"]
 
 
 def test_the_job_completes_when_only_one_of_the_two_engines_succeeds():

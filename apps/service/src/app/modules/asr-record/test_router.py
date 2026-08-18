@@ -208,6 +208,7 @@ def test_starting_a_meeting_transcription_returns_202_with_a_job_id():
     assert body["job_id"]
     assert body["meeting_id"] == "meeting-1"
     assert body["status"] == "queued"
+    assert body["engine_lineages"] == ["engine-a", "engine-b"]
 
 
 def test_starting_a_meeting_transcription_does_not_block_on_the_batch_run():

@@ -86,9 +86,19 @@ class RecordPathTranscriptionJob(BaseModel):
     accepted, before the (potentially long-running) batch engine call has
     finished — `job_id` is what a caller polls or correlates against later,
     since the transcript itself is not ready yet.
+
+    `engine_lineages` records both engine identifiers configured for this run
+    on the job itself, not just on each engine's own `RecordPathTranscript`
+    (PRD FR-2.6). Reconciling the two engines' output only tells you anything
+    if they're actually independent — sharing training data would make
+    agreement between them meaningless — so the run record needs to show
+    which two lineages were used together without having to join across the
+    separate per-engine transcripts, which may not both exist yet (one may
+    still be running, or may have failed before producing one).
     """
 
     job_id: str
     meeting_id: str
     status: TranscriptionJobStatus
     created_at: datetime
+    engine_lineages: list[str]

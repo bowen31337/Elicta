@@ -140,6 +140,10 @@ async def start_record_path_transcription_job(
     concrete task queue directly, since neither the worker mechanism nor a
     durable job queue lives in this package. The caller gets back a job
     handle they can poll or correlate against once the batch run finishes.
+    The job records `engine_lineages` (both configured engine identifiers) up
+    front, since that pairing is what makes reconciling the two engines'
+    output meaningful at all (PRD FR-2.6) — it shouldn't require looking up
+    the individual transcripts, which may not both exist yet.
 
     The scheduled work updates the job to `COMPLETE`/`FAILED` itself and
     swallows the batch failure rather than re-raising it, since by the time
@@ -157,6 +161,7 @@ async def start_record_path_transcription_job(
         meeting_id=meeting_id,
         status=TranscriptionJobStatus.QUEUED,
         created_at=created_at,
+        engine_lineages=[name for name, _ in engines],
     )
     await save_job(job)
 
