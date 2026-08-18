@@ -21,6 +21,11 @@
 //! topic-focus judgment and the bank's coverage state into a
 //! [`coverage_gap_drift::CoverageGapDriftTrigger`], since that decision is
 //! model-assisted-tier and lands on the same tick this crate already owns.
+//! The novel-entity decision rule (PRD FR-5.5) sits alongside it for the
+//! same reason: [`novel_entity::NovelEntityDetector`] turns a per-tick
+//! judgment of which systems, roles, and processes the conversation named
+//! into a [`novel_entity::NovelEntityTrigger`] for any name absent from the
+//! context pack.
 //! Writing a slow-lane pass's novel *candidates* back into the on-device
 //! bank mid-meeting (§3.8) is, however, this crate's own
 //! [`bank_write_back::BankWriteBackStore`] — landing them durably for later
@@ -31,6 +36,7 @@ pub mod bank_write_back;
 pub mod cache_lifetime;
 pub mod coverage_gap_drift;
 pub mod model;
+pub mod novel_entity;
 pub mod orchestrator;
 pub mod prewarm;
 pub mod prompt;
@@ -42,6 +48,7 @@ pub use bank_write_back::{BankWriteBackStore, NovelCandidate, WriteBackError};
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
 pub use coverage_gap_drift::{CoverageGapDriftDetector, CoverageGapDriftTrigger, TopicFocus};
 pub use model::{MeetingModel, ModelId};
+pub use novel_entity::{ContextPackEntities, EntityKind, MentionedEntity, NovelEntityDetector, NovelEntityTrigger};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
 pub use prewarm::{PreWarmRequest, UnwarmedMeeting, WarmedMeeting};
 pub use prompt::{MeetingPromptContext, PromptBlock, SlowLanePrompt};
@@ -388,6 +395,48 @@ mod orchestrator_ticks_end_to_end {
         ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
         let repeat_trigger = detector.on_tick(TopicFocus::on("timeline"), &slots);
         assert_eq!(repeat_trigger, None, "a trigger already reported for this drift must not fire again");
+
+        ticker.stop();
+    }
+
+    /// PRD FR-5.5 end to end, driven by real [`TickEvent`]s from the same
+    /// ticker every other test in this module uses: a slow-lane pass that
+    /// judges a tick's entity mentions against the context pack fires no
+    /// trigger for a name the context pack already carries, and fires
+    /// exactly one [`novel_entity::NovelEntityTrigger`] for a system, role,
+    /// or process the context pack never named -- the same "decide once"
+    /// shape [`coverage_gap_drift::CoverageGapDriftDetector`] uses, so a
+    /// later tick that repeats the same novel name does not refire it.
+    #[test]
+    fn a_novel_entity_absent_from_the_context_pack_emits_a_trigger_event() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let context_pack = ContextPackEntities::new(["Zendesk"]);
+        let mut detector = NovelEntityDetector::new(context_pack);
+
+        // Tick 1: the only entity mentioned is already in the context pack
+        // -- nothing novel to report.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let known_only = detector.on_tick(&[MentionedEntity::new("Zendesk", EntityKind::System)]);
+        assert_eq!(known_only, vec![]);
+
+        // Tick 2: the slow-lane pass's judgment now names a system the
+        // context pack never carried.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let novel = detector.on_tick(&[MentionedEntity::new("Shadow IT ticketing tool", EntityKind::System)]);
+        assert_eq!(
+            novel,
+            vec![NovelEntityTrigger {
+                entity: MentionedEntity::new("Shadow IT ticketing tool", EntityKind::System)
+            }],
+            "a system, role, or process absent from the context pack must emit a trigger event"
+        );
+
+        // Tick 3: the same novel name is mentioned again -- already
+        // reported, must not refire.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let repeat = detector.on_tick(&[MentionedEntity::new("Shadow IT ticketing tool", EntityKind::System)]);
+        assert_eq!(repeat, vec![], "a novel entity already reported earlier in the meeting must not refire");
 
         ticker.stop();
     }
