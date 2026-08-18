@@ -33,7 +33,7 @@ value types it operates on:
 
 ```rust
 pub use backend::{
-    AudioSegmentRef, BackendError, FinalUtterance, InterimHypothesis, LanguageTag,
+    AudioSegmentRef, BackendError, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag,
     SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
 };
 ```
@@ -46,8 +46,14 @@ pub use backend::{
   `UtteranceId`, and `LanguageTag` are plain `String` aliases; `SpeakerTag`
   and `AudioSegmentRef` are minimal local types.
 - `transcription_backend.rs` — the `TranscriptionBackend` trait itself
-  (`send_audio` / `poll_events`, synchronous push/drain, no `async`) and
-  `BackendError`.
+  (`start_stream` / `send_audio` / `poll_events`, synchronous push/drain, no
+  `async`) and `BackendError`. `start_stream` is the keyterm handshake (PRD
+  FR-2.9): every implementation must send the engagement vocabulary passed
+  to it as keyterm prompting before accepting any audio for that
+  `stream_id`, and must reject a `send_audio` call for a stream that hasn't
+  been started yet — the same vocabulary the record path sends via
+  `GetEngagementVocabulary` in `app/modules/asr-record`, injected here on
+  the live path's handshake instead.
 - `fake.rs` — two scripted, non-networked test-double vendors
   (`ImmutablePartialFakeBackend`, mimicking AssemblyAI-style immutable
   partials, and `RevisablePartialFakeBackend`, mimicking Deepgram-style
@@ -55,20 +61,23 @@ pub use backend::{
   same `TranscriptionEvent` shape and can be driven by one function written
   generically over `impl TranscriptionBackend`, standing in for how the
   trigger gate will consume either vendor without knowing which one it is.
-  These are exported, not test-only, so whoever wires the trigger gate can
-  develop against them before a real vendor connection exists.
+  Both record the keyterms handed to `start_stream` (inspectable via
+  `keyterms_sent`) and reject `send_audio` before that handshake has
+  happened. These are exported, not test-only, so whoever wires the trigger
+  gate can develop against them before a real vendor connection exists.
 
 ## Deliberately out of scope here
 
 Everything about how a *real* vendor connection is opened and driven —
 pre-opened websocket at capture start, keepalive frames, linear16 PCM
-framing at 20-50ms, regional endpoint pinning, keyterm-prompting injection
-— is separately scoped work against this same `backend/` directory (see the
-adjacent features in the "Streaming Transcription" category). This handoff
-covers only the trait and event shape; a real `DeepgramBackend` /
+framing at 20-50ms, regional endpoint pinning — is separately scoped work
+against this same `backend/` directory (see the adjacent features in the
+"Streaming Transcription" category). This handoff covers only the trait,
+event shape, and the keyterm handshake; a real `DeepgramBackend` /
 `AssemblyAiBackend` implements `TranscriptionBackend` the same way the fakes
 here do, translating its own wire format into `TranscriptionEvent` inside
-`poll_events`.
+`poll_events` and sending `start_stream`'s keyterms as that vendor's own
+keyterm-prompting mechanism on connection open.
 
 `capture::enrol::SpeakerIdentity` and this module's `SpeakerTag` currently
 have the same shape (`Operator` / `Participant(String)` / `Unknown`) but are
@@ -77,7 +86,6 @@ the crate scaffold wires that dependency, `FinalUtterance::speaker` should
 be reconsidered against `capture::enrol::SpeakerIdentity` directly rather
 than keeping a parallel local type.
 
-Verified with `cargo test` and `cargo clippy` (5 passing tests, no
-warnings) in a scratch crate mirroring this module tree, since the
-crate-level `Cargo.toml`/`lib.rs` don't exist yet and weren't available
-here to build against directly.
+Verified with `cargo test -p asr-live` and `cargo clippy -p asr-live
+--all-targets` against the real crate (7 passing tests in this module, no
+warnings).

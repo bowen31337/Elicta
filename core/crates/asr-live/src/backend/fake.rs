@@ -10,11 +10,11 @@
 //! (not `#[cfg(test)]`-only) so a caller wiring up the trigger gate against
 //! this trait can exercise it without standing up a real vendor either.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use super::event::{
-    AudioSegmentRef, FinalUtterance, InterimHypothesis, SpeakerTag, StreamId, Token,
+    AudioSegmentRef, FinalUtterance, InterimHypothesis, Keyterm, SpeakerTag, StreamId, Token,
     TranscriptionEvent,
 };
 use super::transcription_backend::{BackendError, TranscriptionBackend};
@@ -72,6 +72,7 @@ pub struct ImmutablePartialFakeBackend {
     script: Vec<ScriptedTurn>,
     frames_per_turn: u64,
     frame_count: u64,
+    handshakes: HashMap<StreamId, Vec<Keyterm>>,
 }
 
 impl ImmutablePartialFakeBackend {
@@ -82,7 +83,15 @@ impl ImmutablePartialFakeBackend {
             script: sample_script(),
             frames_per_turn: 2,
             frame_count: 0,
+            handshakes: HashMap::new(),
         }
+    }
+
+    /// The keyterms `start_stream` handed this fake for `stream_id`, if the
+    /// handshake has happened yet — lets a test assert what vocabulary was
+    /// injected rather than just that the call didn't error.
+    pub fn keyterms_sent(&self, stream_id: &StreamId) -> Option<&[Keyterm]> {
+        self.handshakes.get(stream_id).map(Vec::as_slice)
     }
 }
 
@@ -93,7 +102,22 @@ impl Default for ImmutablePartialFakeBackend {
 }
 
 impl TranscriptionBackend for ImmutablePartialFakeBackend {
+    fn start_stream(
+        &mut self,
+        stream_id: &StreamId,
+        keyterms: &[Keyterm],
+    ) -> Result<(), BackendError> {
+        self.handshakes.insert(stream_id.clone(), keyterms.to_vec());
+        Ok(())
+    }
+
     fn send_audio(&mut self, stream_id: &StreamId, frame: &[i16]) -> Result<(), BackendError> {
+        if !self.handshakes.contains_key(stream_id) {
+            return Err(BackendError(
+                "send_audio called before start_stream (keyterm handshake) for this stream"
+                    .to_string(),
+            ));
+        }
         if frame.is_empty() {
             return Err(BackendError("empty frame".to_string()));
         }
@@ -142,6 +166,7 @@ pub struct RevisablePartialFakeBackend {
     script: Vec<ScriptedTurn>,
     frames_per_turn: u64,
     frame_count: u64,
+    handshakes: HashMap<StreamId, Vec<Keyterm>>,
 }
 
 impl RevisablePartialFakeBackend {
@@ -152,7 +177,15 @@ impl RevisablePartialFakeBackend {
             script: sample_script(),
             frames_per_turn: 2,
             frame_count: 0,
+            handshakes: HashMap::new(),
         }
+    }
+
+    /// The keyterms `start_stream` handed this fake for `stream_id`, if the
+    /// handshake has happened yet — lets a test assert what vocabulary was
+    /// injected rather than just that the call didn't error.
+    pub fn keyterms_sent(&self, stream_id: &StreamId) -> Option<&[Keyterm]> {
+        self.handshakes.get(stream_id).map(Vec::as_slice)
     }
 }
 
@@ -163,7 +196,22 @@ impl Default for RevisablePartialFakeBackend {
 }
 
 impl TranscriptionBackend for RevisablePartialFakeBackend {
+    fn start_stream(
+        &mut self,
+        stream_id: &StreamId,
+        keyterms: &[Keyterm],
+    ) -> Result<(), BackendError> {
+        self.handshakes.insert(stream_id.clone(), keyterms.to_vec());
+        Ok(())
+    }
+
     fn send_audio(&mut self, stream_id: &StreamId, frame: &[i16]) -> Result<(), BackendError> {
+        if !self.handshakes.contains_key(stream_id) {
+            return Err(BackendError(
+                "send_audio called before start_stream (keyterm handshake) for this stream"
+                    .to_string(),
+            ));
+        }
         if frame.is_empty() {
             return Err(BackendError("empty frame".to_string()));
         }
@@ -218,6 +266,9 @@ mod tests {
         stream_id: &StreamId,
         frames: u64,
     ) -> Vec<TranscriptionEvent> {
+        backend
+            .start_stream(stream_id, &[])
+            .expect("the keyterm handshake should never fail for a fake backend");
         let mut events = Vec::new();
         for _ in 0..frames {
             backend
@@ -338,9 +389,45 @@ mod tests {
     fn an_empty_frame_is_rejected_rather_than_silently_producing_no_events() {
         let mut backend = ImmutablePartialFakeBackend::new();
         let stream_id: StreamId = "stream-1".to_string();
+        backend.start_stream(&stream_id, &[]).expect("handshake should succeed");
 
         let result = backend.send_audio(&stream_id, &[]);
 
         assert_eq!(result, Err(BackendError("empty frame".to_string())));
+    }
+
+    #[test]
+    fn send_audio_before_the_keyterm_handshake_is_rejected() {
+        let stream_id: StreamId = "stream-1".to_string();
+
+        let mut immutable = ImmutablePartialFakeBackend::new();
+        let mut revisable = RevisablePartialFakeBackend::new();
+
+        assert!(immutable.send_audio(&stream_id, &[0i16; 320]).is_err());
+        assert!(revisable.send_audio(&stream_id, &[0i16; 320]).is_err());
+    }
+
+    #[test]
+    fn start_stream_hands_the_backend_the_engagement_vocabulary_as_keyterms() {
+        let stream_id: StreamId = "stream-1".to_string();
+        let keyterms: Vec<Keyterm> =
+            vec!["Acme Corp".to_string(), "Zephyr API".to_string()];
+
+        let mut immutable = ImmutablePartialFakeBackend::new();
+        let mut revisable = RevisablePartialFakeBackend::new();
+
+        immutable
+            .start_stream(&stream_id, &keyterms)
+            .expect("handshake should succeed");
+        revisable
+            .start_stream(&stream_id, &keyterms)
+            .expect("handshake should succeed");
+
+        assert_eq!(immutable.keyterms_sent(&stream_id), Some(keyterms.as_slice()));
+        assert_eq!(revisable.keyterms_sent(&stream_id), Some(keyterms.as_slice()));
+
+        // Once the handshake has happened, audio for that stream is accepted.
+        assert!(immutable.send_audio(&stream_id, &[0i16; 320]).is_ok());
+        assert!(revisable.send_audio(&stream_id, &[0i16; 320]).is_ok());
     }
 }

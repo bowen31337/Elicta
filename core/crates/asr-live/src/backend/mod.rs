@@ -14,8 +14,8 @@ mod fake;
 mod transcription_backend;
 
 pub use event::{
-    AudioSegmentRef, FinalUtterance, InterimHypothesis, LanguageTag, SpeakerTag, StreamId, Token,
-    TranscriptionEvent, UtteranceId,
+    AudioSegmentRef, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag, SpeakerTag,
+    StreamId, Token, TranscriptionEvent, UtteranceId,
 };
 pub use fake::{ImmutablePartialFakeBackend, RevisablePartialFakeBackend};
 pub use transcription_backend::{BackendError, TranscriptionBackend};

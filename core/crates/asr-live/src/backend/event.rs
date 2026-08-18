@@ -33,6 +33,14 @@ pub enum SpeakerTag {
 /// than one language tag across its tokens.
 pub type LanguageTag = String;
 
+/// One term from the engagement's vocabulary (client name, product names,
+/// internal systems, acronyms) injected as keyterm prompting on the
+/// handshake before the first audio frame is sent (architecture §3.2, PRD
+/// FR-2.9) — the same vocabulary the record path sends via
+/// `GetEngagementVocabulary` in `app/modules/asr-record`, kept as a plain
+/// `String` alias here since this crate doesn't depend on that package.
+pub type Keyterm = String;
+
 /// One recognised word or subword unit within a [`FinalUtterance`]. Carries
 /// per-token confidence and language rather than one scalar per utterance
 /// (architecture §3.2): span-confidence suppression (NFR-5.6) and
