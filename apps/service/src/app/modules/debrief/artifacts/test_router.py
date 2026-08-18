@@ -14,6 +14,7 @@ from app.modules.debrief.artifacts.models import (
     RequirementsState,
 )
 from app.modules.debrief.artifacts.router import (
+    build_decision_log_router,
     build_full_prd_router,
     build_project_brief_router,
 )
@@ -49,10 +50,10 @@ def make_matrix(
     )
 
 
-def make_artifact_set() -> BmadArtifactSet:
+def make_artifact_set(decisions: list[DecisionLogEntry] | None = None) -> BmadArtifactSet:
     return BmadArtifactSet(
         open_questions=[],
-        decisions=[],
+        decisions=decisions or [],
         project_brief=ProjectBriefDraft(body="draft brief", provenance=ClaimProvenance.STATED, citations=[]),
         follow_up_email=FollowUpEmailDraft(
             subject="Follow up", body="draft email", provenance=ClaimProvenance.STATED, citations=[]
@@ -194,13 +195,16 @@ def test_the_requirements_state_route_is_not_registered_when_get_requirements_st
 
 
 def make_bmad_chain(
-    session_id: str = "session-1", *, status: BmadAnalystChainStatus = BmadAnalystChainStatus.COMPLETE,
+    session_id: str = "session-1",
+    *,
+    status: BmadAnalystChainStatus = BmadAnalystChainStatus.COMPLETE,
+    decisions: list[DecisionLogEntry] | None = None,
 ) -> SessionBmadAnalystChain:
     return SessionBmadAnalystChain(
         session_id=session_id,
         status=status,
         engine="claude-agent-sdk",
-        artifacts=make_artifact_set() if status == BmadAnalystChainStatus.COMPLETE else None,
+        artifacts=make_artifact_set(decisions) if status == BmadAnalystChainStatus.COMPLETE else None,
         requested_at=FIXED,
         completed_at=FIXED,
         error=None if status == BmadAnalystChainStatus.COMPLETE else "chain run failed",
@@ -243,3 +247,55 @@ def test_getting_the_draft_project_brief_for_a_session_whose_chain_run_failed_re
 
     assert response.status_code == 404
     assert response.json()["detail"] == "draft project brief not found"
+
+
+def make_decision_log_client(chains: dict[str, SessionBmadAnalystChain]) -> TestClient:
+    async def get_chain(session_id: str) -> SessionBmadAnalystChain | None:
+        return chains.get(session_id)
+
+    app = FastAPI()
+    app.include_router(build_decision_log_router(get_chain))
+    return TestClient(app)
+
+
+def test_getting_a_sessions_decision_log_returns_what_was_agreed_and_by_whom():
+    decisions = [
+        make_decision("go with vendor A", ClaimProvenance.STATED),
+        make_decision("timeline likely slips a month", ClaimProvenance.INFERRED),
+    ]
+    client = make_decision_log_client({"session-1": make_bmad_chain("session-1", decisions=decisions)})
+
+    response = client.get("/api/sessions/session-1/decision-log")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [entry["text"] for entry in body] == ["go with vendor A", "timeline likely slips a month"]
+    assert [entry["decided_by"] for entry in body] == ["alice", "alice"]
+    assert [entry["provenance"] for entry in body] == ["stated", "inferred"]
+
+
+def test_getting_the_decision_log_for_a_session_with_no_decisions_returns_an_empty_list():
+    client = make_decision_log_client({"session-1": make_bmad_chain("session-1", decisions=[])})
+
+    response = client.get("/api/sessions/session-1/decision-log")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_getting_the_decision_log_for_a_session_with_no_chain_record_returns_404():
+    client = make_decision_log_client({})
+
+    response = client.get("/api/sessions/unknown-session/decision-log")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "decision log not found"
+
+
+def test_getting_the_decision_log_for_a_session_whose_chain_run_failed_returns_404():
+    client = make_decision_log_client({"session-1": make_bmad_chain("session-1", status=BmadAnalystChainStatus.FAILED)})
+
+    response = client.get("/api/sessions/session-1/decision-log")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "decision log not found"

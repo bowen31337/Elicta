@@ -1,4 +1,4 @@
-"""HTTP surface for full PRD generation, standing requirements state, and the per-meeting draft project brief (PRD FR-8.5, FR-8.8, FR-8.9, FR-8.10).
+"""HTTP surface for full PRD generation, standing requirements state, the per-meeting draft project brief, and the per-meeting decision log (PRD FR-8.4, FR-8.5, FR-8.8, FR-8.9, FR-8.10).
 
 `build_full_prd_router` takes the coverage lookup, the generation step, and
 (optionally) a requirements-state lookup as injected callables, mirroring
@@ -30,6 +30,14 @@ meeting's classified transcript and persists on its `SessionBmadAnalystChain`
 (PRD FR-8.5). That draft needs no cross-meeting coverage at all — it is
 grounded entirely in the one meeting's own content — so this is a plain
 session-scoped `GET`, not gated the way full PRD generation is.
+
+`build_decision_log_router` exposes the same `SessionBmadAnalystChain` for its
+`decisions` instead: the decision and commitment log `run_bmad_analyst_chain`
+already derives per meeting, recording what was agreed and `decided_by` whom
+(PRD FR-8.4). Like the draft project brief, this needs no cross-meeting
+coverage — it is a plain session-scoped `GET` of what that one meeting's chain
+run already persisted, not a rebuild of the engagement-wide `decisions` list
+`merge_requirements_state_forward` (PRD FR-8.9) accumulates in `state.py`.
 """
 
 from __future__ import annotations
@@ -40,6 +48,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.modules.debrief.pipeline.models import (
     BmadArtifactSet,
+    DecisionLogEntry,
     ProjectBriefDraft,
     SessionBmadAnalystChain,
 )
@@ -120,5 +129,30 @@ def build_project_brief_router(get_chain: GetSessionBmadAnalystChain) -> APIRout
         if chain is None or chain.artifacts is None:
             raise HTTPException(status_code=404, detail="draft project brief not found")
         return chain.artifacts.project_brief
+
+    return router
+
+
+def build_decision_log_router(get_chain: GetSessionBmadAnalystChain) -> APIRouter:
+    """Build the per-meeting decision and commitment log read router (PRD FR-8.4).
+
+    `get_chain` looks up the same session's `SessionBmadAnalystChain` the
+    draft project brief route reads — this is a plain read of the
+    `DecisionLogEntry` list `run_bmad_analyst_chain` already persisted, each
+    entry recording what was agreed (`text`) and by whom (`decided_by`), not
+    a recomputation. A session with no chain record yet, or one whose run
+    `FAILED` (`artifacts` is `None`), has no decision log to return, so both
+    cases 404 rather than one looking like an empty log and the other an
+    error.
+    """
+
+    router = APIRouter(prefix="/api/sessions", tags=["debrief-decision-log"])
+
+    @router.get("/{session_id}/decision-log", response_model=list[DecisionLogEntry])
+    async def get_session_decision_log(session_id: str) -> list[DecisionLogEntry]:
+        chain = await get_chain(session_id)
+        if chain is None or chain.artifacts is None:
+            raise HTTPException(status_code=404, detail="decision log not found")
+        return chain.artifacts.decisions
 
     return router

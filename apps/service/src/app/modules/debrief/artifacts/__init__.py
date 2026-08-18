@@ -23,7 +23,11 @@ project brief the same way, one meeting at a time: a plain
 `GET /api/sessions/{session_id}/project-brief` reading the session's own
 `SessionBmadAnalystChain` (built in `debrief/pipeline`), with no coverage
 gate at all since a single meeting's draft brief needs no cross-meeting
-evidence (PRD FR-8.5).
+evidence (PRD FR-8.5). `build_decision_log_router` exposes that same
+session's decision and commitment log the same way: a plain
+`GET /api/sessions/{session_id}/decision-log` reading the `DecisionLogEntry`
+list — what was agreed, and by whom — the chain already persisted (PRD
+FR-8.4).
 """
 
 from __future__ import annotations
@@ -51,6 +55,7 @@ from app.modules.debrief.artifacts.router import (
     GetEngagementCoverageMatrices,
     GetRequirementsState,
     GetSessionBmadAnalystChain,
+    build_decision_log_router,
     build_full_prd_router,
     build_project_brief_router,
 )
@@ -76,6 +81,7 @@ __all__ = [
     "SaveCoverageMatrix",
     "SaveRequirementsState",
     "build_coverage_matrix",
+    "build_decision_log_router",
     "build_full_prd_router",
     "build_project_brief_router",
     "merge_requirements_state_forward",
