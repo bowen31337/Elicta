@@ -1,8 +1,9 @@
 """Domain types for the per-meeting consent gate (PRD L1/L2, D3)."""
 
+from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConsentModel(str, Enum):
@@ -47,3 +48,22 @@ class ConsentGate(BaseModel):
     @property
     def capture_may_begin(self) -> bool:
         return self.status != ConsentGateStatus.AWAITING_CONFIRMATION
+
+
+class ConsentConfirmationRequest(BaseModel):
+    """Payload for an operator confirming the consent prompt (PRD feature 246)."""
+
+    confirmed_by: str = Field(min_length=1)
+
+
+class ConsentRecord(BaseModel):
+    """Durable proof that consent was confirmed for one meeting (PRD feature 246).
+
+    ``confirmed_by`` identifies the operator who confirmed the prompt, not
+    the meeting participants — this records accountability for having
+    disclosed and confirmed consent, which is what a later audit needs.
+    """
+
+    meeting_id: str
+    confirmed_by: str
+    confirmed_at: datetime

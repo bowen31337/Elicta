@@ -5,7 +5,7 @@ model — callers pass in the engagement's configured `ConsentModel` and
 whether this meeting already has a recorded confirmation, and get back a
 gate result plus (when required) the prompt to show the operator. Recording
 the confirmation itself, with timestamp and operator, is a separate concern
-(PRD feature 246).
+handled by `confirmation.py` (PRD feature 246).
 """
 
 from app.core.consent.models import (
