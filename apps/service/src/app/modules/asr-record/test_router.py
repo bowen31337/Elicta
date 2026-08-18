@@ -20,6 +20,7 @@ _router = importlib.import_module("app.modules.asr-record.router")
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 RecordPathTranscript = _models.RecordPathTranscript
 RecordPathTranscriptionJob = _models.RecordPathTranscriptionJob
+SessionAlignment = _models.SessionAlignment
 TranscriptionJobStatus = _models.TranscriptionJobStatus
 TranscriptionStatus = _models.TranscriptionStatus
 TranscriptSegment = _models.TranscriptSegment
@@ -52,8 +53,10 @@ def make_client(
     fail_a: bool = False,
     fail_b: bool = False,
     vocabulary: list[str] | None = None,
+    with_alignment: bool = False,
 ) -> tuple[TestClient, dict[str, list[RecordPathTranscript]], list[list[list[str]]]]:
     store: dict[str, list[RecordPathTranscript]] = {}
+    alignment_store: dict[str, SessionAlignment] = {}
 
     engine_a, keyterms_a = make_engine("engine-a", fail=fail_a)
     engine_b, keyterms_b = make_engine("engine-b", fail=fail_b)
@@ -68,15 +71,33 @@ def make_client(
     async def get(session_id: str) -> list[RecordPathTranscript]:
         return store.get(session_id, [])
 
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        alignment_store[alignment.session_id] = alignment
+
+    async def get_alignment(session_id: str) -> SessionAlignment | None:
+        return alignment_store.get(session_id)
+
     app = FastAPI()
     app.include_router(
-        build_record_path_router(engines, get_vocabulary, save, get)
+        build_record_path_router(
+            engines,
+            get_vocabulary,
+            save,
+            get,
+            save_alignment=save_alignment if with_alignment else None,
+            get_alignment=get_alignment if with_alignment else None,
+        )
     )
-    return TestClient(app, raise_server_exceptions=False), store, [keyterms_a, keyterms_b]
+    return (
+        TestClient(app, raise_server_exceptions=False),
+        store,
+        [keyterms_a, keyterms_b],
+        alignment_store,
+    )
 
 
 def test_posting_triggers_both_batch_engines_and_returns_201():
-    client, _, _ = make_client()
+    client, _, _, _ = make_client()
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript",
@@ -92,7 +113,7 @@ def test_posting_triggers_both_batch_engines_and_returns_201():
 
 
 def test_posting_sends_the_engagement_vocabulary_as_keyterms_to_both_engines():
-    client, _, keyterms = make_client(
+    client, _, keyterms, _ = make_client(
         vocabulary=["Acme Corp", "Project Nightingale"]
     )
 
@@ -106,7 +127,7 @@ def test_posting_sends_the_engagement_vocabulary_as_keyterms_to_both_engines():
 
 
 def test_posting_persists_one_transcript_per_engine_so_they_can_be_fetched_afterwards():
-    client, store, _ = make_client()
+    client, store, _, _ = make_client()
 
     client.post(
         "/api/sessions/session-1/record-path-transcript",
@@ -124,7 +145,7 @@ def test_posting_persists_one_transcript_per_engine_so_they_can_be_fetched_after
 
 
 def test_missing_audio_ref_is_rejected():
-    client, _, _ = make_client()
+    client, _, _, _ = make_client()
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript", json={"audio_ref": ""}
@@ -134,7 +155,7 @@ def test_missing_audio_ref_is_rejected():
 
 
 def test_getting_a_session_with_no_transcript_yet_returns_404():
-    client, _, _ = make_client()
+    client, _, _, _ = make_client()
 
     response = client.get("/api/sessions/unknown-session/record-path-transcript")
 
@@ -142,7 +163,7 @@ def test_getting_a_session_with_no_transcript_yet_returns_404():
 
 
 def test_one_engine_failing_still_persists_a_failed_record_for_it_and_a_complete_one_for_the_other():
-    client, store, _ = make_client(fail_a=True)
+    client, store, _, _ = make_client(fail_a=True)
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript",
@@ -156,14 +177,68 @@ def test_one_engine_failing_still_persists_a_failed_record_for_it_and_a_complete
     assert by_engine["engine-b"].status == TranscriptionStatus.COMPLETE
 
 
+def test_posting_persists_an_alignment_with_an_agreement_score_per_span_when_wired():
+    client, _, _, alignment_store = make_client(with_alignment=True)
+
+    client.post(
+        "/api/sessions/session-1/record-path-transcript",
+        json={"audio_ref": "recordings/session-1.wav"},
+    )
+
+    assert "session-1" in alignment_store
+    alignment = alignment_store["session-1"]
+    assert len(alignment.spans) > 0
+    for span in alignment.spans:
+        assert 0.0 <= span.agreement_score <= 1.0
+
+    response = client.get("/api/sessions/session-1/record-path-alignment")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["spans"]) > 0
+    assert all(0.0 <= s["agreement_score"] <= 1.0 for s in body["spans"])
+
+
+def test_getting_an_alignment_for_an_unknown_session_returns_404_when_wired():
+    client, _, _, _ = make_client(with_alignment=True)
+
+    response = client.get("/api/sessions/unknown-session/record-path-alignment")
+
+    assert response.status_code == 404
+
+
+def test_the_alignment_route_is_not_registered_when_get_alignment_is_not_supplied():
+    client, _, _, _ = make_client()
+
+    response = client.get("/api/sessions/session-1/record-path-alignment")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] != "record-path alignment not found"
+
+
+def test_one_engine_failing_does_not_persist_an_alignment_via_the_router():
+    client, _, _, alignment_store = make_client(with_alignment=True, fail_a=True)
+
+    client.post(
+        "/api/sessions/session-1/record-path-transcript",
+        json={"audio_ref": "recordings/session-1.wav"},
+    )
+
+    assert "session-1" not in alignment_store
+
+
 def make_meeting_client(
-    *, fail_a: bool = False, fail_b: bool = False, vocabulary: list[str] | None = None
+    *,
+    fail_a: bool = False,
+    fail_b: bool = False,
+    vocabulary: list[str] | None = None,
+    with_alignment: bool = False,
 ) -> tuple[
     TestClient, dict[str, list[RecordPathTranscript]], list[RecordPathTranscriptionJob], list
 ]:
     transcript_store: dict[str, list[RecordPathTranscript]] = {}
     job_store: list[RecordPathTranscriptionJob] = []
     scheduled: list = []
+    alignment_store: dict[str, SessionAlignment] = {}
 
     engine_a, _ = make_engine("engine-a", fail=fail_a)
     engine_b, _ = make_engine("engine-b", fail=fail_b)
@@ -181,10 +256,18 @@ def make_meeting_client(
     def schedule(work) -> None:
         scheduled.append(work)
 
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        alignment_store[alignment.session_id] = alignment
+
     app = FastAPI()
     app.include_router(
         build_meeting_transcription_router(
-            engines, get_vocabulary, save_transcript, save_job, schedule
+            engines,
+            get_vocabulary,
+            save_transcript,
+            save_job,
+            schedule,
+            save_alignment=save_alignment if with_alignment else None,
         )
     )
     return (
@@ -192,11 +275,12 @@ def make_meeting_client(
         transcript_store,
         job_store,
         scheduled,
+        alignment_store,
     )
 
 
 def test_starting_a_meeting_transcription_returns_202_with_a_job_id():
-    client, _, _, _ = make_meeting_client()
+    client, _, _, _, _ = make_meeting_client()
 
     response = client.post(
         "/api/meetings/meeting-1/record/transcribe",
@@ -212,7 +296,7 @@ def test_starting_a_meeting_transcription_returns_202_with_a_job_id():
 
 
 def test_starting_a_meeting_transcription_does_not_block_on_the_batch_run():
-    client, transcript_store, job_store, scheduled = make_meeting_client()
+    client, transcript_store, job_store, scheduled, _ = make_meeting_client()
 
     response = client.post(
         "/api/meetings/meeting-1/record/transcribe",
@@ -226,7 +310,7 @@ def test_starting_a_meeting_transcription_does_not_block_on_the_batch_run():
 
 
 def test_missing_audio_ref_is_rejected_for_meeting_transcription():
-    client, _, _, _ = make_meeting_client()
+    client, _, _, _, _ = make_meeting_client()
 
     response = client.post(
         "/api/meetings/meeting-1/record/transcribe", json={"audio_ref": ""}
@@ -236,7 +320,7 @@ def test_missing_audio_ref_is_rejected_for_meeting_transcription():
 
 
 def test_running_the_scheduled_meeting_work_persists_one_transcript_per_engine():
-    client, transcript_store, job_store, scheduled = make_meeting_client()
+    client, transcript_store, job_store, scheduled, _ = make_meeting_client()
 
     client.post(
         "/api/meetings/meeting-1/record/transcribe",
@@ -248,3 +332,17 @@ def test_running_the_scheduled_meeting_work_persists_one_transcript_per_engine()
     assert len(transcript_store["meeting-1"]) == 2
     assert {t.engine for t in transcript_store["meeting-1"]} == {"engine-a", "engine-b"}
     assert job_store[-1].status == TranscriptionJobStatus.COMPLETE
+
+
+def test_running_the_scheduled_meeting_work_persists_an_alignment_when_wired():
+    client, _, _, scheduled, alignment_store = make_meeting_client(with_alignment=True)
+
+    client.post(
+        "/api/meetings/meeting-1/record/transcribe",
+        json={"audio_ref": "recordings/meeting-1.wav"},
+    )
+
+    asyncio.run(scheduled[0]())
+
+    assert "meeting-1" in alignment_store
+    assert len(alignment_store["meeting-1"].spans) > 0

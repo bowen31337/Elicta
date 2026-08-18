@@ -14,22 +14,25 @@ now deal in lists of `RecordPathTranscript` — one entry per configured
 engine — instead of a single transcript.
 """
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from fastapi import APIRouter, HTTPException
 
-from .models import RecordPathTranscript, RecordPathTranscriptionJob
+from .models import RecordPathTranscript, RecordPathTranscriptionJob, SessionAlignment
 from .schemas import RecordPathTranscriptionRequest
 from .service import (
     BatchEngine,
     GetEngagementVocabulary,
     GetRecordPathTranscript,
     SaveRecordPathTranscript,
+    SaveSessionAlignment,
     SaveTranscriptionJob,
     ScheduleTranscriptionWork,
     run_record_path_transcription,
     start_record_path_transcription_job,
 )
+
+GetSessionAlignment = Callable[[str], Awaitable[SessionAlignment | None]]
 
 
 def build_record_path_router(
@@ -37,6 +40,8 @@ def build_record_path_router(
     get_vocabulary: GetEngagementVocabulary,
     save_transcript: SaveRecordPathTranscript,
     get_transcripts: GetRecordPathTranscript,
+    save_alignment: SaveSessionAlignment | None = None,
+    get_alignment: GetSessionAlignment | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/sessions", tags=["record-path-transcription"])
 
@@ -49,7 +54,12 @@ def build_record_path_router(
         session_id: str, payload: RecordPathTranscriptionRequest
     ) -> list[RecordPathTranscript]:
         return await run_record_path_transcription(
-            session_id, payload.audio_ref, engines, save_transcript, get_vocabulary
+            session_id,
+            payload.audio_ref,
+            engines,
+            save_transcript,
+            get_vocabulary,
+            save_alignment=save_alignment,
         )
 
     @router.get(
@@ -64,6 +74,20 @@ def build_record_path_router(
             )
         return transcripts
 
+    if get_alignment is not None:
+
+        @router.get(
+            "/{session_id}/record-path-alignment",
+            response_model=SessionAlignment,
+        )
+        async def get_record_path_alignment(session_id: str) -> SessionAlignment:
+            alignment = await get_alignment(session_id)
+            if alignment is None:
+                raise HTTPException(
+                    status_code=404, detail="record-path alignment not found"
+                )
+            return alignment
+
     return router
 
 
@@ -73,6 +97,7 @@ def build_meeting_transcription_router(
     save_transcript: SaveRecordPathTranscript,
     save_job: SaveTranscriptionJob,
     schedule: ScheduleTranscriptionWork,
+    save_alignment: SaveSessionAlignment | None = None,
 ) -> APIRouter:
     """Async, job-based entry point for starting one meeting's record-path run.
 
@@ -102,6 +127,7 @@ def build_meeting_transcription_router(
             save_transcript,
             save_job,
             schedule,
+            save_alignment=save_alignment,
         )
 
     return router

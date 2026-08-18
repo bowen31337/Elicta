@@ -79,6 +79,45 @@ class TranscriptionJobStatus(str, Enum):
     FAILED = "failed"
 
 
+class AlignedSpan(BaseModel):
+    """One time-aligned span comparing both engines' output over the same interval.
+
+    `reference_text`/`other_text` are what each engine produced for this
+    span — `other_text` is the concatenation of whatever the other engine's
+    segments overlap this interval, since the two engines rarely agree on
+    exact segment boundaries even when they agree on the words. `agreement_score`
+    is the confidence signal this feature exists to produce: 1.0 means the
+    two engines' normalized wording matched exactly here, 0.0 means they
+    shared no words at all (including the case where one engine transcribed
+    silence where the other transcribed speech) — it is never left null,
+    since a low or zero score is itself meaningful signal, not a missing value.
+    """
+
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    reference_engine: str
+    reference_text: str
+    other_engine: str
+    other_text: str
+    agreement_score: float = Field(ge=0, le=1)
+
+
+class SessionAlignment(BaseModel):
+    """Durable record of aligning one session's two record-path transcripts (PRD FR-2.6 follow-on).
+
+    Persisted once both engines configured for a session have produced a
+    `COMPLETE` `RecordPathTranscript` — reconciling the two engines' output
+    only means something once both independent results exist, so this is a
+    separate artifact from either transcript rather than a field on one of them.
+    """
+
+    session_id: str
+    reference_engine: str
+    other_engine: str
+    spans: list[AlignedSpan]
+    computed_at: datetime
+
+
 class RecordPathTranscriptionJob(BaseModel):
     """Handle for one meeting's record-path transcription job (PRD FR-2.5).
 

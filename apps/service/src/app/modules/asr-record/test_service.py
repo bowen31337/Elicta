@@ -22,6 +22,7 @@ _service = importlib.import_module("app.modules.asr-record.service")
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 RecordPathTranscript = _models.RecordPathTranscript
 RecordPathTranscriptionJob = _models.RecordPathTranscriptionJob
+SessionAlignment = _models.SessionAlignment
 TranscriptionJobStatus = _models.TranscriptionJobStatus
 TranscriptionStatus = _models.TranscriptionStatus
 TranscriptSegment = _models.TranscriptSegment
@@ -217,6 +218,85 @@ def test_a_vocabulary_lookup_failure_persists_a_failed_transcript_per_engine_and
     assert all(s.error == "engagement lookup unavailable" for s in saved)
 
 
+def test_a_successful_run_with_both_engines_complete_persists_an_alignment_with_a_score_per_span():
+    saved_alignments: list[SessionAlignment] = []
+
+    engines = [make_engine("engine-a", text="hello world"), make_engine("engine-b", text="hello world")]
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        pass
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
+
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        saved_alignments.append(alignment)
+
+    asyncio.run(
+        run_record_path_transcription(
+            "session-1",
+            "recordings/session-1.wav",
+            engines,
+            save,
+            get_vocabulary,
+            save_alignment=save_alignment,
+        )
+    )
+
+    assert len(saved_alignments) == 1
+    alignment = saved_alignments[0]
+    assert alignment.session_id == "session-1"
+    assert len(alignment.spans) > 0
+    for span in alignment.spans:
+        assert 0.0 <= span.agreement_score <= 1.0
+
+
+def test_one_engine_failing_does_not_persist_an_alignment():
+    saved_alignments: list[SessionAlignment] = []
+
+    engines = [make_engine("engine-a", fail=True), make_engine("engine-b")]
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        pass
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
+
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        saved_alignments.append(alignment)
+
+    asyncio.run(
+        run_record_path_transcription(
+            "session-1",
+            "recordings/session-1.wav",
+            engines,
+            save,
+            get_vocabulary,
+            save_alignment=save_alignment,
+        )
+    )
+
+    assert saved_alignments == []
+
+
+def test_no_alignment_is_computed_when_save_alignment_is_not_supplied():
+    engines = [make_engine("engine-a"), make_engine("engine-b")]
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        pass
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
+
+    results = asyncio.run(
+        run_record_path_transcription(
+            "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
+        )
+    )
+
+    assert len(results) == 2
+
+
 def make_job_deps(*, fail_a: bool = False, fail_b: bool = False):
     saved_transcripts: list[RecordPathTranscript] = []
     saved_jobs: list[RecordPathTranscriptionJob] = []
@@ -374,3 +454,30 @@ def test_the_job_fails_only_when_both_engines_fail():
     assert all(
         t.status == TranscriptionStatus.FAILED for t in deps["saved_transcripts"]
     )
+
+
+def test_running_the_scheduled_work_persists_an_alignment_when_save_alignment_is_supplied():
+    deps = make_job_deps()
+    saved_alignments: list[SessionAlignment] = []
+
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        saved_alignments.append(alignment)
+
+    asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["engines"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+            save_alignment=save_alignment,
+        )
+    )
+
+    asyncio.run(deps["scheduled"][0]())
+
+    assert len(saved_alignments) == 1
+    assert saved_alignments[0].session_id == "meeting-1"

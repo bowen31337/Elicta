@@ -29,10 +29,12 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 
+from .alignment import align_completed_transcripts
 from .models import (
     BatchTranscriptionOutput,
     RecordPathTranscript,
     RecordPathTranscriptionJob,
+    SessionAlignment,
     TranscriptionJobStatus,
     TranscriptionStatus,
 )
@@ -44,6 +46,7 @@ GetRecordPathTranscript = Callable[[str], Awaitable[list[RecordPathTranscript]]]
 GetEngagementVocabulary = Callable[[str], Awaitable[list[str]]]
 SaveTranscriptionJob = Callable[[RecordPathTranscriptionJob], Awaitable[None]]
 ScheduleTranscriptionWork = Callable[[Callable[[], Awaitable[None]]], None]
+SaveSessionAlignment = Callable[[SessionAlignment], Awaitable[None]]
 
 
 async def run_record_path_transcription(
@@ -54,6 +57,7 @@ async def run_record_path_transcription(
     get_vocabulary: GetEngagementVocabulary,
     *,
     requested_at: datetime | None = None,
+    save_alignment: SaveSessionAlignment | None = None,
 ) -> list[RecordPathTranscript]:
     """Re-transcribe one full session with every configured engine (PRD FR-2.6).
 
@@ -70,6 +74,14 @@ async def run_record_path_transcription(
     lookup itself fails, since neither engine can run without it; that case
     still persists a `FAILED` transcript per engine first, so a session
     never ends up with fewer transcripts than configured engines.
+
+    When `save_alignment` is supplied and at least two engines came back
+    `COMPLETE`, this also aligns those transcripts (see `alignment.py`) and
+    persists the resulting `SessionAlignment` — the agreement score per
+    aligned span is the confidence signal reconciling the two engines exists
+    to produce. `save_alignment` is optional and defaults to `None` so a
+    caller only interested in the per-engine transcripts (or with only one
+    engine configured) doesn't need to supply it.
     """
 
     requested_at = requested_at or datetime.now(timezone.utc)
@@ -113,9 +125,16 @@ async def run_record_path_transcription(
         await save(transcript)
         return transcript
 
-    return list(
+    results = list(
         await asyncio.gather(*(run_one(name, transcribe) for name, transcribe in engines))
     )
+
+    if save_alignment is not None:
+        alignment = align_completed_transcripts(results)
+        if alignment is not None:
+            await save_alignment(alignment)
+
+    return results
 
 
 async def start_record_path_transcription_job(
@@ -129,6 +148,7 @@ async def start_record_path_transcription_job(
     *,
     job_id: str | None = None,
     created_at: datetime | None = None,
+    save_alignment: SaveSessionAlignment | None = None,
 ) -> RecordPathTranscriptionJob:
     """Accept a meeting's record-path transcription request without waiting on it.
 
@@ -152,6 +172,9 @@ async def start_record_path_transcription_job(
     vocabulary lookup blew up before any engine could run) — each engine's
     own outcome is already visible on its own persisted transcript, so the
     job status is just the coarse "did this run produce anything usable" summary.
+
+    `save_alignment`, when supplied, is forwarded to `run_record_path_transcription`
+    so the two engines' output gets aligned and persisted once both complete.
     """
 
     job_id = job_id or uuid.uuid4().hex
@@ -174,6 +197,7 @@ async def start_record_path_transcription_job(
                 save_transcript,
                 get_vocabulary,
                 requested_at=created_at,
+                save_alignment=save_alignment,
             )
         except Exception:
             await save_job(job.model_copy(update={"status": TranscriptionJobStatus.FAILED}))
