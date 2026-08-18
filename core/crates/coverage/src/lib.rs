@@ -10,11 +10,13 @@
 //! their process-local values.
 
 pub mod error;
+pub mod matrix;
 pub mod slot;
 pub mod store;
 pub mod urgency;
 
 pub use error::StoreError;
+pub use matrix::{coverage_matrix, CoverageMatrix};
 pub use slot::{CoverageSlot, FillState};
 pub use store::CoverageStore;
 pub use urgency::{coverage_urgency, SectionUrgency};

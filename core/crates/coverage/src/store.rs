@@ -35,9 +35,11 @@ impl CoverageStore {
     }
 
     /// Opens an in-memory coverage database — for tests that exercise this
-    /// store's behaviour without touching disk.
+    /// store's behaviour without touching disk. `pub(crate)` so other
+    /// modules in this crate (e.g. `matrix`'s [`CoverageStore::matrix`]
+    /// tests) can reuse it rather than each rolling their own.
     #[cfg(test)]
-    fn open_in_memory() -> Result<Self, StoreError> {
+    pub(crate) fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(StoreError::Open)?;
         ensure_schema(&conn)?;
         Ok(Self { conn })
