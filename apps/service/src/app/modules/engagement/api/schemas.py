@@ -74,3 +74,30 @@ class EngagementDetailResponse(BaseModel):
     target_requirements_template: str | None = None
     document_count: int
     context_completeness_score: float
+
+
+class EngagementSummary(BaseModel):
+    """One row of the engagement list (GET /api/engagements).
+
+    Carries `EngagementRecord`'s fields plus the id, mirroring
+    `EngagementDetailResponse` minus the per-engagement document count and
+    completeness score — those require the extra lookups `GET /{id}` does for
+    a single engagement, which a list endpoint should not pay N times over.
+    """
+
+    engagement_id: str
+    client_organisation: str
+    sector: str
+    commercial_context: str
+    purpose: str | None = None
+    scope_boundary: str | None = None
+    target_requirements_template: str | None = None
+
+
+class EngagementListResponse(BaseModel):
+    """A page of engagements for the signed-in delivery team."""
+
+    items: list[EngagementSummary]
+    total: int
+    page: int
+    page_size: int

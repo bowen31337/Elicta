@@ -5,6 +5,7 @@ from app.modules.engagement.api.router import build_engagement_router
 from app.modules.engagement.api.schemas import (
     EngagementCreateRequest,
     EngagementRecord,
+    EngagementSummary,
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
@@ -15,16 +16,20 @@ def make_client(
     existing_engagements: set[str] | None = None,
     engagements: dict[str, EngagementRecord] | None = None,
     document_counts: dict[str, int] | None = None,
+    engagement_list: list[EngagementSummary] | None = None,
 ) -> tuple[
     TestClient,
     list[EngagementCreateRequest],
     list[tuple[str, EngagementUpdateRequest]],
+    list[tuple[int, int]],
 ]:
     received_creates: list[EngagementCreateRequest] = []
     received_updates: list[tuple[str, EngagementUpdateRequest]] = []
+    received_list_calls: list[tuple[int, int]] = []
     known_ids = existing_engagements if existing_engagements is not None else {engagement_id}
     records = engagements if engagements is not None else {}
     counts = document_counts if document_counts is not None else {}
+    all_engagements = engagement_list if engagement_list is not None else []
 
     async def create_engagement(payload: EngagementCreateRequest) -> str:
         received_creates.append(payload)
@@ -49,6 +54,12 @@ def make_client(
     async def get_document_count(target_id: str) -> int:
         return counts.get(target_id, 0)
 
+    async def list_engagements(page: int, page_size: int) -> tuple[list[EngagementSummary], int]:
+        received_list_calls.append((page, page_size))
+        start = (page - 1) * page_size
+        end = start + page_size
+        return all_engagements[start:end], len(all_engagements)
+
     app = FastAPI()
     app.include_router(
         build_engagement_router(
@@ -56,13 +67,14 @@ def make_client(
             update_engagement,
             get_engagement=get_engagement,
             get_document_count=get_document_count,
+            list_engagements=list_engagements,
         )
     )
-    return TestClient(app), received_creates, received_updates
+    return TestClient(app), received_creates, received_updates, received_list_calls
 
 
 def test_creating_an_engagement_returns_201_with_engagement_id():
-    client, _, _ = make_client(engagement_id="eng-123")
+    client, _, _, _ = make_client(engagement_id="eng-123")
 
     response = client.post(
         "/api/engagements",
@@ -78,7 +90,7 @@ def test_creating_an_engagement_returns_201_with_engagement_id():
 
 
 def test_creating_an_engagement_passes_client_background_through():
-    client, received_creates, _ = make_client()
+    client, received_creates, _, _ = make_client()
 
     client.post(
         "/api/engagements",
@@ -96,7 +108,7 @@ def test_creating_an_engagement_passes_client_background_through():
 
 
 def test_missing_required_field_is_rejected():
-    client, _, _ = make_client()
+    client, _, _, _ = make_client()
 
     response = client.post(
         "/api/engagements",
@@ -107,7 +119,7 @@ def test_missing_required_field_is_rejected():
 
 
 def test_blank_required_field_is_rejected():
-    client, _, _ = make_client()
+    client, _, _, _ = make_client()
 
     response = client.post(
         "/api/engagements",
@@ -122,7 +134,7 @@ def test_blank_required_field_is_rejected():
 
 
 def test_updating_an_engagement_returns_200_with_updated_fields():
-    client, _, _ = make_client(engagement_id="eng-123")
+    client, _, _, _ = make_client(engagement_id="eng-123")
 
     response = client.patch(
         "/api/engagements/eng-123",
@@ -143,7 +155,7 @@ def test_updating_an_engagement_returns_200_with_updated_fields():
 
 
 def test_updating_an_engagement_passes_fields_through():
-    client, _, received_updates = make_client(engagement_id="eng-123")
+    client, _, received_updates, _ = make_client(engagement_id="eng-123")
 
     client.patch(
         "/api/engagements/eng-123",
@@ -163,7 +175,7 @@ def test_updating_an_engagement_passes_fields_through():
 
 
 def test_updating_a_single_field_is_allowed():
-    client, _, _ = make_client(engagement_id="eng-123")
+    client, _, _, _ = make_client(engagement_id="eng-123")
 
     response = client.patch(
         "/api/engagements/eng-123",
@@ -178,7 +190,7 @@ def test_updating_a_single_field_is_allowed():
 
 
 def test_updating_an_unknown_engagement_returns_404():
-    client, _, _ = make_client(engagement_id="eng-123", existing_engagements=set())
+    client, _, _, _ = make_client(engagement_id="eng-123", existing_engagements=set())
 
     response = client.patch(
         "/api/engagements/does-not-exist",
@@ -189,7 +201,7 @@ def test_updating_an_unknown_engagement_returns_404():
 
 
 def test_updating_with_no_fields_is_rejected():
-    client, _, _ = make_client(engagement_id="eng-123")
+    client, _, _, _ = make_client(engagement_id="eng-123")
 
     response = client.patch("/api/engagements/eng-123", json={})
 
@@ -197,7 +209,7 @@ def test_updating_with_no_fields_is_rejected():
 
 
 def test_updating_with_a_blank_field_is_rejected():
-    client, _, _ = make_client(engagement_id="eng-123")
+    client, _, _, _ = make_client(engagement_id="eng-123")
 
     response = client.patch(
         "/api/engagements/eng-123",
@@ -208,7 +220,7 @@ def test_updating_with_a_blank_field_is_rejected():
 
 
 def test_getting_an_engagement_returns_200_with_document_count_and_score():
-    client, _, _ = make_client(
+    client, _, _, _ = make_client(
         engagements={
             "eng-123": EngagementRecord(
                 client_organisation="Acme Corp",
@@ -237,7 +249,7 @@ def test_getting_an_engagement_returns_200_with_document_count_and_score():
 
 
 def test_getting_an_unknown_engagement_returns_404():
-    client, _, _ = make_client(engagements={})
+    client, _, _, _ = make_client(engagements={})
 
     response = client.get("/api/engagements/does-not-exist")
 
@@ -245,7 +257,7 @@ def test_getting_an_unknown_engagement_returns_404():
 
 
 def test_getting_an_engagement_with_no_documents_returns_zero_count():
-    client, _, _ = make_client(
+    client, _, _, _ = make_client(
         engagements={
             "eng-123": EngagementRecord(
                 client_organisation="Acme Corp",
@@ -261,3 +273,108 @@ def test_getting_an_engagement_with_no_documents_returns_zero_count():
     body = response.json()
     assert body["document_count"] == 0
     assert body["context_completeness_score"] == 0.5
+
+
+def test_listing_engagements_returns_200_with_a_page_of_items():
+    client, _, _, _ = make_client(
+        engagement_list=[
+            EngagementSummary(
+                engagement_id="eng-1",
+                client_organisation="Acme Corp",
+                sector="Manufacturing",
+                commercial_context="Multi-year cost reduction programme",
+            ),
+            EngagementSummary(
+                engagement_id="eng-2",
+                client_organisation="Globex",
+                sector="Retail",
+                commercial_context="Store footprint rationalisation",
+            ),
+        ],
+    )
+
+    response = client.get("/api/engagements")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "engagement_id": "eng-1",
+                "client_organisation": "Acme Corp",
+                "sector": "Manufacturing",
+                "commercial_context": "Multi-year cost reduction programme",
+                "purpose": None,
+                "scope_boundary": None,
+                "target_requirements_template": None,
+            },
+            {
+                "engagement_id": "eng-2",
+                "client_organisation": "Globex",
+                "sector": "Retail",
+                "commercial_context": "Store footprint rationalisation",
+                "purpose": None,
+                "scope_boundary": None,
+                "target_requirements_template": None,
+            },
+        ],
+        "total": 2,
+        "page": 1,
+        "page_size": 20,
+    }
+
+
+def test_listing_engagements_with_no_engagements_returns_an_empty_page():
+    client, _, _, _ = make_client(engagement_list=[])
+
+    response = client.get("/api/engagements")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+
+def test_listing_engagements_passes_page_and_page_size_through():
+    client, _, _, received_list_calls = make_client(
+        engagement_list=[
+            EngagementSummary(
+                engagement_id=f"eng-{i}",
+                client_organisation="Acme Corp",
+                sector="Manufacturing",
+                commercial_context="Multi-year cost reduction programme",
+            )
+            for i in range(5)
+        ],
+    )
+
+    response = client.get("/api/engagements", params={"page": 2, "page_size": 2})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["page"] == 2
+    assert body["page_size"] == 2
+    assert body["total"] == 5
+    assert [item["engagement_id"] for item in body["items"]] == ["eng-2", "eng-3"]
+    assert received_list_calls == [(2, 2)]
+
+
+def test_listing_engagements_defaults_to_page_1_and_page_size_20():
+    client, _, _, received_list_calls = make_client(engagement_list=[])
+
+    client.get("/api/engagements")
+
+    assert received_list_calls == [(1, 20)]
+
+
+def test_listing_engagements_rejects_a_page_below_1():
+    client, _, _, _ = make_client(engagement_list=[])
+
+    response = client.get("/api/engagements", params={"page": 0})
+
+    assert response.status_code == 422
+
+
+def test_listing_engagements_rejects_a_page_size_above_100():
+    client, _, _, _ = make_client(engagement_list=[])
+
+    response = client.get("/api/engagements", params={"page_size": 101})
+
+    assert response.status_code == 422

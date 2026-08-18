@@ -20,18 +20,28 @@ the engagement's own context fields with the document count from the sibling
 `documents` package and the context-completeness score `completeness.py`
 computes from those fields — a single read spanning what would otherwise be
 two separate lookups.
+
+`list_engagements` is likewise optional and, when supplied, backs
+`GET /api/engagements`: a paginated list of engagements for the signed-in
+delivery team. Scoping the list to the caller's team is an authentication
+concern that lives outside this feature's footprint
+(`app/modules/engagement/api`) — `list_engagements` is expected to already be
+closed over whatever caller identity the wiring layer resolves, the same way
+`create_engagement`/`update_engagement` take no caller identity of their own.
 """
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.modules.engagement.api.completeness import compute_context_completeness_score
 from app.modules.engagement.api.schemas import (
     EngagementCreateRequest,
     EngagementCreateResponse,
     EngagementDetailResponse,
+    EngagementListResponse,
     EngagementRecord,
+    EngagementSummary,
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
@@ -42,6 +52,7 @@ UpdateEngagement = Callable[
 ]
 GetEngagement = Callable[[str], Awaitable[EngagementRecord | None]]
 GetDocumentCount = Callable[[str], Awaitable[int]]
+ListEngagements = Callable[[int, int], Awaitable[tuple[list[EngagementSummary], int]]]
 
 
 def build_engagement_router(
@@ -49,8 +60,28 @@ def build_engagement_router(
     update_engagement: UpdateEngagement,
     get_engagement: GetEngagement | None = None,
     get_document_count: GetDocumentCount | None = None,
+    list_engagements: ListEngagements | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/engagements", tags=["engagements"])
+
+    if list_engagements is not None:
+
+        @router.get(
+            "",
+            response_model=EngagementListResponse,
+            status_code=200,
+        )
+        async def list_engagements_endpoint(
+            page: int = Query(default=1, ge=1),
+            page_size: int = Query(default=20, ge=1, le=100),
+        ) -> EngagementListResponse:
+            items, total = await list_engagements(page, page_size)
+            return EngagementListResponse(
+                items=items,
+                total=total,
+                page=page,
+                page_size=page_size,
+            )
 
     @router.post(
         "",
