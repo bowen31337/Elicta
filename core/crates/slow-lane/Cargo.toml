@@ -8,4 +8,5 @@ name = "slow_lane"
 path = "src/lib.rs"
 
 [dependencies]
+coverage = { path = "../coverage" }
 telemetry = { path = "../../shared/telemetry" }

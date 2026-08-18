@@ -16,9 +16,15 @@
 //! Assembling the actual partitioned prompt, calling the Messages API,
 //! and writing coverage updates/candidates back into the bank (§3.8) are
 //! separate features that consume the events and decisions this crate
-//! produces — this crate owns the tick and the overlap invariant only.
+//! produces — this crate owns the tick and the overlap invariant, plus
+//! (per architecture §3.11) the coverage-gap-plus-drift decision rule
+//! (PRD FR-5.6) that turns a per-tick topic-focus judgment and the bank's
+//! coverage state into a [`coverage_gap_drift::CoverageGapDriftTrigger`],
+//! since that decision is model-assisted-tier and lands on the same tick
+//! this crate already owns.
 
 pub mod cache_lifetime;
+pub mod coverage_gap_drift;
 pub mod model;
 pub mod orchestrator;
 pub mod prewarm;
@@ -28,6 +34,7 @@ pub mod request;
 pub mod ticker;
 
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
+pub use coverage_gap_drift::{CoverageGapDriftDetector, CoverageGapDriftTrigger, TopicFocus};
 pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
 pub use prewarm::{PreWarmRequest, UnwarmedMeeting, WarmedMeeting};
@@ -323,6 +330,58 @@ mod orchestrator_ticks_end_to_end {
         // already wrote this exact prefix before the tick fired.
         let usage = telemetry::CacheTickUsage { input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 1800 };
         run.run_tick(first_tick, &prompt, usage);
+
+        ticker.stop();
+    }
+
+    /// PRD FR-5.6 end to end, driven by real [`TickEvent`]s from the same
+    /// ticker every other test in this module uses: a slow-lane pass that
+    /// reads coverage as unfilled and the conversation still on that
+    /// section produces no trigger, and only the tick where the model's
+    /// topic-focus judgment moves off that section -- while it is still
+    /// unfilled -- emits a [`coverage_gap_drift::CoverageGapDriftTrigger`].
+    /// A later tick that stays on the new focus must not refire it, the
+    /// same "decide once, on the transition" shape
+    /// [`orchestrator::SlowLaneOrchestrator`] uses for the overlap
+    /// invariant.
+    #[test]
+    fn a_topic_drift_away_from_an_unfilled_coverage_section_emits_a_coverage_gap_trigger_event() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let mut detector = CoverageGapDriftDetector::new();
+        let slots = vec![coverage::CoverageSlot {
+            template_section: "scope".to_string(),
+            fill_state: coverage::FillState::Empty,
+            satisfied_at: None,
+        }];
+
+        // Tick 1: the model's topic-focus judgment says the conversation
+        // is on the unfilled section itself -- nothing to have drifted
+        // away from yet.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let first_tick_trigger = detector.on_tick(TopicFocus::on("scope"), &slots);
+        assert_eq!(first_tick_trigger, None);
+
+        // Tick 2: the topic-focus judgment has moved to a different
+        // section while "scope" is still unfilled -- coverage gap plus
+        // topic drift, exactly what FR-5.6 names.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let drift_trigger = detector.on_tick(TopicFocus::on("timeline"), &slots);
+        assert_eq!(
+            drift_trigger,
+            Some(CoverageGapDriftTrigger {
+                template_section: "scope".to_string(),
+                fill_state: coverage::FillState::Empty,
+                drifted_to: Some("timeline".to_string()),
+            }),
+            "a coverage gap combined with topic drift away from the unfilled section must fire a trigger event"
+        );
+
+        // Tick 3: still on the new focus -- already reported, must not
+        // refire.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let repeat_trigger = detector.on_tick(TopicFocus::on("timeline"), &slots);
+        assert_eq!(repeat_trigger, None, "a trigger already reported for this drift must not fire again");
 
         ticker.stop();
     }
