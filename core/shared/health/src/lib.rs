@@ -9,6 +9,7 @@ mod inference_degraded;
 mod language_panel;
 mod preflight;
 mod question_bank;
+mod service_tier_degraded;
 mod session_resume;
 
 pub use asr_auto_restart::{
@@ -40,5 +41,9 @@ pub use preflight::{
 pub use question_bank::{
     validate_question_bank_at_startup, QuestionBankBlockReason, QuestionBankBlockedError,
     QuestionBankStartupStatus, QuestionBankState,
+};
+pub use service_tier_degraded::{
+    badge_for_service_tier_outcome, ServiceTierHealthBadge, ServiceTierHealthMonitor,
+    ServiceTierOutcome,
 };
 pub use session_resume::{describe_session_resume, SessionResumeStatus};
