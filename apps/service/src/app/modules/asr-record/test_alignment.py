@@ -20,6 +20,7 @@ TranscriptSegment = _models.TranscriptSegment
 TranscriptionStatus = _models.TranscriptionStatus
 align_transcripts = _alignment.align_transcripts
 align_completed_transcripts = _alignment.align_completed_transcripts
+DIVERGENCE_THRESHOLD = _alignment.DIVERGENCE_THRESHOLD
 
 FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -65,6 +66,7 @@ def test_identical_wording_scores_full_agreement_per_span():
     assert alignment.other_engine == "engine-b"
     assert len(alignment.spans) == 2
     assert all(span.agreement_score == pytest.approx(1.0) for span in alignment.spans)
+    assert all(span.is_divergent is False for span in alignment.spans)
 
 
 def test_completely_different_wording_scores_zero_agreement():
@@ -80,6 +82,7 @@ def test_completely_different_wording_scores_zero_agreement():
     alignment = align_transcripts(reference, other, computed_at=FIXED)
 
     assert alignment.spans[0].agreement_score == 0.0
+    assert alignment.spans[0].is_divergent is True
 
 
 def test_partial_word_overlap_scores_between_zero_and_one():
@@ -111,6 +114,64 @@ def test_a_span_with_no_overlapping_speech_from_the_other_engine_scores_zero_not
 
     assert alignment.spans[0].other_text == ""
     assert alignment.spans[0].agreement_score == 0.0
+    assert alignment.spans[0].is_divergent is True
+
+
+def test_span_scoring_at_or_above_the_divergence_threshold_is_not_flagged():
+    reference = make_transcript(
+        "engine-a",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there friend")],
+    )
+    other = make_transcript(
+        "engine-b",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there friend")],
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    assert alignment.spans[0].agreement_score >= DIVERGENCE_THRESHOLD
+    assert alignment.spans[0].is_divergent is False
+
+
+def test_span_scoring_below_the_divergence_threshold_is_flagged():
+    reference = make_transcript(
+        "engine-a",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="the quick brown fox jumps")],
+    )
+    other = make_transcript(
+        "engine-b",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="a slow gray dog sleeps")],
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    assert alignment.spans[0].agreement_score < DIVERGENCE_THRESHOLD
+    assert alignment.spans[0].is_divergent is True
+
+
+def test_every_divergent_span_is_flagged_not_just_the_worst_one():
+    reference = make_transcript(
+        "engine-a",
+        [
+            TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there"),
+            TranscriptSegment(start_seconds=1.0, end_seconds=2.0, text="apple banana"),
+            TranscriptSegment(start_seconds=2.0, end_seconds=3.0, text="cats and dogs"),
+        ],
+    )
+    other = make_transcript(
+        "engine-b",
+        [
+            TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there"),
+            TranscriptSegment(start_seconds=1.0, end_seconds=2.0, text="xylophone zebra"),
+            TranscriptSegment(start_seconds=2.0, end_seconds=3.0, text="cats and rabbits"),
+        ],
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    divergent = [span for span in alignment.spans if span.is_divergent]
+    assert len(divergent) == 2
+    assert {span.reference_text for span in divergent} == {"apple banana", "cats and dogs"}
 
 
 def test_agreement_score_is_bounded_between_zero_and_one():

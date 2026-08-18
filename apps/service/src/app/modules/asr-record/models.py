@@ -91,6 +91,13 @@ class AlignedSpan(BaseModel):
     shared no words at all (including the case where one engine transcribed
     silence where the other transcribed speech) — it is never left null,
     since a low or zero score is itself meaningful signal, not a missing value.
+
+    `is_divergent` is set alongside `agreement_score` by `alignment.py`
+    (PRD FR-2.8) whenever that score falls below the divergence threshold.
+    It is a separate persisted field rather than something a reader
+    recomputes from `agreement_score` at display time, so every disagreeing
+    span is flagged for operator review during debrief instead of the
+    service silently picking one engine's wording as the winner.
     """
 
     start_seconds: float = Field(ge=0)
@@ -100,6 +107,7 @@ class AlignedSpan(BaseModel):
     other_engine: str
     other_text: str
     agreement_score: float = Field(ge=0, le=1)
+    is_divergent: bool
 
 
 class SessionAlignment(BaseModel):

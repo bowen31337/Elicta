@@ -10,6 +10,14 @@ and for each of its spans the other engine's overlapping segments are
 concatenated and compared by normalized word overlap. This is intentionally
 simple — good enough to surface a per-span confidence signal — not a
 phoneme- or WER-level aligner.
+
+PRD FR-2.8 additionally requires every divergent or low-confidence span to
+be surfaced to the operator for review during debrief rather than the
+service silently picking one engine's wording as the winner. `DIVERGENCE_THRESHOLD`
+is the agreement-score cutoff below which a span is flagged `is_divergent`;
+it is intentionally not 0.0, since anything short of a (near-)exact match
+between two independent engines is exactly the case an operator should be
+able to review rather than have resolved for them.
 """
 
 from __future__ import annotations
@@ -21,6 +29,8 @@ from datetime import datetime, timezone
 from .models import AlignedSpan, RecordPathTranscript, SessionAlignment, TranscriptSegment, TranscriptionStatus
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
+
+DIVERGENCE_THRESHOLD = 0.8
 
 
 def _normalize_words(text: str) -> list[str]:
@@ -73,10 +83,12 @@ def align_transcripts(
             reference_text=segment.text,
             other_engine=other.engine,
             other_text=other_text,
-            agreement_score=_agreement_score(segment.text, other_text),
+            agreement_score=score,
+            is_divergent=score < DIVERGENCE_THRESHOLD,
         )
         for segment in reference.segments
         for other_text in [_overlapping_text(other.segments, segment.start_seconds, segment.end_seconds)]
+        for score in [_agreement_score(segment.text, other_text)]
     ]
 
     return SessionAlignment(
