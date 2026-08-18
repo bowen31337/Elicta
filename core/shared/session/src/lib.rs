@@ -14,13 +14,19 @@
 //! what makes "restart resumes" (NFR-4.3) true: everything already applied
 //! was, by construction, already durable.
 //!
-//! On top of the utterance log, [`state::SessionState`] also materialises a
-//! [`state::StateSummary`] — covered sections, open threads, decisions and
-//! contradictions (architecture §3.4) — on request via
+//! On top of the utterance log, [`state::SessionState`] also materialises
+//! two views on demand — the pair architecture §3.4 hands to the slow
+//! lane instead of the full transcript. One is a [`state::StateSummary`] —
+//! covered sections, open threads, decisions and contradictions — via
 //! [`state::SessionState::summary`], or [`task::SessionHandle::summary`]
 //! from outside the owning task. It is far smaller than the transcript
 //! itself and is what the slow lane orchestrator actually carries forward
-//! between ticks (§3.8).
+//! between ticks (§3.8). The other is a rolling *verbatim* window — the
+//! last 60-90 seconds of utterance text, unmodified — via
+//! [`state::SessionState::verbatim_window`], or
+//! [`task::SessionHandle::verbatim_window`] from outside the owning task;
+//! its exact length is left to the caller to size against its own prompt
+//! token budget rather than fixed here.
 
 pub mod state;
 pub mod store;

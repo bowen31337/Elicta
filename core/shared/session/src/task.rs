@@ -23,7 +23,7 @@
 use std::sync::mpsc::{self, Receiver, RecvError, SendError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 
-use crate::state::{Command, Mutation, SessionState, StateSummary};
+use crate::state::{Command, Mutation, SessionState, StateSummary, Utterance};
 use crate::store::{LoadOutcome, SessionStore, StoreError};
 
 /// What crosses the command channel to the owning task: either a mutation
@@ -35,6 +35,12 @@ use crate::store::{LoadOutcome, SessionStore, StoreError};
 enum WorkerMessage {
     Apply(Command),
     Summarise(Sender<StateSummary>),
+    /// Materialise a rolling verbatim window covering the last `window_ms`
+    /// of meeting time (architecture §3.4, §3.8) and hand it back. Kept on
+    /// this same channel for the same reason `Summarise` is: a window
+    /// requested here reflects every command sent before it, never one
+    /// that raced ahead or behind on a separate channel.
+    Window { window_ms: u64, respond_to: Sender<Vec<Utterance>> },
 }
 
 /// A cloneable capability to send commands to the one task that owns a
@@ -55,6 +61,7 @@ impl SessionHandle {
         self.messages.send(WorkerMessage::Apply(command)).map_err(|SendError(message)| match message {
             WorkerMessage::Apply(command) => SendError(command),
             WorkerMessage::Summarise(_) => unreachable!("send() only ever enqueues WorkerMessage::Apply"),
+            WorkerMessage::Window { .. } => unreachable!("send() only ever enqueues WorkerMessage::Apply"),
         })
     }
 
@@ -67,6 +74,23 @@ impl SessionHandle {
     pub fn summary(&self) -> Result<StateSummary, RecvError> {
         let (respond_to, response) = mpsc::channel();
         if self.messages.send(WorkerMessage::Summarise(respond_to)).is_err() {
+            // The owning task is gone; there is no response coming.
+            return Err(RecvError);
+        }
+        response.recv()
+    }
+
+    /// Asks the owning task to materialise a rolling verbatim window of the
+    /// utterance log — every utterance ending within the last `window_ms`
+    /// of meeting time, ending at the most recently appended utterance
+    /// (architecture §3.4, §3.8) — as of every command sent before this
+    /// call, and blocks until it answers. Mirrors [`SessionHandle::summary`]
+    /// in every respect but what gets materialised: nothing pushes a window
+    /// to a caller unprompted, and calling this twice in a row asks the
+    /// owning task to build it fresh both times.
+    pub fn verbatim_window(&self, window_ms: u64) -> Result<Vec<Utterance>, RecvError> {
+        let (respond_to, response) = mpsc::channel();
+        if self.messages.send(WorkerMessage::Window { window_ms, respond_to }).is_err() {
             // The owning task is gone; there is no response coming.
             return Err(RecvError);
         }
@@ -131,6 +155,11 @@ impl SessionTask {
                         // waiting; nothing else to do about that here.
                         let _ = respond_to.send(state.summary());
                     }
+                    WorkerMessage::Window { window_ms, respond_to } => {
+                        // Same reasoning as `Summarise` above: a dropped
+                        // receiver just means the caller stopped waiting.
+                        let _ = respond_to.send(state.verbatim_window(window_ms));
+                    }
                 }
             }
             Ok(())
@@ -192,6 +221,10 @@ mod tests {
             start_ms: 0,
             end_ms: 1200,
         }
+    }
+
+    fn utterance_at(id: &str, start_ms: u64, end_ms: u64) -> Utterance {
+        Utterance { start_ms, end_ms, ..utterance(id) }
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
@@ -419,6 +452,41 @@ mod tests {
 
         let summary = handle.summary().unwrap();
         assert_eq!(summary.decisions.len(), 1);
+
+        drop(handle);
+        task.join().unwrap();
+    }
+
+    #[test]
+    fn a_fresh_tasks_verbatim_window_is_empty() {
+        let (task, _restored) = SessionTask::spawn(InMemorySessionStore::new()).unwrap();
+        let handle = task.handle();
+
+        assert!(handle.verbatim_window(60_000).unwrap().is_empty());
+
+        drop(handle);
+        task.join().unwrap();
+    }
+
+    /// Requesting a window through the handle answers with verbatim text —
+    /// the utterance's `text` field completely unmodified — for whatever
+    /// was sent before the request, mirroring how `summary()` reflects
+    /// commands sent before it was asked for.
+    #[test]
+    fn verbatim_window_reflects_utterances_sent_before_it_was_requested() {
+        let (task, _restored) = SessionTask::spawn(InMemorySessionStore::new()).unwrap();
+        let handle = task.handle();
+
+        handle.send(Command::AppendUtterance(utterance_at("utt-old", 0, 1_000))).unwrap();
+        handle
+            .send(Command::AppendUtterance(utterance_at("utt-new", 90_000, 91_000)))
+            .unwrap();
+        task.recv_mutation().unwrap();
+        task.recv_mutation().unwrap();
+
+        let window = handle.verbatim_window(60_000).unwrap();
+
+        assert_eq!(window, vec![utterance_at("utt-new", 90_000, 91_000)]);
 
         drop(handle);
         task.join().unwrap();

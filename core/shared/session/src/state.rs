@@ -171,6 +171,38 @@ impl SessionState {
         }
     }
 
+    /// Materialises a rolling *verbatim* window of the utterance log: every
+    /// utterance whose end falls within the last `window_ms` milliseconds
+    /// of meeting time, ending at the most recently appended utterance,
+    /// oldest first (architecture §3.4, §3.8; PRD §"prompt caching"). This
+    /// is the other of the two views the slow lane reads instead of the
+    /// full transcript — unlike [`SessionState::summary`], which derives a
+    /// structured facet of state, this returns each utterance's `text`
+    /// completely unmodified, which is the entire point: the slow lane's
+    /// cached prompt prefix only stays the majority of the request if the
+    /// appended, uncached suffix stays bounded to roughly 60-90 seconds
+    /// rather than growing with the whole meeting.
+    ///
+    /// `window_ms` is left to the caller (architecture: "budget the rolling
+    /// window by counting, not estimating") rather than fixed here, so the
+    /// slow lane can size it against its token budget instead of this
+    /// crate guessing at one.
+    ///
+    /// An empty log, or a `window_ms` of `0`, both yield an empty window
+    /// rather than an error — there is nothing verbatim to materialise
+    /// yet, which is not a failure.
+    pub fn verbatim_window(&self, window_ms: u64) -> Vec<Utterance> {
+        let Some(end_of_window) = self.utterances.last().map(|utterance| utterance.end_ms) else {
+            return Vec::new();
+        };
+        let start_of_window = end_of_window.saturating_sub(window_ms);
+        self.utterances
+            .iter()
+            .filter(|utterance| utterance.end_ms > start_of_window)
+            .cloned()
+            .collect()
+    }
+
     /// Applies one command, mutating state and returning the mutation that
     /// resulted. Not `pub(crate)` by accident of visibility but by design:
     /// this is the one place state changes, and it is only ever called
@@ -221,6 +253,10 @@ mod tests {
             start_ms: 0,
             end_ms: 1200,
         }
+    }
+
+    fn utterance_at(id: &str, start_ms: u64, end_ms: u64) -> Utterance {
+        Utterance { start_ms, end_ms, ..utterance(id) }
     }
 
     #[test]
@@ -353,6 +389,74 @@ mod tests {
         state.apply(Command::RecordContradiction(contradiction.clone()));
 
         assert_eq!(state.summary().contradictions, vec![contradiction]);
+    }
+
+    #[test]
+    fn a_fresh_state_has_an_empty_verbatim_window() {
+        let state = SessionState::default();
+        assert!(state.verbatim_window(60_000).is_empty());
+    }
+
+    #[test]
+    fn verbatim_window_excludes_utterances_that_ended_before_the_window_started() {
+        let mut state = SessionState::default();
+        // Ends 100_000ms before the latest utterance's end — well outside a
+        // 60s window measured back from the latest utterance.
+        state.apply(Command::AppendUtterance(utterance_at("utt-old", 0, 1_000)));
+        state.apply(Command::AppendUtterance(utterance_at("utt-new", 100_500, 101_000)));
+
+        let window = state.verbatim_window(60_000);
+
+        let ids: Vec<&str> = window.iter().map(|u| u.id.as_str()).collect();
+        assert_eq!(ids, vec!["utt-new"]);
+    }
+
+    #[test]
+    fn verbatim_window_includes_every_utterance_ending_within_the_window_oldest_first() {
+        let mut state = SessionState::default();
+        state.apply(Command::AppendUtterance(utterance_at("utt-a", 0, 10_000)));
+        state.apply(Command::AppendUtterance(utterance_at("utt-b", 10_000, 40_000)));
+        state.apply(Command::AppendUtterance(utterance_at("utt-c", 40_000, 70_000)));
+
+        // 70_000 (latest end) - 60_000 window = 30_000 cutoff: utt-a (ends
+        // 10_000) is excluded, utt-b and utt-c (ending after 30_000) stay,
+        // in the order they were appended.
+        let window = state.verbatim_window(60_000);
+
+        let ids: Vec<&str> = window.iter().map(|u| u.id.as_str()).collect();
+        assert_eq!(ids, vec!["utt-b", "utt-c"]);
+    }
+
+    #[test]
+    fn verbatim_window_returns_each_utterances_text_completely_unmodified() {
+        let mut state = SessionState::default();
+        let sent = utterance_at("utt-a", 0, 1_000);
+        state.apply(Command::AppendUtterance(sent.clone()));
+
+        let window = state.verbatim_window(60_000);
+
+        assert_eq!(window, vec![sent]);
+    }
+
+    #[test]
+    fn a_zero_length_window_is_empty_even_with_utterances_present() {
+        let mut state = SessionState::default();
+        state.apply(Command::AppendUtterance(utterance_at("utt-a", 0, 1_000)));
+
+        assert!(state.verbatim_window(0).is_empty());
+    }
+
+    #[test]
+    fn widening_the_window_reaches_further_back_without_re_ordering() {
+        let mut state = SessionState::default();
+        state.apply(Command::AppendUtterance(utterance_at("utt-a", 0, 5_000)));
+        state.apply(Command::AppendUtterance(utterance_at("utt-b", 5_000, 65_000)));
+
+        assert_eq!(state.verbatim_window(30_000).len(), 1);
+
+        let widened = state.verbatim_window(90_000);
+        let ids: Vec<&str> = widened.iter().map(|u| u.id.as_str()).collect();
+        assert_eq!(ids, vec!["utt-a", "utt-b"]);
     }
 
     #[test]
