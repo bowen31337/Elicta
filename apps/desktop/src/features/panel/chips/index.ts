@@ -6,3 +6,7 @@ export type {
   UseEscapeHatchInputOptions,
   UseEscapeHatchInputResult,
 } from './useEscapeHatchInput';
+export { AskedItChip } from './AskedItChip';
+export type { AskedItChipProps } from './AskedItChip';
+export { useAskedItChip } from './useAskedItChip';
+export type { UseAskedItChipOptions, UseAskedItChipResult } from './useAskedItChip';
