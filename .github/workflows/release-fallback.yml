@@ -1,0 +1,79 @@
+name: Fallback Release (dmg + MSI)
+
+# Publishes the notarised macOS .dmg and signed Windows .msi as downloadable
+# GitHub Release assets (PRD NFR-3.6). MDM push (NFR-3.5, Jamf/Intune) is the
+# preferred install path where an org has it configured; this workflow is
+# what makes the direct-download fallback actually available rather than
+# leaving the installers stranded as 14-day CI build artifacts.
+#
+# Triggered by the completion of "Sign & Notarize macOS Build" (sign-macos.yml),
+# which itself calls build.yml as a reusable workflow — so a single run
+# already contains the notarised macOS bundle plus both Windows-arch MSI
+# bundles. This workflow only assembles and publishes what that run produced;
+# it does not rebuild anything.
+
+on:
+  workflow_run:
+    workflows: ["Sign & Notarize macOS Build"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: Run ID of a completed "Sign & Notarize macOS Build" run to publish
+        required: true
+
+concurrency:
+  group: release-fallback-${{ github.workflow }}-${{ github.event.workflow_run.head_branch || inputs.run-id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Assemble and publish fallback installers
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve source run
+        id: source
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "run-id=${{ inputs.run-id }}" >> "$GITHUB_OUTPUT"
+            echo "tag=$(gh api /repos/${{ github.repository }}/actions/runs/${{ inputs.run-id }} --jq .head_branch)" >> "$GITHUB_OUTPUT"
+          else
+            echo "run-id=${{ github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download build artifacts from the source run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run-id }}
+          path: artifacts
+
+      - name: Assemble the dmg + MSI fallback bundle
+        run: ./packaging/mdm/scripts/prepare-release-assets.sh artifacts dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.source.outputs.tag }}
+          name: ${{ steps.source.outputs.tag }}
+          generate_release_notes: true
+          body: |
+            Direct-download fallback distribution (PRD NFR-3.6). MDM push
+            (PRD NFR-3.5, Jamf/Intune) is the preferred install path where
+            your organization has it configured — use these installers when
+            it isn't.
+          files: |
+            dist/*.dmg
+            dist/*.msi
+            dist/SHA256SUMS.txt
