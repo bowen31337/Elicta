@@ -26,6 +26,17 @@ net-new local concepts rather than reuses of an existing enum.
 FR-4.1/FR-4.2 that assigns each candidate's target template section) is
 responsible for handing them to `suppress_out_of_stage_candidates` in this
 shape.
+
+`CandidateAuthorityRequirement` backs `authority_matching.py` (PRD FR-4.7).
+It names the same compiled `authority_match` tag the `candidate` table
+already carries (architecture §3.6: "roles that can answer this",
+`compiler/agent/models.py`'s `BmadCandidateDraft.authority_match`) under a
+local field name -- `required_authority` -- so it is never confused with
+that module's own computed `authority_match` value. Whoever compiles that
+tag (out of this feature's footprint) is responsible for handing it to
+`compute_candidate_authority_match` in this shape, the same handoff
+`HypothesisDocumentClaim` and `ShapedCandidate` already describe for their
+own techniques.
 """
 
 from __future__ import annotations
@@ -80,3 +91,10 @@ class ShapedCandidate(BaseModel):
 
     candidate: BankCandidate
     shape: CandidateShape
+
+
+class CandidateAuthorityRequirement(BaseModel):
+    """One candidate's compiled `authority_match` tag -- the roles that can answer it (PRD FR-4.7, architecture §3.6)."""
+
+    candidate_id: str = Field(min_length=1)
+    required_authority: list[str] = Field(default_factory=list)
