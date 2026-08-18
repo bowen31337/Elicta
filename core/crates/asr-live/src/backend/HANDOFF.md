@@ -33,16 +33,36 @@ value types it operates on:
 
 ```rust
 pub use backend::{
-    AudioFramer, AudioSegmentRef, BackendError, EndpointResolutionError, EngagementId,
-    EngagementRegionRegistry, FinalUtterance, FrameDurationError, FramedBackend,
-    InterimHypothesis, Keyterm, LanguageTag, MAX_FRAME_MS, MIN_FRAME_MS, Region, RegionPinError,
-    RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver, SpeakerTag, StreamId,
-    Token, TranscriptionBackend, TranscriptionEvent, UtteranceId, VendorRegionEndpoints,
+    AudioEncoding, AudioFramer, AudioSegmentRef, BackendError, EndpointResolutionError,
+    EngagementId, EngagementRegionRegistry, FinalUtterance, FrameDurationError, FramedBackend,
+    InterimHypothesis, Keyterm, LanguageTag, LINEAR16_16KHZ_MONO, MAX_FRAME_MS, MIN_FRAME_MS,
+    Region, RegionPinError, RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver,
+    SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
+    VendorRegionEndpoints,
 };
 ```
 
 ## What's here
 
+- `encoding.rs` — the audio encoding declared on every vendor connection
+  (architecture §14.1 point 3, "Do not double-compress": conference audio
+  has already been through a lossy codec once, so send `encoding=linear16`
+  at `sample_rate=16000` rather than re-encoding to Opus). `AudioEncoding`
+  is a plain value (`codec`, `sample_rate_hz`, `channels`); the crate
+  exposes exactly one instance of it, `LINEAR16_16KHZ_MONO`, and no
+  lossy-codec variant — the "unless bandwidth genuinely forbids it"
+  exception architecture §14.1 allows is a deployment-time call, not
+  something this crate models as a fallback default a vendor backend could
+  reach for silently. `AudioEncoding::as_query_string` renders the
+  parameter names Deepgram's and AssemblyAI's streaming endpoints both
+  accept directly on the connection URL, and
+  `AudioEncoding::apply_to_endpoint` appends that query string onto a
+  resolved endpoint (correctly joining with `?` or `&` depending on
+  whether the endpoint already carries one) — composed with
+  `RegionalEndpointResolver::resolve` from `region.rs`, a real vendor
+  backend's `connect` closure gets the one URL that is both regionally
+  pinned and non-lossy, without a call site needing to remember to append
+  the encoding by hand.
 - `event.rs` — the value types architecture §3.2 specifies verbatim:
   `InterimHypothesis`, `FinalUtterance`, `Token`, plus the `TranscriptionEvent`
   enum that unions them into the one shape every backend emits. `StreamId`,
