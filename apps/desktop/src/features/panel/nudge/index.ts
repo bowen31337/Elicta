@@ -15,3 +15,7 @@ export {
 export type { NudgeQueueState, NudgeRenderResult } from './nudgeQueue';
 export { useNudgeQueue } from './useNudgeQueue';
 export type { UseNudgeQueueOptions, UseNudgeQueueResult } from './useNudgeQueue';
+
+export { loadOperatorLanguage, saveOperatorLanguage } from './operatorLanguageStore';
+export { useOperatorLanguage, DEFAULT_OPERATOR_LANGUAGE } from './useOperatorLanguage';
+export type { UseOperatorLanguageResult } from './useOperatorLanguage';
