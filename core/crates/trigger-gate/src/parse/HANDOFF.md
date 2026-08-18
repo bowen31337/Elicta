@@ -1,80 +1,108 @@
 # parse module — handoff
 
-Implements the "span-confidence suppression" feature `lexicon/HANDOFF.md`
-called out as out of scope for itself: "System suppresses a nudge when the
-trigger span itself falls below the per-word confidence threshold" (PRD
-NFR-5.6). Done when a low-confidence span emits a suppressed trigger event
-carrying its reason.
+Implements "System emits a `TriggerEvent` carrying kind, utterance_id, span,
+and the minimum token confidence across that span" — architecture §3.5's
+literal output shape for the trigger gate:
 
-`core/crates/trigger-gate/src/lib.rs` already existed (`pub mod lexicon;`)
-from an earlier workspace-scaffold change, so this change only adds
-`pub mod parse;` alongside it — no new crate scaffold needed.
+```rust
+pub struct TriggerEvent {
+    pub kind: TriggerKind,
+    pub utterance_id: Uuid,
+    pub span: Option<Range<usize>>, // byte range of the offending phrase
+    pub confidence: f32,            // minimum token confidence across the span
+}
+```
+
+A prior feature in this same directory ("System suppresses a nudge when the
+trigger span itself falls below the per-word confidence threshold", PRD
+NFR-5.6) had already landed a `TriggerEvent` — but as an enum,
+`Fired { span, confidence }` / `Suppressed { span, confidence, reason }`,
+with no `utterance_id` and no top-level `kind` field. This change reshapes
+it into the struct architecture §3.5 actually specifies, folding that
+enum's two variants into the new `kind: TriggerKind` field
+(`TriggerKind::Fired` / `TriggerKind::Suppressed(SuppressionReason)`) so no
+suppression behaviour or test coverage from that feature was lost — only
+restructured.
+
+`core/crates/trigger-gate/src/lib.rs` already had `pub mod parse;`; no
+scaffold changes needed here.
 
 ## What's here
 
-- `event.rs` — `TriggerEvent`, the trigger gate's uniform output shape
-  (architecture §3.5): `Fired { span, confidence }` or
-  `Suppressed { span, confidence, reason }`. `SuppressionReason` currently
-  has one variant, `SpanConfidenceBelowThreshold { confidence, threshold }`
-  (NFR-5.6) — left as an enum rather than a single struct since architecture
-  §3.5 implies other tiers (e.g. FR-5.7's pass-rate self-regulation) may add
-  their own suppression reasons later without changing `TriggerEvent`'s
-  shape.
-- `gate.rs` — `gate_span_confidence(span, word_confidences, min_span_confidence)`.
-  Takes every per-word confidence the candidate span covers and reduces it
-  to the minimum itself, matching architecture §3.5's own definition of
-  `TriggerEvent.confidence` as "the minimum token confidence across the
-  span" — deliberately not an average, since one misheard word inside an
-  otherwise-clean multi-word span (`quantify "fast"` for "vast") is exactly
-  the case NFR-5.6 exists to catch, and an average a single bad word can't
-  move far would defeat the point. A span backed by zero words is
-  suppressed with confidence `0.0` rather than treated as automatically
-  trustworthy (there is nothing here to be confident about).
-- `mod.rs` — module doc and re-exports (`TriggerEvent`, `SuppressionReason`,
-  `gate_span_confidence`).
+- `event.rs` — `TriggerEvent` (struct: `kind`, `utterance_id`, `span`,
+  `confidence`), `TriggerKind` (`Fired` | `Suppressed(SuppressionReason)`),
+  `SuppressionReason` (`SpanConfidenceBelowThreshold { confidence,
+  threshold }`, PRD NFR-5.6), and `UtteranceId`.
+  `UtteranceId` is a `String` alias, not architecture's literal `Uuid` —
+  this crate has no dependency on the `uuid` crate or on `asr-live` (which
+  mints real utterance ids as `String` too, see
+  `core/crates/asr-live/src/backend/event.rs`), and nothing here needs to
+  parse or generate an id, only carry one through. Re-point at a shared
+  type once crate wiring links `trigger-gate` to whatever mints utterance
+  ids at runtime.
+  `span` is `Option<Range<usize>>` per architecture §3.5, for trigger kinds
+  not tied to one specific span; every kind this crate produces today
+  (`Fired`, `Suppressed`) always sets it to `Some`.
+  `TriggerKind` only has two variants because this crate only implements
+  span-confidence gating so far — the trigger-type taxonomy architecture
+  §3.5 lists (unquantified adjective, unnamed actor, contradiction, novel
+  entity, coverage-gap-plus-drift) is not plumbed into this module at all;
+  `gate_span_confidence`'s inputs (a span, its word confidences, a
+  threshold) carry no notion of *which* trigger rule matched. Whoever wires
+  `lexicon::LexiconMatch` into this event will need to either extend
+  `TriggerKind` with those variants or thread trigger-type information
+  through as a new field — not decided here.
+- `gate.rs` — `gate_span_confidence(utterance_id, span, word_confidences,
+  min_span_confidence)`. Same reduction logic as before (minimum, not
+  average, of `word_confidences`; a span backed by zero words is suppressed
+  at confidence `0.0`) — only the return shape and the new `utterance_id`
+  parameter changed. `utterance_id` is a pure pass-through: it is not
+  derived from the span or its confidences, only carried onto the
+  resulting event (see
+  `two_events_from_different_utterances_carry_their_own_utterance_id`).
+- `mod.rs` — module doc and re-exports (`TriggerEvent`, `TriggerKind`,
+  `SuppressionReason`, `UtteranceId`, `gate_span_confidence`).
 
-## Why this satisfies "a low-confidence span emits a suppressed trigger
-event carrying its reason"
+## Why this satisfies "emits a TriggerEvent carrying kind, utterance_id,
+span, and the minimum token confidence across that span"
 
-`gate_span_confidence` is a pure function from a span's own word
-confidences to a `TriggerEvent` — there is no code path where a span whose
-minimum confidence is below `min_span_confidence` produces `Fired` instead
-of `Suppressed`, and `Suppressed` cannot be constructed without a `reason`
-(it is a required struct field, not optional). `gate.rs`'s
-`a_span_below_threshold_is_suppressed_and_carries_its_reason` and
-`a_single_low_confidence_word_suppresses_an_otherwise_confident_span` tests
-cover this directly; `confidence_exactly_at_the_threshold_is_not_suppressed`
-and `a_zero_threshold_never_suppresses` pin the boundary so the comparison
-can't silently drift to `<=` or become inverted later.
+`TriggerEvent` is a struct, not an enum, with exactly those four fields —
+matching architecture §3.5's own type signature rather than approximating
+it. `gate_span_confidence` cannot construct one without all four: `kind` is
+computed from the confidence-vs-threshold comparison, `utterance_id` is a
+required parameter with no default, `span` is always `Some(span)`, and
+`confidence` is the same minimum-of-word-confidences value in every case
+(fired or suppressed) — architecture §3.5's "for every event, fired or
+not". `gate.rs`'s existing suppression tests (`a_span_below_threshold_...`,
+`a_single_low_confidence_word_...`, `confidence_exactly_at_the_threshold_...`,
+`a_span_backed_by_no_words_...`, `a_zero_threshold_...`) were updated to the
+new struct shape and still pass, pinning the same boundary behaviour as
+before; the new
+`two_events_from_different_utterances_carry_their_own_utterance_id` test
+covers the field this feature actually adds.
 
 ## Wiring needed
 
-`core/crates/trigger-gate/src/lib.rs` now has:
-
-```rust
-pub mod lexicon;
-pub mod parse;
-```
-
-No other integration is required by this feature's own "Done when"
-criterion. Not yet wired here, left for whoever integrates the full gate
+`core/crates/trigger-gate/src/lib.rs` is unchanged (`pub mod lexicon; pub
+mod parse;`). Not yet wired here, left for whoever integrates the full gate
 loop (feature 141) or a sibling `ratelimit/` submodule:
 
+- Extending `TriggerKind` (or adding a separate field) to carry *which*
+  trigger rule matched (unquantified adjective, unnamed actor, etc.) once
+  `lexicon::LexiconMatch` is threaded into this module — today `TriggerKind`
+  only distinguishes fired vs. suppressed, not trigger category.
+- Sourcing a real `utterance_id` at the call site — this feature only
+  proves the value is carried through untouched, not where it comes from
+  at runtime.
 - Turning a `lexicon::LexiconMatch` plus the `TaggedToken`s it was matched
-  from into the `(span, word_confidences)` this module's function takes —
-  today `LexiconMatch` carries a single `token_index`, not a byte range or a
-  confidence, so that adapter is a few lines wherever the two modules are
-  first wired together, not a decision made here.
-- The actual `min_span_confidence` threshold value used at runtime — PRD
-  NFR-5.6 does not specify a number, and no other feature in this worktree
-  has set one either (checked: no config/constant defines it anywhere in
-  the repo). `gate_span_confidence` takes it as a parameter, same
-  convention as `LexiconRouter::run`'s `min_tag_confidence`.
-- FR-5.7's rolling pass-rate self-regulation (raising thresholds when pass
-  rate exceeds ~10% of utterances) — a stateful concern layered on top of
-  this stateless per-span comparison, out of scope for this feature.
+  from into the `(span, word_confidences)` `gate_span_confidence` takes —
+  `LexiconMatch` still carries a single `token_index`, not a byte range or
+  a confidence.
+- The actual `min_span_confidence` threshold value used at runtime, and
+  FR-5.7's rolling pass-rate self-regulation — both unchanged from the
+  prior feature's handoff notes, still out of scope here.
 
-Verified standalone: `cargo test -p trigger-gate` — 22/22 pass (16 prior
-`lexicon` tests untouched, 6 new `parse` tests); `cargo clippy -p
-trigger-gate --all-targets -- -D warnings` — clean; `cargo fmt -p
-trigger-gate -- --check` — clean.
+Verified standalone: `cargo test -p trigger-gate` — 23/23 pass (16 prior
+`lexicon` tests untouched, 6 prior `parse` tests updated to the new shape,
+1 new `parse` test); `cargo clippy -p trigger-gate --all-targets -- -D
+warnings` — clean; `cargo fmt -p trigger-gate -- --check` — clean.

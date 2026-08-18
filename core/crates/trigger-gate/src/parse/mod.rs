@@ -11,5 +11,5 @@
 pub mod event;
 pub mod gate;
 
-pub use event::{SuppressionReason, TriggerEvent};
+pub use event::{SuppressionReason, TriggerEvent, TriggerKind, UtteranceId};
 pub use gate::gate_span_confidence;
