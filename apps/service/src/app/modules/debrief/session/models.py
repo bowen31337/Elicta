@@ -14,12 +14,22 @@ nudge that fired during the call, and what became of it. `NudgeDisposition`
 and `NudgeDispositionRecord` capture that trace so the debrief thread opens
 already knowing which nudges fired, which were taken, and which were parked
 (FR-7.4).
+
+`DebriefMessage` carries one turn of the conversation the way the underlying
+streaming conversation itself represents it — a list of raw content blocks,
+not the plain-text extraction of them. The debrief session is multi-turn
+and reads a full transcript, so it outgrows a single context window and
+relies on the underlying conversation's server-side compaction; that
+compaction attaches its own state to the response's content blocks, and a
+history that stores only the extracted text silently drops that state the
+next time it is replayed back into the conversation.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -65,6 +75,35 @@ class NudgeDispositionRecord(BaseModel):
     disposition: NudgeDisposition
 
 
+class DebriefMessageRole(str, Enum):
+    """Who authored one turn of the debrief conversation history."""
+
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class DebriefMessage(BaseModel):
+    """One turn of the debrief conversation, persisted verbatim.
+
+    `content` is the underlying streaming conversation's own list of content
+    blocks — for an assistant turn, the full `response.content` the Claude
+    Agent SDK returns — rather than a text extraction of it. This package
+    never inspects the blocks, only carries them, since it has no way to
+    know which ones the vendor's server-side compaction has attached state
+    to.
+    """
+
+    role: DebriefMessageRole
+    content: list[dict[str, Any]]
+    recorded_at: datetime
+
+
+class DebriefMessageRequest(BaseModel):
+    """Request body for sending a free-form message into an open debrief conversation."""
+
+    message: str
+
+
 class DebriefConversationSession(BaseModel):
     """One meeting's open debrief conversation (PRD FR-7.1, FR-7.4).
 
@@ -79,6 +118,11 @@ class DebriefConversationSession(BaseModel):
     fired, taken, or parked — it ended live mode with. It is persisted as
     part of the session itself rather than fetched separately, so the
     debrief context always has that history the moment the session opens.
+
+    `history` is every turn exchanged in the conversation so far, in order,
+    each carrying its raw content blocks rather than extracted text (see
+    `DebriefMessage`). It opens empty and grows one user turn plus one
+    assistant turn per message sent.
     """
 
     session_id: str
@@ -90,3 +134,4 @@ class DebriefConversationSession(BaseModel):
     latency_budget_seconds: float | None
     opened_at: datetime
     nudge_dispositions: list[NudgeDispositionRecord]
+    history: list[DebriefMessage]

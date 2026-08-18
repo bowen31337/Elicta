@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.modules.debrief.session.models import (
     DebriefConversationSession,
+    DebriefSessionStatus,
     NudgeDisposition,
     NudgeDispositionRecord,
 )
@@ -20,9 +21,14 @@ FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 def make_client(
     conversation_ref: str = "conv-1",
     nudge_dispositions: list[NudgeDispositionRecord] | None = None,
+    response_content: list[dict] | None = None,
+    existing_session: DebriefConversationSession | None = None,
 ) -> tuple[TestClient, list[DebriefConversationSession]]:
     saved: list[DebriefConversationSession] = []
     nudge_dispositions = nudge_dispositions if nudge_dispositions is not None else []
+    response_content = (
+        response_content if response_content is not None else [{"type": "text", "text": "Reply."}]
+    )
 
     async def open_conversation(meeting_id: str, session_id: str) -> str:
         return conversation_ref
@@ -33,8 +39,31 @@ def make_client(
     async def save(session: DebriefConversationSession) -> None:
         saved.append(session)
 
+    async def load_session(meeting_id: str) -> DebriefConversationSession:
+        if existing_session is not None:
+            return existing_session
+        return DebriefConversationSession(
+            session_id="session-1",
+            meeting_id=meeting_id,
+            conversation_ref=conversation_ref,
+            status=DebriefSessionStatus.OPEN,
+            streaming_enabled=True,
+            length_cap=None,
+            latency_budget_seconds=None,
+            opened_at=FIXED,
+            nudge_dispositions=[],
+            history=[],
+        )
+
+    async def send_message(conversation_ref: str, message: str) -> list[dict]:
+        return response_content
+
     app = FastAPI()
-    app.include_router(build_debrief_session_router(open_conversation, load_nudge_signal, save))
+    app.include_router(
+        build_debrief_session_router(
+            open_conversation, load_nudge_signal, save, load_session, send_message
+        )
+    )
     return TestClient(app), saved
 
 
@@ -130,3 +159,34 @@ def test_starting_a_debrief_session_with_no_live_mode_nudges_returns_an_empty_li
     response = client.post("/api/meetings/meeting-1/debrief/start")
 
     assert response.json()["nudge_dispositions"] == []
+
+
+def test_sending_a_debrief_message_returns_200_with_the_updated_session():
+    client, _ = make_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/debrief/message", json={"message": "What's the budget status?"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meeting_id"] == "meeting-1"
+    assert len(body["history"]) == 2
+
+
+def test_sending_a_debrief_message_persists_the_full_response_content_in_history():
+    response_content = [
+        {"type": "text", "text": "Here is a summary."},
+        {"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": {"query": "budget"}},
+    ]
+    client, saved = make_client(response_content=response_content)
+
+    response = client.post(
+        "/api/meetings/meeting-1/debrief/message", json={"message": "What's the budget status?"}
+    )
+
+    body = response.json()
+    assert body["history"][0]["role"] == "user"
+    assert body["history"][1]["role"] == "assistant"
+    assert body["history"][1]["content"] == response_content
+    assert saved[-1].history[1].content == response_content
