@@ -9,11 +9,11 @@
 //! to know why a span fired or was suppressed, only that it did or didn't.
 //!
 //! [`PassRateCounter`] only counts; it does not itself decide anything from
-//! the number it produces. Raising the gate's own thresholds in response to
-//! a high pass rate — the self-regulation half of architecture §3.5's "and
-//! raises its own thresholds if pass rate exceeds ~10%" — is a separate
-//! concern that consumes [`PassRateCounter::record`]'s return value, not
-//! part of counting it.
+//! the number it produces. [`regulation::ThresholdRegulator`] is the
+//! consumer that closes the loop: raising the gate's own thresholds in
+//! response to a high pass rate — the self-regulation half of architecture
+//! §3.5's "and raises its own thresholds if pass rate exceeds ~10%"
+//! (PRD FR-5.7) — by consuming [`PassRateCounter::record`]'s return value.
 //!
 //! [`storm`] is the sibling concern for the burstier failure mode in the
 //! architecture's risk table: an endpointing storm during cross-talk, where
@@ -22,7 +22,9 @@
 //! consuming [`PassRateCounter`]'s output.
 
 pub mod pass_rate;
+pub mod regulation;
 pub mod storm;
 
 pub use pass_rate::PassRateCounter;
+pub use regulation::{RegulationOutcome, ThresholdRegulator};
 pub use storm::{StormGuard, StormOutcome};

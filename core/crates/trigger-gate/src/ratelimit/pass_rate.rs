@@ -11,9 +11,10 @@
 //! [`PassRateCounter`] only counts; it does not itself decide anything from
 //! the number it produces. Raising the gate's own thresholds in response to
 //! a high pass rate — the self-regulation half of architecture §3.5's "and
-//! raises its own thresholds if pass rate exceeds ~10%" — is a separate
-//! concern that consumes [`PassRateCounter::record`]'s return value, not
-//! part of counting it.
+//! raises its own thresholds if pass rate exceeds ~10%" — is
+//! [`super::regulation::ThresholdRegulator`]'s concern: it consumes
+//! [`PassRateCounter::record`]'s return value rather than this module
+//! deciding anything from the number it produces.
 
 use std::collections::VecDeque;
 
