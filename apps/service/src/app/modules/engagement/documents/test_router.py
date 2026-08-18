@@ -5,9 +5,9 @@ from collections.abc import Iterable
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from .errors import EngagementNotFoundError
+from .errors import DocumentNotFoundError, EngagementNotFoundError
 from .models import DocumentStatus, EngagementDocument
-from .router import build_engagement_documents_router
+from .router import build_document_status_router, build_engagement_documents_router
 
 
 def document(
@@ -29,6 +29,24 @@ def make_client(
 
     app = FastAPI()
     app.include_router(build_engagement_documents_router(list_documents))
+    return TestClient(app), received
+
+
+def make_status_client(
+    result: EngagementDocument | Exception,
+) -> tuple[TestClient, list[tuple[str, DocumentStatus]]]:
+    received: list[tuple[str, DocumentStatus]] = []
+
+    async def update_status(
+        document_id: str, status: DocumentStatus
+    ) -> EngagementDocument:
+        received.append((document_id, status))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    app = FastAPI()
+    app.include_router(build_document_status_router(update_status))
     return TestClient(app), received
 
 
@@ -81,5 +99,66 @@ def test_unknown_engagement_id_returns_404():
     client, _ = make_client(EngagementNotFoundError("eng-missing"))
 
     response = client.get("/api/engagements/eng-missing/documents")
+
+    assert response.status_code == 404
+
+
+def test_updating_document_status_returns_200_with_updated_document():
+    updated = document("doc-1", "Scoping deck", DocumentStatus.SUPERSEDED)
+    client, received = make_status_client(updated)
+
+    response = client.patch(
+        "/api/documents/doc-1/status", json={"status": "superseded"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "document_id": "doc-1",
+        "name": "Scoping deck",
+        "status": "superseded",
+    }
+    assert received == [("doc-1", DocumentStatus.SUPERSEDED)]
+
+
+def test_updating_document_status_passes_document_id_and_status_through():
+    updated = document("doc-2", "Draft roadmap", DocumentStatus.GROUND_TRUTH)
+    client, received = make_status_client(updated)
+
+    client.patch("/api/documents/doc-2/status", json={"status": "ground truth"})
+
+    assert received == [("doc-2", DocumentStatus.GROUND_TRUTH)]
+
+
+def test_updating_document_status_to_hypothesis():
+    updated = document("doc-3", "Draft roadmap", DocumentStatus.HYPOTHESIS)
+    client, _ = make_status_client(updated)
+
+    response = client.patch(
+        "/api/documents/doc-3/status", json={"status": "hypothesis"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "hypothesis"
+
+
+def test_updating_document_status_with_invalid_status_returns_422():
+    client, received = make_status_client(
+        document("doc-1", "Scoping deck", DocumentStatus.GROUND_TRUTH)
+    )
+
+    response = client.patch(
+        "/api/documents/doc-1/status", json={"status": "not-a-real-status"}
+    )
+
+    assert response.status_code == 422
+    assert received == []
+
+
+def test_unknown_document_id_returns_404():
+    client, _ = make_status_client(DocumentNotFoundError("doc-missing"))
+
+    response = client.patch(
+        "/api/documents/doc-missing/status", json={"status": "hypothesis"}
+    )
 
     assert response.status_code == 404

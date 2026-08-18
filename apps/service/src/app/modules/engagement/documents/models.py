@@ -37,3 +37,9 @@ class EngagementDocumentListResponse(BaseModel):
 
     engagement_id: str = Field(min_length=1)
     documents: list[EngagementDocument]
+
+
+class DocumentStatusUpdateRequest(BaseModel):
+    """Body for retagging a document's status (PATCH .../documents/{id}/status)."""
+
+    status: DocumentStatus
