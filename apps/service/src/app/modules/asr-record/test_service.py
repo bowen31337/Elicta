@@ -44,7 +44,9 @@ def make_output(
 def test_a_successful_run_persists_a_complete_transcript_for_the_full_session():
     saved: list[RecordPathTranscript] = []
 
-    async def transcribe(session_id: str, audio_ref: str) -> BatchTranscriptionOutput:
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
         assert session_id == "session-1"
         assert audio_ref == "recordings/session-1.wav"
         return make_output()
@@ -52,9 +54,12 @@ def test_a_successful_run_persists_a_complete_transcript_for_the_full_session():
     async def save(transcript: RecordPathTranscript) -> None:
         saved.append(transcript)
 
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return ["Acme Corp", "Project Nightingale"]
+
     result = asyncio.run(
         run_record_path_transcription(
-            "session-1", "recordings/session-1.wav", transcribe, save
+            "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
         )
     )
 
@@ -67,14 +72,43 @@ def test_a_successful_run_persists_a_complete_transcript_for_the_full_session():
     assert saved == [result]
 
 
-def test_requested_at_is_deterministic_when_supplied():
-    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+def test_the_engagement_vocabulary_is_sent_as_keyterms_on_every_batch_request():
+    sent_keyterms: list[list[str]] = []
 
-    async def transcribe(session_id: str, audio_ref: str) -> BatchTranscriptionOutput:
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        sent_keyterms.append(keyterms)
         return make_output()
 
     async def save(transcript: RecordPathTranscript) -> None:
         pass
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return ["Acme Corp", "Project Nightingale", "SSO"]
+
+    asyncio.run(
+        run_record_path_transcription(
+            "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
+        )
+    )
+
+    assert sent_keyterms == [["Acme Corp", "Project Nightingale", "SSO"]]
+
+
+def test_requested_at_is_deterministic_when_supplied():
+    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        return make_output()
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        pass
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
 
     result = asyncio.run(
         run_record_path_transcription(
@@ -82,6 +116,7 @@ def test_requested_at_is_deterministic_when_supplied():
             "recordings/session-1.wav",
             transcribe,
             save,
+            get_vocabulary,
             requested_at=fixed,
         )
     )
@@ -93,16 +128,21 @@ def test_requested_at_is_deterministic_when_supplied():
 def test_an_engine_failure_persists_a_failed_transcript_and_reraises():
     saved: list[RecordPathTranscript] = []
 
-    async def transcribe(session_id: str, audio_ref: str) -> BatchTranscriptionOutput:
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
         raise RuntimeError("vendor engine timed out")
 
     async def save(transcript: RecordPathTranscript) -> None:
         saved.append(transcript)
 
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
+
     with pytest.raises(RuntimeError, match="vendor engine timed out"):
         asyncio.run(
             run_record_path_transcription(
-                "session-1", "recordings/session-1.wav", transcribe, save
+                "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
             )
         )
 
@@ -111,3 +151,29 @@ def test_an_engine_failure_persists_a_failed_transcript_and_reraises():
     assert saved[0].session_id == "session-1"
     assert saved[0].error == "vendor engine timed out"
     assert saved[0].segments == []
+
+
+def test_a_vocabulary_lookup_failure_also_persists_a_failed_transcript_and_reraises():
+    saved: list[RecordPathTranscript] = []
+
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        raise AssertionError("transcribe should not run if vocabulary lookup fails")
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        saved.append(transcript)
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        raise RuntimeError("engagement lookup unavailable")
+
+    with pytest.raises(RuntimeError, match="engagement lookup unavailable"):
+        asyncio.run(
+            run_record_path_transcription(
+                "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
+            )
+        )
+
+    assert len(saved) == 1
+    assert saved[0].status == TranscriptionStatus.FAILED
+    assert saved[0].error == "engagement lookup unavailable"

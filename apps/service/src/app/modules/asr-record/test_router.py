@@ -24,11 +24,18 @@ build_record_path_router = _router.build_record_path_router
 
 
 def make_client(
-    *, engine: str = "highest-accuracy-engine", fail: bool = False
-) -> tuple[TestClient, dict[str, RecordPathTranscript]]:
+    *,
+    engine: str = "highest-accuracy-engine",
+    fail: bool = False,
+    vocabulary: list[str] | None = None,
+) -> tuple[TestClient, dict[str, RecordPathTranscript], list[list[str]]]:
     store: dict[str, RecordPathTranscript] = {}
+    sent_keyterms: list[list[str]] = []
 
-    async def transcribe(session_id: str, audio_ref: str) -> BatchTranscriptionOutput:
+    async def transcribe(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        sent_keyterms.append(keyterms)
         if fail:
             raise RuntimeError("vendor engine unavailable")
         return BatchTranscriptionOutput(
@@ -39,6 +46,9 @@ def make_client(
             text="hello",
         )
 
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return vocabulary if vocabulary is not None else []
+
     async def save(transcript: RecordPathTranscript) -> None:
         store[transcript.session_id] = transcript
 
@@ -46,12 +56,14 @@ def make_client(
         return store.get(session_id)
 
     app = FastAPI()
-    app.include_router(build_record_path_router(transcribe, save, get))
-    return TestClient(app, raise_server_exceptions=False), store
+    app.include_router(
+        build_record_path_router(transcribe, get_vocabulary, save, get)
+    )
+    return TestClient(app, raise_server_exceptions=False), store, sent_keyterms
 
 
 def test_posting_triggers_batch_transcription_and_returns_201():
-    client, _ = make_client()
+    client, _, _ = make_client()
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript",
@@ -66,8 +78,21 @@ def test_posting_triggers_batch_transcription_and_returns_201():
     assert body["engine"] == "highest-accuracy-engine"
 
 
+def test_posting_sends_the_engagement_vocabulary_as_keyterms():
+    client, _, sent_keyterms = make_client(
+        vocabulary=["Acme Corp", "Project Nightingale"]
+    )
+
+    client.post(
+        "/api/sessions/session-1/record-path-transcript",
+        json={"audio_ref": "recordings/session-1.wav"},
+    )
+
+    assert sent_keyterms == [["Acme Corp", "Project Nightingale"]]
+
+
 def test_posting_persists_the_transcript_so_it_can_be_fetched_afterwards():
-    client, store = make_client()
+    client, store, _ = make_client()
 
     client.post(
         "/api/sessions/session-1/record-path-transcript",
@@ -83,7 +108,7 @@ def test_posting_persists_the_transcript_so_it_can_be_fetched_afterwards():
 
 
 def test_missing_audio_ref_is_rejected():
-    client, _ = make_client()
+    client, _, _ = make_client()
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript", json={"audio_ref": ""}
@@ -93,7 +118,7 @@ def test_missing_audio_ref_is_rejected():
 
 
 def test_getting_a_session_with_no_transcript_yet_returns_404():
-    client, _ = make_client()
+    client, _, _ = make_client()
 
     response = client.get("/api/sessions/unknown-session/record-path-transcript")
 
@@ -101,7 +126,7 @@ def test_getting_a_session_with_no_transcript_yet_returns_404():
 
 
 def test_a_failed_batch_run_still_persists_a_failed_record():
-    client, store = make_client(fail=True)
+    client, store, _ = make_client(fail=True)
 
     response = client.post(
         "/api/sessions/session-1/record-path-transcript",

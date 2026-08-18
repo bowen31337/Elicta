@@ -13,6 +13,7 @@ from .models import RecordPathTranscript
 from .schemas import RecordPathTranscriptionRequest
 from .service import (
     BatchTranscriber,
+    GetEngagementVocabulary,
     GetRecordPathTranscript,
     SaveRecordPathTranscript,
     run_record_path_transcription,
@@ -21,6 +22,7 @@ from .service import (
 
 def build_record_path_router(
     transcribe: BatchTranscriber,
+    get_vocabulary: GetEngagementVocabulary,
     save_transcript: SaveRecordPathTranscript,
     get_transcript: GetRecordPathTranscript,
 ) -> APIRouter:
@@ -35,7 +37,7 @@ def build_record_path_router(
         session_id: str, payload: RecordPathTranscriptionRequest
     ) -> RecordPathTranscript:
         return await run_record_path_transcription(
-            session_id, payload.audio_ref, transcribe, save_transcript
+            session_id, payload.audio_ref, transcribe, save_transcript, get_vocabulary
         )
 
     @router.get(
