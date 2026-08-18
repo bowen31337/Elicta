@@ -10,6 +10,8 @@
 
 pub mod event;
 pub mod gate;
+pub mod unnamed_actor;
 
 pub use event::{SuppressionReason, TriggerEvent, TriggerKind, UtteranceId};
 pub use gate::gate_span_confidence;
+pub use unnamed_actor::{find_agentless_clauses, gate_agentless_clauses, AgentlessClauseMatch};

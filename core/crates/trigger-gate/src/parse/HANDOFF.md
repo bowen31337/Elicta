@@ -1,108 +1,105 @@
 # parse module — handoff
 
-Implements "System emits a `TriggerEvent` carrying kind, utterance_id, span,
-and the minimum token confidence across that span" — architecture §3.5's
-literal output shape for the trigger gate:
+Implements "System detects unnamed actors in English through a dependency
+parse over passive constructions and agentless clauses" (PRD FR-5.3,
+architecture §3.5's deterministic-tier table: "Unnamed actor — Dependency
+parse; passive constructions and agentless clauses"). Done when an
+agentless clause emits a `TriggerEvent` carrying its span.
 
-```rust
-pub struct TriggerEvent {
-    pub kind: TriggerKind,
-    pub utterance_id: Uuid,
-    pub span: Option<Range<usize>>, // byte range of the offending phrase
-    pub confidence: f32,            // minimum token confidence across the span
-}
-```
-
-A prior feature in this same directory ("System suppresses a nudge when the
-trigger span itself falls below the per-word confidence threshold", PRD
-NFR-5.6) had already landed a `TriggerEvent` — but as an enum,
-`Fired { span, confidence }` / `Suppressed { span, confidence, reason }`,
-with no `utterance_id` and no top-level `kind` field. This change reshapes
-it into the struct architecture §3.5 actually specifies, folding that
-enum's two variants into the new `kind: TriggerKind` field
-(`TriggerKind::Fired` / `TriggerKind::Suppressed(SuppressionReason)`) so no
-suppression behaviour or test coverage from that feature was lost — only
-restructured.
-
-`core/crates/trigger-gate/src/lib.rs` already had `pub mod parse;`; no
-scaffold changes needed here.
+This crate has no dependency-parsing library in the workspace (checked the
+workspace root `Cargo.toml`: no crate anywhere under `core/crates/*` parses
+English syntax trees), so there is no real dependency parse to call. The
+new `unnamed_actor` module approximates the one surface pattern FR-5.3 asks
+for — passive voice with no `by <agent>` phrase — as a local scan, the same
+relationship `lexicon::terms::Lexicon::scan`'s plain substring scan has to
+the Aho-Corasick engine FR-5.2 eventually wants: a stand-in over the same
+output contract, replaceable later without changing what downstream code
+sees.
 
 ## What's here
 
-- `event.rs` — `TriggerEvent` (struct: `kind`, `utterance_id`, `span`,
-  `confidence`), `TriggerKind` (`Fired` | `Suppressed(SuppressionReason)`),
-  `SuppressionReason` (`SpanConfidenceBelowThreshold { confidence,
-  threshold }`, PRD NFR-5.6), and `UtteranceId`.
-  `UtteranceId` is a `String` alias, not architecture's literal `Uuid` —
-  this crate has no dependency on the `uuid` crate or on `asr-live` (which
-  mints real utterance ids as `String` too, see
-  `core/crates/asr-live/src/backend/event.rs`), and nothing here needs to
-  parse or generate an id, only carry one through. Re-point at a shared
-  type once crate wiring links `trigger-gate` to whatever mints utterance
-  ids at runtime.
-  `span` is `Option<Range<usize>>` per architecture §3.5, for trigger kinds
-  not tied to one specific span; every kind this crate produces today
-  (`Fired`, `Suppressed`) always sets it to `Some`.
-  `TriggerKind` only has two variants because this crate only implements
-  span-confidence gating so far — the trigger-type taxonomy architecture
-  §3.5 lists (unquantified adjective, unnamed actor, contradiction, novel
-  entity, coverage-gap-plus-drift) is not plumbed into this module at all;
-  `gate_span_confidence`'s inputs (a span, its word confidences, a
-  threshold) carry no notion of *which* trigger rule matched. Whoever wires
-  `lexicon::LexiconMatch` into this event will need to either extend
-  `TriggerKind` with those variants or thread trigger-type information
-  through as a new field — not decided here.
-- `gate.rs` — `gate_span_confidence(utterance_id, span, word_confidences,
-  min_span_confidence)`. Same reduction logic as before (minimum, not
-  average, of `word_confidences`; a span backed by zero words is suppressed
-  at confidence `0.0`) — only the return shape and the new `utterance_id`
-  parameter changed. `utterance_id` is a pure pass-through: it is not
-  derived from the span or its confidences, only carried onto the
-  resulting event (see
-  `two_events_from_different_utterances_carry_their_own_utterance_id`).
-- `mod.rs` — module doc and re-exports (`TriggerEvent`, `TriggerKind`,
-  `SuppressionReason`, `UtteranceId`, `gate_span_confidence`).
+- `unnamed_actor.rs` (new) —
+  - `find_agentless_clauses(tokens: &[TaggedToken]) -> Vec<AgentlessClauseMatch>`:
+    scans for a finite "to be" form (`BE_FORMS`) immediately followed by a
+    past participle (`IRREGULAR_PAST_PARTICIPLES` list, or a regular `-ed`
+    suffix), then looks up to `AGENT_LOOKAHEAD` (3) tokens past the
+    participle for a `by` token. A pair followed by `by` names its agent and
+    is not returned; otherwise it's an `AgentlessClauseMatch { start, end }`
+    (be-verb index, participle index, inclusive). Scanning resumes just past
+    a matched pair either way, so matches never overlap.
+  - `token_range_span(tokens, start, end) -> Range<usize>`: the byte range
+    `tokens[start..=end]` would occupy in `tokens` reconstructed as one
+    string joined by single spaces — a multi-token generalisation of
+    `lexicon::evaluation::token_span`'s same reconstruction assumption (that
+    function stays put in `lexicon`, out of this feature's footprint; this
+    is a separate, local copy of the same idea for a token *range* rather
+    than a single index). Private — not re-exported.
+  - `gate_agentless_clauses(utterance_id, tokens, min_span_confidence) -> Vec<TriggerEvent>`:
+    runs `find_agentless_clauses`, turns each match into a span (via
+    `token_range_span`) and its word confidences (the matched tokens'
+    `confidence` fields), and gates each through the existing
+    `gate_span_confidence` (NFR-5.6) — reusing the same suppression path
+    every other trigger kind in this crate goes through, so a misheard
+    agentless clause is suppressed rather than silently dropped or
+    silently trusted.
+- `mod.rs` — added `pub mod unnamed_actor;` and re-exports
+  (`AgentlessClauseMatch`, `find_agentless_clauses`,
+  `gate_agentless_clauses`).
 
-## Why this satisfies "emits a TriggerEvent carrying kind, utterance_id,
-span, and the minimum token confidence across that span"
+Known, documented gaps in the local scan (left for a real parse):
+adverbs or negation between the be-verb and participle ("was not
+reviewed", "was quickly reviewed") break the required token adjacency and
+are not detected; a bare `-ed` adjective ("was interested") can be
+mistaken for a passive participle. Both are recall/precision trade-offs
+for running with zero NLP dependency, not a design considered final —
+see the module's own doc comment.
 
-`TriggerEvent` is a struct, not an enum, with exactly those four fields —
-matching architecture §3.5's own type signature rather than approximating
-it. `gate_span_confidence` cannot construct one without all four: `kind` is
-computed from the confidence-vs-threshold comparison, `utterance_id` is a
-required parameter with no default, `span` is always `Some(span)`, and
-`confidence` is the same minimum-of-word-confidences value in every case
-(fired or suppressed) — architecture §3.5's "for every event, fired or
-not". `gate.rs`'s existing suppression tests (`a_span_below_threshold_...`,
-`a_single_low_confidence_word_...`, `confidence_exactly_at_the_threshold_...`,
-`a_span_backed_by_no_words_...`, `a_zero_threshold_...`) were updated to the
-new struct shape and still pass, pinning the same boundary behaviour as
-before; the new
-`two_events_from_different_utterances_carry_their_own_utterance_id` test
-covers the field this feature actually adds.
+## Why this satisfies "an agentless clause emits a trigger event with its span"
+
+`gate_agentless_clauses("utt-1", &["the","report","was","reviewed"].., 0.6)`
+returns one `TriggerEvent` with `kind: TriggerKind::Fired`,
+`utterance_id: "utt-1"`, and `span: Some(11..23)` — the byte range of "was
+reviewed" in the space-joined reconstruction (test
+`gate_agentless_clauses_emits_a_fired_event_with_its_span`). A clause
+naming its agent ("...was reviewed by the team") or in active voice
+produces no event at all (`a_passive_clause_naming_its_agent_is_not_a_match`,
+`active_voice_is_not_a_match`, `gate_agentless_clauses_emits_nothing_for_an_active_voice_utterance`).
+A low-confidence agentless clause still emits an event, just
+`Suppressed` rather than dropped (`gate_agentless_clauses_suppresses_a_low_confidence_span`) —
+the same "every candidate becomes exactly one `TriggerEvent`" contract
+`gate_span_confidence` already upholds for lexicon-sourced spans.
 
 ## Wiring needed
 
-`core/crates/trigger-gate/src/lib.rs` is unchanged (`pub mod lexicon; pub
-mod parse;`). Not yet wired here, left for whoever integrates the full gate
-loop (feature 141) or a sibling `ratelimit/` submodule:
+Not wired into `lexicon::evaluation::evaluate_utterance` (FR-5.1's gate
+loop) — that function currently only calls `LexiconRouter::run` +
+`gate_span_confidence` per lexicon match; it has no call to
+`gate_agentless_clauses` yet, so unnamed-actor triggers do not yet reach a
+`GateDecision` in the live evaluation path. Left for whoever integrates the
+full deterministic tier (feature 141's loop, or a follow-up): each
+utterance's English-tagged token group (`lexicon::group_by_language`'s "en"
+group) would need to run through `gate_agentless_clauses` alongside the
+lexicon scan, and the two event vectors merged.
 
-- Extending `TriggerKind` (or adding a separate field) to carry *which*
-  trigger rule matched (unquantified adjective, unnamed actor, etc.) once
-  `lexicon::LexiconMatch` is threaded into this module — today `TriggerKind`
-  only distinguishes fired vs. suppressed, not trigger category.
-- Sourcing a real `utterance_id` at the call site — this feature only
-  proves the value is carried through untouched, not where it comes from
-  at runtime.
-- Turning a `lexicon::LexiconMatch` plus the `TaggedToken`s it was matched
-  from into the `(span, word_confidences)` `gate_span_confidence` takes —
-  `LexiconMatch` still carries a single `token_index`, not a byte range or
-  a confidence.
-- The actual `min_span_confidence` threshold value used at runtime, and
-  FR-5.7's rolling pass-rate self-regulation — both unchanged from the
-  prior feature's handoff notes, still out of scope here.
+`TriggerKind` still only distinguishes `Fired` vs `Suppressed(reason)`, not
+*which* trigger rule matched (unquantified adjective vs. unnamed actor,
+etc.) — the taxonomy gap `event.rs`'s doc comment already flagged before
+this feature landed, still unresolved. A caller cannot yet tell an
+agentless-clause `Fired` event apart from a lexicon-match `Fired` event
+except by which function produced it.
 
-Verified standalone: `cargo test -p trigger-gate` — 23/23 pass (16 prior
-`lexicon` tests untouched, 6 prior `parse` tests updated to the new shape,
-1 new `parse` test); `cargo clippy -p trigger-gate --all-targets -- -D
-warnings` — clean; `cargo fmt -p trigger-gate -- --check` — clean.
+Per-language dispatch is not addressed here either: `find_agentless_clauses`
+runs over whatever tokens it's handed with no language check of its own.
+Architecture §3.5 is explicit that this rule "does not transfer to pro-drop
+languages" (Chinese, Japanese, Korean) — calling it on non-English tokens
+was never validated and is expected to misfire. Restricting it to the "en"
+language group (via `lexicon::group_by_language`) is part of the wiring
+work above, not done in this feature.
+
+Verified standalone: `cargo test -p trigger-gate` — 72/72 pass (59 prior
+tests untouched, 13 new `unnamed_actor` tests); `cargo clippy -p
+trigger-gate --all-targets -- -D warnings` — clean; `rustfmt --check` on
+both changed files (`unnamed_actor.rs`, `mod.rs`) — clean. (Note:
+`cargo fmt -p trigger-gate -- --check` alone reports pre-existing diffs in
+`ratelimit/regulation.rs` and `ratelimit/storm.rs` — outside this feature's
+footprint and untouched by it.)
