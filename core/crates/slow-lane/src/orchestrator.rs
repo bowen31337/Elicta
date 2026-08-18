@@ -11,6 +11,19 @@
 
 use crate::ticker::TickEvent;
 
+/// The record that a specific in-flight tick got cancelled, emitted per
+/// §14.3's "cancel and replace; never overlap" rule. Naming which tick was
+/// cancelled — not just that *some* pass got interrupted — is what lets a
+/// caller log or alert on the overlap instead of only knowing a new pass
+/// started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TickCancelled {
+    /// The tick whose still-running pass got cancelled.
+    pub cancelled: TickEvent,
+    /// The tick that superseded it and starts fresh instead.
+    pub superseded_by: TickEvent,
+}
+
 /// What a caller should do with an incoming [`TickEvent`], given whether a
 /// pass from a previous tick is still running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +32,20 @@ pub enum TickDecision {
     Start(TickEvent),
     /// A previous tick's pass is still running. Per §14.3, the caller
     /// must cancel it and start fresh against this tick instead of
-    /// letting both run — never queue, never run concurrently.
-    CancelInFlightAndStart(TickEvent),
+    /// letting both run — never queue, never run concurrently. Carries a
+    /// [`TickCancelled`] naming which tick got cancelled, not just the one
+    /// replacing it.
+    CancelInFlightAndStart(TickCancelled),
+}
+
+impl TickDecision {
+    /// The tick to start a pass for, regardless of which variant this is.
+    pub fn tick(&self) -> TickEvent {
+        match self {
+            TickDecision::Start(event) => *event,
+            TickDecision::CancelInFlightAndStart(cancelled) => cancelled.superseded_by,
+        }
+    }
 }
 
 /// Tracks whether a slow-lane pass is currently in flight, so at most one
@@ -30,12 +55,12 @@ pub enum TickDecision {
 /// or cancelled) has actually stopped running.
 #[derive(Debug, Default)]
 pub struct SlowLaneOrchestrator {
-    in_flight: bool,
+    in_flight: Option<TickEvent>,
 }
 
 impl SlowLaneOrchestrator {
     pub fn new() -> Self {
-        Self { in_flight: false }
+        Self { in_flight: None }
     }
 
     /// Decides what to do with `event`. A slow-lane failure must never be
@@ -43,24 +68,25 @@ impl SlowLaneOrchestrator {
     /// returns an error for any input — the worst outcome it can produce
     /// is asking the caller to cancel and restart.
     pub fn on_tick(&mut self, event: TickEvent) -> TickDecision {
-        let decision = if self.in_flight {
-            TickDecision::CancelInFlightAndStart(event)
-        } else {
-            TickDecision::Start(event)
+        let decision = match self.in_flight {
+            Some(previous) => {
+                TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: previous, superseded_by: event })
+            }
+            None => TickDecision::Start(event),
         };
-        self.in_flight = true;
+        self.in_flight = Some(event);
         decision
     }
 
     /// Reports that whatever pass was in flight (started or cancelled) has
     /// now actually stopped running, so the next tick may start cleanly.
     pub fn mark_complete(&mut self) {
-        self.in_flight = false;
+        self.in_flight = None;
     }
 
     /// Whether a pass is currently believed to be in flight.
     pub fn is_in_flight(&self) -> bool {
-        self.in_flight
+        self.in_flight.is_some()
     }
 }
 
@@ -83,13 +109,53 @@ mod tests {
     #[test]
     fn a_second_tick_while_the_first_is_still_in_flight_cancels_and_replaces_rather_than_overlapping() {
         let mut orchestrator = SlowLaneOrchestrator::new();
-        orchestrator.on_tick(event(0));
+        let first = event(0);
+        orchestrator.on_tick(first);
 
         let second = event(1);
         assert_eq!(
             orchestrator.on_tick(second),
-            TickDecision::CancelInFlightAndStart(second),
+            TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: first, superseded_by: second }),
             "two ticks must never both be treated as started"
+        );
+    }
+
+    #[test]
+    fn a_superseded_tick_emits_a_cancellation_event_naming_which_tick_was_cancelled() {
+        let mut orchestrator = SlowLaneOrchestrator::new();
+        let first = event(0);
+        orchestrator.on_tick(first);
+
+        let second = event(1);
+        let decision = orchestrator.on_tick(second);
+
+        let TickDecision::CancelInFlightAndStart(cancelled) = decision else {
+            panic!("expected a cancel-and-replace decision, got {decision:?}");
+        };
+        assert_eq!(
+            cancelled.cancelled, first,
+            "the cancellation event must name the tick that got cancelled, not just the one replacing it"
+        );
+        assert_eq!(cancelled.superseded_by, second);
+    }
+
+    #[test]
+    fn a_chain_of_uncompleted_ticks_each_cancels_the_immediately_previous_one() {
+        let mut orchestrator = SlowLaneOrchestrator::new();
+        let first = event(0);
+        orchestrator.on_tick(first);
+
+        let second = event(1);
+        assert_eq!(
+            orchestrator.on_tick(second),
+            TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: first, superseded_by: second })
+        );
+
+        let third = event(2);
+        assert_eq!(
+            orchestrator.on_tick(third),
+            TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: second, superseded_by: third }),
+            "each cancellation must name the tick actually in flight, not the original first tick"
         );
     }
 

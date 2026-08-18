@@ -25,7 +25,7 @@ pub mod request;
 pub mod ticker;
 
 pub use model::{MeetingModel, ModelId};
-pub use orchestrator::{SlowLaneOrchestrator, TickDecision};
+pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
@@ -58,13 +58,7 @@ mod orchestrator_ticks_end_to_end {
             decisions.push(decision);
         }
 
-        let sequences: Vec<u64> = decisions
-            .iter()
-            .map(|decision| match decision {
-                TickDecision::Start(event) => event.sequence,
-                TickDecision::CancelInFlightAndStart(event) => event.sequence,
-            })
-            .collect();
+        let sequences: Vec<u64> = decisions.iter().map(|decision| decision.tick().sequence).collect();
         assert_eq!(sequences, vec![0, 1, 2, 3], "a pass fires for every tick, in order");
 
         assert!(
@@ -92,8 +86,8 @@ mod orchestrator_ticks_end_to_end {
         let second = ticks.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(
             orchestrator.on_tick(second),
-            TickDecision::CancelInFlightAndStart(second),
-            "the next tick still arrives on schedule and is flagged to cancel-and-replace"
+            TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: first, superseded_by: second }),
+            "the next tick still arrives on schedule and is flagged to cancel-and-replace, naming which tick it cancelled"
         );
 
         ticker.stop();
@@ -120,7 +114,10 @@ mod orchestrator_ticks_end_to_end {
 
         let second = ticks.recv_timeout(Duration::from_secs(1)).unwrap();
         let decision = orchestrator.on_tick(second);
-        assert_eq!(decision, TickDecision::CancelInFlightAndStart(second));
+        assert_eq!(
+            decision,
+            TickDecision::CancelInFlightAndStart(TickCancelled { cancelled: first, superseded_by: second })
+        );
 
         let config = SlowLaneRequestConfig::new(format, &meeting);
         assert_eq!(
