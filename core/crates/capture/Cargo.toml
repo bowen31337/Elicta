@@ -6,3 +6,11 @@ edition = "2021"
 [lib]
 name = "capture"
 path = "src/lib.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+] }
