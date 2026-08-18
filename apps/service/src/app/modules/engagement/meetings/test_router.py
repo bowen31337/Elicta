@@ -159,3 +159,78 @@ def test_domain_expertise_supports_more_than_one_area():
         "capex approval",
         "procurement",
     ]
+
+
+def test_each_invitee_on_a_calendar_invite_persists_as_an_attendee_row():
+    client, received = make_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/attendees/from-calendar-invite",
+        json={
+            "invitees": [
+                {"email": "jamie@example.com", "display_name": "Jamie Rivera"},
+                {"email": "alex@example.com", "display_name": "Alex Chen"},
+            ]
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert [a["display_name"] for a in body] == ["Jamie Rivera", "Alex Chen"]
+    assert all(a["meeting_id"] == "meeting-1" for a in body)
+    assert all(a["id"] for a in body)
+
+    assert [payload.display_name for _, payload in received] == [
+        "Jamie Rivera",
+        "Alex Chen",
+    ]
+
+
+def test_an_invitee_without_a_display_name_falls_back_to_their_email():
+    client, received = make_client()
+
+    client.post(
+        "/api/meetings/meeting-1/attendees/from-calendar-invite",
+        json={"invitees": [{"email": "jamie@example.com"}]},
+    )
+
+    assert received[0][1].display_name == "jamie@example.com"
+
+
+def test_an_invitee_carries_no_structured_profile_fields():
+    client, _ = make_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/attendees/from-calendar-invite",
+        json={"invitees": [{"email": "jamie@example.com"}]},
+    )
+
+    attendee = response.json()[0]
+    assert attendee["role"] is None
+    assert attendee["business_function"] is None
+    assert attendee["decision_authority"] is None
+    assert attendee["domain_expertise"] == []
+
+
+def test_a_calendar_invite_with_no_invitees_persists_no_attendees():
+    client, received = make_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/attendees/from-calendar-invite",
+        json={"invitees": []},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == []
+    assert received == []
+
+
+def test_an_invitee_without_an_email_is_rejected():
+    client, _ = make_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/attendees/from-calendar-invite",
+        json={"invitees": [{"display_name": "Jamie Rivera"}]},
+    )
+
+    assert response.status_code == 422

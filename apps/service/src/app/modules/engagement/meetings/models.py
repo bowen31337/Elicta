@@ -16,6 +16,10 @@ persisted into.
 
 `Attendee` mirrors the same table row in full, adding the identity
 (`id`, `meeting_id`) that only exists once the row has been persisted.
+
+`CalendarInvitee` and `CalendarInvite` model the calendar invite itself,
+where one is available for a meeting (FR-3.9): a list of invited people,
+each identified by `email` and an optional friendlier `display_name`.
 """
 
 from __future__ import annotations
@@ -45,3 +49,28 @@ class Attendee(BaseModel):
     business_function: str | None = None
     decision_authority: str | None = None
     domain_expertise: list[str] = Field(default_factory=list)
+
+
+class CalendarInvitee(BaseModel):
+    """One person invited via a calendar invite (PRD FR-3.9).
+
+    `email` is the only field a calendar invite reliably carries for every
+    invitee; `display_name` is the friendlier label most calendar systems
+    also include. Neither implies any of the structured profile fields
+    (`role`, `business_function`, `decision_authority`, `domain_expertise`)
+    from FR-3.10 -- those are unknowable from an invite and are filled in
+    later, so a pre-populated attendee starts with only a name.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=1)
+    display_name: str | None = Field(default=None, min_length=1)
+
+
+class CalendarInvite(BaseModel):
+    """A calendar invite's invitee list, used to pre-populate meeting attendees (PRD FR-3.9)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invitees: list[CalendarInvitee] = Field(default_factory=list)
