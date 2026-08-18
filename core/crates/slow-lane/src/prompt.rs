@@ -129,6 +129,58 @@ impl SlowLanePrompt {
     }
 }
 
+/// The four stable segments, pinned once for a meeting's entire lifetime
+/// (architecture §3.8, §14.3). A cache prefix only stays a prefix if the
+/// bytes ahead of the boundary never change tick to tick -- and the most
+/// common way that quietly breaks is a refactor that rebuilds those
+/// segments fresh on every tick from something that looks stable but
+/// isn't (a re-rendered digest, a timestamp threaded through "just this
+/// once"). [`MeetingPromptContext::pin`] stores the four segments exactly
+/// once; [`MeetingPromptContext::for_tick`] is the only way to get a
+/// [`SlowLanePrompt`] back out, and it takes nothing but the per-tick
+/// variable segment, so there is no parameter through which a tick
+/// sequence number, a fired-at instant, or a request identifier could
+/// reach a stable segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingPromptContext {
+    system_instruction: String,
+    engagement_digest: String,
+    template: String,
+    attendee_roster: String,
+}
+
+impl MeetingPromptContext {
+    /// Pins the four stable segments for the rest of the meeting.
+    pub fn pin(
+        system_instruction: impl Into<String>,
+        engagement_digest: impl Into<String>,
+        template: impl Into<String>,
+        attendee_roster: impl Into<String>,
+    ) -> Self {
+        Self {
+            system_instruction: system_instruction.into(),
+            engagement_digest: engagement_digest.into(),
+            template: template.into(),
+            attendee_roster: attendee_roster.into(),
+        }
+    }
+
+    /// Builds one tick's prompt from the pinned stable segments plus
+    /// `variable`, the only thing that may change tick to tick. Every
+    /// prompt built from the same context, no matter how many ticks apart,
+    /// carries byte-identical stable segments -- there is no other way to
+    /// construct a [`SlowLanePrompt`] from this type.
+    pub fn for_tick(&self, variable: impl Into<String>) -> SlowLanePrompt {
+        SlowLanePrompt::new(
+            self.system_instruction.clone(),
+            self.engagement_digest.clone(),
+            self.template.clone(),
+            self.attendee_roster.clone(),
+            variable,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +272,48 @@ mod tests {
             second_tick.blocks()[boundary + 1],
             "the variable segment is expected to actually change tick to tick"
         );
+    }
+
+    #[test]
+    fn a_pinned_context_builds_byte_identical_stable_blocks_across_many_ticks() {
+        let context = MeetingPromptContext::pin(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+        );
+
+        let first_tick = context.for_tick("utterance window 1-12");
+        let second_tick = context.for_tick("utterance window 13-24");
+        let fortieth_tick = context.for_tick("utterance window 480-491");
+
+        let boundary = first_tick.cache_boundary_index();
+        assert_eq!(first_tick.blocks()[..=boundary], second_tick.blocks()[..=boundary]);
+        assert_eq!(first_tick.blocks()[..=boundary], fortieth_tick.blocks()[..=boundary]);
+    }
+
+    #[test]
+    fn a_ticks_own_sequence_and_timestamp_can_only_ever_land_in_the_variable_segment() {
+        let context = MeetingPromptContext::pin(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+        );
+
+        // for_tick has no parameter that reaches a stable segment, so even
+        // a caller that deliberately tries to fold a tick identifier or a
+        // timestamp into the request can only ever put it in `variable`.
+        let prompt = context.for_tick("tick 7, fired_at 2026-08-19T00:00:07Z, request-id 7f3a");
+        let boundary = prompt.cache_boundary_index();
+
+        for block in &prompt.blocks()[..=boundary] {
+            assert!(
+                !block.text().contains("tick 7") && !block.text().contains("request-id"),
+                "a per-tick identifier must never reach a stable, cached segment"
+            );
+        }
+        assert!(prompt.blocks()[boundary + 1].text().contains("request-id"));
     }
 
     #[test]

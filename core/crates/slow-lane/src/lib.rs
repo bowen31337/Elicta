@@ -27,7 +27,7 @@ pub mod ticker;
 
 pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
-pub use prompt::{PromptBlock, SlowLanePrompt};
+pub use prompt::{MeetingPromptContext, PromptBlock, SlowLanePrompt};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
@@ -167,6 +167,44 @@ mod orchestrator_ticks_end_to_end {
             "a mid-meeting model switch discards the cached prefix entirely; every tick must emit the same identifier"
         );
         assert_eq!(models_sent[0].as_str(), "claude-opus-5");
+
+        ticker.stop();
+    }
+
+    /// This crate's version of §14.3's own CI assertion, end to end: pins
+    /// the four stable prompt segments once via [`MeetingPromptContext`],
+    /// builds each tick's prompt from real [`TickEvent`]s the ticker
+    /// fires -- folding the tick's own sequence and fired-at instant into
+    /// the *variable* segment, the only place [`MeetingPromptContext::for_tick`]
+    /// lets a caller put them -- and feeds every tick through a
+    /// [`ReplayRun`] alongside the usage the Messages API would report.
+    /// Because no timestamp or request identifier can reach a stable
+    /// segment, the prefix stays byte-identical tick over tick and the
+    /// replay run's own assertion -- a non-zero cache read on the second
+    /// tick -- passes without a panic.
+    #[test]
+    fn a_meetings_pinned_prompt_context_keeps_the_prefix_byte_identical_so_the_second_ticks_cache_read_is_nonzero() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let context = MeetingPromptContext::pin(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+        );
+        let mut run = ReplayRun::new();
+
+        let usages = [
+            telemetry::CacheTickUsage { input_tokens: 200, cache_creation_input_tokens: 1800, cache_read_input_tokens: 0 },
+            telemetry::CacheTickUsage { input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 1800 },
+        ];
+
+        for usage in usages {
+            let event = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+            let variable = format!("tick {} fired at {:?}", event.sequence, event.fired_at);
+            let prompt = context.for_tick(variable);
+            run.run_tick(event, &prompt, usage);
+        }
 
         ticker.stop();
     }
