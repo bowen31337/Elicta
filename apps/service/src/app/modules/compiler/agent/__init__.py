@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from app.modules.compiler.agent.batch_submission import (
+    SaveEngagementBmadAnalystBatchSubmission,
+    SubmitBmadAnalystBatch,
+    submit_bmad_analyst_batch,
+)
 from app.modules.compiler.agent.bmad_analyst import (
     MAX_CANDIDATES,
     MIN_CANDIDATES,
@@ -13,10 +18,12 @@ from app.modules.compiler.agent.bmad_analyst import (
 from app.modules.compiler.agent.models import (
     AnalystBankCandidate,
     AnalystContextPack,
+    BmadAnalystBatchSubmissionStatus,
     BmadAnalystPassOutput,
     BmadAnalystPassStatus,
     BmadCandidateDraft,
     ContextPackDocument,
+    EngagementBmadAnalystBatchSubmission,
     EngagementBmadAnalystPass,
 )
 
@@ -25,13 +32,18 @@ __all__ = [
     "MIN_CANDIDATES",
     "AnalystBankCandidate",
     "AnalystContextPack",
+    "BmadAnalystBatchSubmissionStatus",
     "BmadAnalystPassOutput",
     "BmadAnalystPassStatus",
     "BmadCandidateDraft",
     "ContextPackDocument",
+    "EngagementBmadAnalystBatchSubmission",
     "EngagementBmadAnalystPass",
     "RunBmadAnalystPass",
+    "SaveEngagementBmadAnalystBatchSubmission",
     "SaveEngagementBmadAnalystPass",
+    "SubmitBmadAnalystBatch",
     "build_bank_candidates",
     "run_bmad_analyst_pass",
+    "submit_bmad_analyst_batch",
 ]

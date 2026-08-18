@@ -134,3 +134,43 @@ class EngagementBmadAnalystPass(BaseModel):
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
+
+
+class BmadAnalystBatchSubmissionStatus(str, Enum):
+    """Terminal state of one attempt to submit the Analyst pass to the Batch API (architecture §14.4).
+
+    Distinct from `BmadAnalystPassStatus`, which describes a finished pass's
+    outcome once its candidates are in hand -- `SUBMITTED` here only means
+    the Batch API accepted the workload and handed back a job id; the pass
+    itself has no latency constraint (architecture §3.10) and runs to
+    completion later, out of this record's view. `FAILED` covers a
+    submission attempt that never got a job id at all.
+    """
+
+    SUBMITTED = "submitted"
+    FAILED = "failed"
+
+
+class EngagementBmadAnalystBatchSubmission(BaseModel):
+    """Durable record of one attempt to submit an engagement's Analyst pass to the Batch API (architecture §14.4).
+
+    Persisted whether the submission attempt succeeded or failed, mirroring
+    `EngagementBmadAnalystPass`: an engagement with no submission record at
+    all would be indistinguishable from one that simply hasn't been
+    submitted yet, so `status` and `error` make a failed attempt visible
+    instead of silent. `batch_job_id` is the vendor-assigned id a later stage
+    keys results against by `custom_id`, never by position (architecture
+    §14.4) -- it is `None` on a `FAILED` attempt, since no job was ever
+    accepted. `requested_at`/`completed_at` bound the submission call itself,
+    not the batch run it kicks off -- the Batch API returns a job id
+    synchronously; only collecting that job's results is the long-running
+    part, and that collection is a separate concern from this one.
+    """
+
+    engagement_id: str = Field(min_length=1)
+    status: BmadAnalystBatchSubmissionStatus
+    engine: str
+    batch_job_id: str | None
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
