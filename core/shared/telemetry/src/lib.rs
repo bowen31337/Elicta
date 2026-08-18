@@ -15,8 +15,11 @@
 //!
 //! [`TotalLatencyTracker`] is the NFR-1 metric itself: the full
 //! speech-end-to-nudge-visible span, recorded as its own end-to-end
-//! histogram and compared against the 2.0s p50 target rather than left for
-//! callers to infer from the per-stage breakdown.
+//! histogram and compared against the 2.0s p50 target *and* the 3.5s p95
+//! target rather than left for callers to infer from the per-stage
+//! breakdown. The two targets are reported separately, because a different
+//! knob governs each: mean-silence tuning drives p50, while the forced
+//! turn-end ceiling drives p95.
 
 mod cache_health;
 mod histogram;
@@ -27,5 +30,5 @@ pub use cache_health::{CacheHealthSnapshot, CachePrefixMonitor, CacheTickUsage};
 pub use histogram::{LatencyHistogram, Snapshot};
 pub use registry::{StageTimerGuard, StageTimers};
 pub use total_latency::{
-    TotalLatencyGuard, TotalLatencySnapshot, TotalLatencyTracker, P50_TARGET_MS,
+    TotalLatencyGuard, TotalLatencySnapshot, TotalLatencyTracker, P50_TARGET_MS, P95_TARGET_MS,
 };
