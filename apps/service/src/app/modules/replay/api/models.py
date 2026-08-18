@@ -26,6 +26,18 @@ class SuggestionRatingResponse(BaseModel):
     rating_id: str
 
 
+class StartReplayRunRequest(BaseModel):
+    """A request to start a replay run against an already-uploaded recording."""
+
+    recording_id: str = Field(min_length=1)
+
+
+class StartReplayRunResponse(BaseModel):
+    """Acknowledgement that a replay run has been queued."""
+
+    run_id: str = Field(min_length=1)
+
+
 class ReplayRunStatus(str, Enum):
     """Lifecycle state of a replay run."""
 

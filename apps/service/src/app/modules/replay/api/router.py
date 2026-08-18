@@ -1,4 +1,4 @@
-"""HTTP surface for replay run ratings and status.
+"""HTTP surface for starting replay runs and their ratings and status.
 
 Each `build_*_router` takes a callback rather than importing a persistence
 model directly, since that layer does not live in this package
@@ -13,15 +13,41 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 
-from app.modules.replay.api.errors import ReplayRunNotFoundError
+from app.modules.replay.api.errors import (
+    RecordingNotFoundError,
+    ReplayRunNotFoundError,
+)
 from app.modules.replay.api.models import (
     ReplayRunStatusResponse,
+    StartReplayRunRequest,
+    StartReplayRunResponse,
     SuggestionRatingRequest,
     SuggestionRatingResponse,
 )
 
 SaveSuggestionRating = Callable[[str, SuggestionRatingRequest], Awaitable[str]]
 GetReplayRunStatus = Callable[[str], Awaitable[ReplayRunStatusResponse]]
+StartReplayRun = Callable[[StartReplayRunRequest], Awaitable[str]]
+
+
+def build_replay_start_router(start_run: StartReplayRun) -> APIRouter:
+    router = APIRouter(prefix="/api/replay/runs", tags=["replay-runs"])
+
+    @router.post(
+        "",
+        response_model=StartReplayRunResponse,
+        status_code=202,
+    )
+    async def start_replay_run(
+        payload: StartReplayRunRequest,
+    ) -> StartReplayRunResponse:
+        try:
+            run_id = await start_run(payload)
+        except RecordingNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return StartReplayRunResponse(run_id=run_id)
+
+    return router
 
 
 def build_replay_ratings_router(save_rating: SaveSuggestionRating) -> APIRouter:
