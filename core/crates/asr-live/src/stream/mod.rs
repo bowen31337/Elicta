@@ -14,14 +14,21 @@
 //! decision that sets how soon the engine emits its *first* partial,
 //! rather than how a *finalised* utterance is corrected after the fact.
 //!
+//! And [`EndpointingThresholds`] (PRD FR-2.2): the silence threshold that
+//! drives endpointing itself, exposed as configuration with a 600ms
+//! default and tuned independently per [`CaptureMode`] rather than shared
+//! across every capture path.
+//!
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
+mod endpointing_threshold;
 mod event;
 mod fake;
 mod first_partial_delay;
 mod reevaluate;
 
+pub use endpointing_threshold::{CaptureMode, EndpointingThresholds, DEFAULT_ENDPOINTING_THRESHOLD};
 pub use event::StreamEvent;
 pub use fake::PrematureEndpointFakeBackend;
 pub use first_partial_delay::{

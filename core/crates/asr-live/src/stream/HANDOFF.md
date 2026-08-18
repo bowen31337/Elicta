@@ -59,6 +59,19 @@ required for it specifically.
   and `FirstPartialDelay::new` validates any override stays inside that
   range rather than silently sending the engine a value it doesn't
   support.
+- `endpointing_threshold.rs` — `EndpointingThresholds` (PRD FR-2.2): the
+  endpointing silence threshold as configuration, defaulting to 600ms
+  (`DEFAULT_ENDPOINTING_THRESHOLD`) and tunable independently per
+  `CaptureMode` (`ManagedParticipant`, `Loopback`, `LineIn`,
+  `AcousticFallback` — PRD §10's priority-ordered capture options).
+  `for_mode`/`set` is the whole public surface: reading a mode that was
+  never tuned returns the default, and `set` persists an override for that
+  mode only, leaving every other mode's value alone. `CaptureMode` is
+  defined locally rather than imported from `capture::device::kind`'s
+  `AudioSourceKind` (same four paths, different names) to keep this module
+  dependency-free, the same reasoning `fake.rs` and `first_partial_delay.rs`
+  already follow for this directory — see "Deliberately out of scope"
+  below for what unifying the two would take.
 
 ## Suggested integration point
 
@@ -79,6 +92,13 @@ value as that connection's `interruption_delay` when opening the stream.
 parameter — extending it is `backend/`'s call, not this module's, since
 `transcription_backend.rs` lives outside this directory.
 
+Whoever knows a session's `capture::device::kind::AudioSourceKind` should
+map it to this module's `CaptureMode` and call
+`EndpointingThresholds::for_mode` for the value to request as that vendor
+connection's silence-timer / turn-silence parameter (architecture §14.2's
+table — which vendor field that is depends on the engine, same as the
+`FirstPartialDelay` wiring above).
+
 ## Deliberately out of scope here
 
 - Threading `FirstPartialDelay` through `TranscriptionBackend::start_stream`
@@ -91,6 +111,23 @@ parameter — extending it is `backend/`'s call, not this module's, since
   constructor parameter rather than hard-coding one number, with
   `DEFAULT_CONTINUATION_WINDOW` as a documented starting point, not a
   claim that it's been empirically tuned.
+- Validating a configured `EndpointingThresholds` value against a
+  per-vendor range, the way `FirstPartialDelay::new` validates
+  `interruption_delay`: architecture §14.2 is explicit that Deepgram's
+  silence timer and AssemblyAI's confidence/punctuation turn models "do
+  not expose comparable knobs," so there is no single valid range to check
+  against yet — that split is T2's bake-off, not FR-2.2's configuration
+  surface.
+- Splitting the single FR-2.2 threshold into AssemblyAI's separate
+  `min_turn_silence` (p50) / `max_turn_silence` (p95) knobs is explicitly
+  T2 scope (architecture §14.2: "FR-2.2's single threshold
+  under-specifies both"); `EndpointingThresholds` models the one threshold
+  FR-2.2 actually asks for, per capture mode, not per vendor knob.
+- Unifying this module's `CaptureMode` with `capture::device::kind::AudioSourceKind`
+  into one shared type: that would need a shared crate dependency, which
+  is a `Cargo.toml`/`lib.rs` change outside this directory (see the
+  wiring note above) — until then the two enums are kept in sync by
+  naming convention, not by the compiler.
 - Merging retained audio segments (`AudioSegmentRef`) is not attempted —
   `merge` keeps the earlier utterance's `audio_ref` as-is rather than
   concatenating two opaque storage keys into a segment that doesn't exist.
