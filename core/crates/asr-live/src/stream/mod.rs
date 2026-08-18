@@ -30,12 +30,20 @@
 //! speech onset it carries in `started_at`, not just that the field itself
 //! is populated.
 //!
+//! And [`FinalUtteranceEvent`]/[`on_endpoint`] (PRD FR-2.3): the event this
+//! crate actually emits when an endpoint fires, carrying exactly `id`,
+//! `stream_id`, `speaker`, `start_ms`, `end_ms`, and `tokens` — converting
+//! `FinalUtterance`'s internal `Duration`s into the millisecond integers
+//! FR-2.3 names, and leaving `text`/`audio_ref` behind as this crate's own
+//! bookkeeping.
+//!
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
 mod endpointing_threshold;
 mod event;
 mod fake;
+mod final_utterance_event;
 mod first_partial_delay;
 mod interim_latency;
 mod reevaluate;
@@ -43,6 +51,7 @@ mod turn_silence;
 
 pub use endpointing_threshold::{CaptureMode, EndpointingThresholds, DEFAULT_ENDPOINTING_THRESHOLD};
 pub use event::StreamEvent;
+pub use final_utterance_event::{on_endpoint, FinalUtteranceEvent};
 pub use fake::PrematureEndpointFakeBackend;
 pub use first_partial_delay::{
     FirstPartialDelay, FirstPartialDelayOutOfRange, FIRST_PARTIAL_DELAY, MAX_FIRST_PARTIAL_DELAY,

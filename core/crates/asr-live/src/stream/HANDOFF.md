@@ -110,6 +110,20 @@ required for it specifically.
   later revision — reached a consumer in time, independent of what delay
   was requested.
 
+- `final_utterance_event.rs` — `FinalUtteranceEvent`/`on_endpoint` (PRD
+  FR-2.3). `backend::FinalUtterance` already carries every field FR-2.3
+  names (`id`, `stream_id`, `speaker`, `start`, `end`, `tokens` —
+  `backend/event.rs`), plus two more (`text`, `audio_ref`) that are this
+  crate's own bookkeeping rather than part of the FR-2.3 contract.
+  `FinalUtteranceEvent` is the outbound shape with exactly FR-2.3's fields,
+  `start`/`end` converted from `Duration` into `start_ms`/`end_ms`
+  millisecond integers. `on_endpoint(&StreamEvent) -> Option<FinalUtteranceEvent>`
+  is what a caller should call on every `StreamEvent` it observes: `None`
+  for `Interim`, `Some` for both `Final` and `Correction` — a `Correction`
+  is still an utterance closing on endpoint, just one continuation
+  re-evaluation has already merged, and it carries the same FR-2.3 fields
+  a `Final` would.
+
 ## Suggested integration point
 
 Whatever currently drains `TranscriptionBackend::poll_events()` and hands
@@ -154,6 +168,14 @@ elsewhere in this crate. An `InterimLatencyExceeded` is a monitoring signal
 (FR-2.1 compliance), not a reason to drop or delay the event itself — a
 late interim is still the best hypothesis available and should still reach
 the consumer.
+
+Whoever wires the endpoint this crate ultimately emits over (a websocket to
+a client, an internal queue, whatever transport FR-2.3's "on endpoint"
+phrasing refers to) should call `on_endpoint` on every
+`StreamEvent` coming out of `UtteranceReevaluator::apply` and send whatever
+it returns `Some` for — skipping `None` (an `Interim`) — rather than
+serialising `FinalUtterance` itself, so `text` and `audio_ref` never
+accidentally leak across that boundary.
 
 ## Deliberately out of scope here
 
@@ -227,8 +249,15 @@ the consumer.
   `started_at`, `observed_at`, `over_by`) for a caller to decide, the same
   reasoning `TuningReport` reports p50/p95 without prescribing what a
   caller does with a missed target.
+- Actually serialising `FinalUtteranceEvent` onto a wire format (JSON,
+  protobuf, whatever a real websocket/queue transport needs) is not
+  attempted: no dependency in this crate provides that today (see
+  `backend/HANDOFF.md`, "every crate in this workspace is std-only so
+  far"), and picking a serialisation format is a decision for whoever
+  actually owns the endpoint FR-2.3 emits over, not this module. This
+  module's job ends at producing the right plain Rust value.
 
-Verified with `cargo test` and `cargo clippy` (72 passing tests, no
+Verified with `cargo test` and `cargo clippy` (82 passing tests, no
 warnings) in a scratch crate mirroring this module tree plus the existing
 `backend` module, since the crate-level `Cargo.toml`/`lib.rs` in this
 worktree only registers `backend` and `tokens` as of this writing. That
