@@ -18,11 +18,13 @@
 //! separate features that consume the events and decisions this crate
 //! produces — this crate owns the tick and the overlap invariant only.
 
+pub mod model;
 pub mod orchestrator;
 pub mod replay;
 pub mod request;
 pub mod ticker;
 
+pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickDecision};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
@@ -109,6 +111,7 @@ mod orchestrator_ticks_end_to_end {
         let (ticker, ticks) = SlowLaneTicker::spawn(interval);
         let mut orchestrator = SlowLaneOrchestrator::new();
         let format = ResponseSchema::new("slow_lane_pass", "{\"type\":\"object\"}");
+        let meeting = MeetingModel::pin(ModelId::new("claude-opus-5"));
 
         let first = ticks.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(orchestrator.on_tick(first), TickDecision::Start(first));
@@ -119,12 +122,52 @@ mod orchestrator_ticks_end_to_end {
         let decision = orchestrator.on_tick(second);
         assert_eq!(decision, TickDecision::CancelInFlightAndStart(second));
 
-        let config = SlowLaneRequestConfig::new(format);
+        let config = SlowLaneRequestConfig::new(format, &meeting);
         assert_eq!(
             config.effort(),
             Effort::Low,
             "a cancelled-and-replaced tick must still send an effort setting, not skip it"
         );
+
+        ticker.stop();
+    }
+
+    /// The other half of §14.3 this crate is responsible for: "the meeting
+    /// emits one model identifier throughout." Runs several ticks —
+    /// including one that hits the cancel-and-replace branch, the same
+    /// path a rate-limit-driven retry would take — and asserts every
+    /// request built along the way names the meeting's one pinned model,
+    /// never a different one.
+    #[test]
+    fn a_meetings_pinned_model_identifier_never_changes_across_ticks_even_after_a_cancel_and_replace() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let mut orchestrator = SlowLaneOrchestrator::new();
+        let meeting = MeetingModel::pin(ModelId::new("claude-opus-5"));
+
+        let mut models_sent = Vec::new();
+        for tick_index in 0..4 {
+            let event = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+            let decision = orchestrator.on_tick(event);
+            if !matches!(decision, TickDecision::CancelInFlightAndStart(_)) {
+                orchestrator.mark_complete();
+            }
+            // Tick 1 is deliberately left in flight to force tick 2 into
+            // the cancel-and-replace branch, mirroring a hung pass.
+            if tick_index == 2 {
+                orchestrator.mark_complete();
+            }
+
+            let format = ResponseSchema::new("slow_lane_pass", "{\"type\":\"object\"}");
+            let config = SlowLaneRequestConfig::new(format, &meeting);
+            models_sent.push(config.model().clone());
+        }
+
+        assert!(
+            models_sent.iter().all(|model| model == &models_sent[0]),
+            "a mid-meeting model switch discards the cached prefix entirely; every tick must emit the same identifier"
+        );
+        assert_eq!(models_sent[0].as_str(), "claude-opus-5");
 
         ticker.stop();
     }
