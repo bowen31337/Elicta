@@ -24,6 +24,18 @@ name: Replay Ranking Precision Gate
 # reasoning parity.yml gives for reusing
 # assert_identical_suggestion_logs: the CI gate and the metrics endpoint's
 # own definition of M1 can't drift apart if they're the same code.
+#
+# A second job, embarrassment-gate, enforces M2 (PRD §5): a release
+# candidate ships only when embarrassing_count is exactly zero for every
+# language, not just "low". M2 has no HTTP endpoint (metrics/schemas.py
+# scopes that endpoint to M1 only), so this job scores the same golden
+# corpus directly against app.modules.replay.metrics.publication's
+# MetricsPublication/LanguageFigure.clears_m2_gate — the same production
+# gate definition the rating panel uses — instead of reimplementing the
+# zero-tolerance rule here. Each golden entry also carries a `stub` (the
+# glanceable suggestion text SuggestionLogEntry.stub records in the real
+# suggestion log), so a failing gate can name exactly which suggestion an
+# embarrassment verdict was recorded against, not just which language.
 
 on:
   push:
@@ -136,3 +148,112 @@ jobs:
           print(f"precision@surfaced clears the {THRESHOLD:.0%} threshold for every language")
           PY
           uv run python "$RUNNER_TEMP/replay_gate.py"
+
+  embarrassment-gate:
+    name: embarrassment count == 0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install service dependencies
+        working-directory: apps/service
+        run: uv sync --locked
+
+      - name: Score golden replay corpus against the M2 gate
+        working-directory: apps/service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/embarrassment_gate.py" <<'PY'
+          import os
+          import sys
+
+          from app.modules.replay.metrics.models import RatedSuggestion
+          from app.modules.replay.metrics.publication import MetricsPublication
+
+          # Golden regression corpus for the M2 (embarrassment) gate (see this
+          # workflow's header comment for what this represents and how it's
+          # meant to be maintained). `stub` is the glanceable suggestion text
+          # a human re-reviewing the golden run would recognize — the same
+          # role SuggestionLogEntry.stub plays in the real suggestion log —
+          # so a failing gate can name exactly which suggestion it fired on.
+          GOLDEN_SUGGESTIONS = {
+              "en": [
+                  {"stub": "Confirm renewal date before the call", "useful": True, "embarrassing": False},
+                  {"stub": "Ask about their team's headcount growth", "useful": True, "embarrassing": False},
+                  {"stub": "Summarize last quarter's support tickets", "useful": True, "embarrassing": False},
+                  {"stub": "Reference the champion's LinkedIn title", "useful": True, "embarrassing": False},
+                  {"stub": "Note the open invoice balance", "useful": True, "embarrassing": False},
+                  {"stub": "Flag the upcoming contract auto-renewal", "useful": True, "embarrassing": False},
+                  {"stub": "Mention the competitor mentioned in email", "useful": True, "embarrassing": False},
+                  {"stub": "Ask about the migration timeline", "useful": True, "embarrassing": False},
+                  {"stub": "Recap the last escalation's resolution", "useful": True, "embarrassing": False},
+                  {"stub": "Suggest a generic icebreaker question", "useful": False, "embarrassing": False},
+              ],
+              "vi": [
+                  {"stub": "Confirm renewal date before the call", "useful": True, "embarrassing": False},
+                  {"stub": "Ask about their team's headcount growth", "useful": True, "embarrassing": False},
+                  {"stub": "Summarize last quarter's support tickets", "useful": True, "embarrassing": False},
+                  {"stub": "Reference the champion's job title", "useful": True, "embarrassing": False},
+                  {"stub": "Note the open invoice balance", "useful": True, "embarrassing": False},
+                  {"stub": "Flag the upcoming contract auto-renewal", "useful": True, "embarrassing": False},
+                  {"stub": "Ask about the migration timeline", "useful": True, "embarrassing": False},
+                  {"stub": "Recap the last escalation's resolution", "useful": True, "embarrassing": False},
+                  {"stub": "Suggest a generic icebreaker question", "useful": False, "embarrassing": False},
+                  {"stub": "Suggest an off-topic small-talk prompt", "useful": False, "embarrassing": False},
+              ],
+          }
+
+          publication = MetricsPublication()
+          for language, suggestions in GOLDEN_SUGGESTIONS.items():
+              ratings = [
+                  RatedSuggestion(
+                      language=language,
+                      useful=suggestion["useful"],
+                      embarrassing=suggestion["embarrassing"],
+                  )
+                  for suggestion in suggestions
+              ]
+              publication.publish(language, ratings)
+
+          failing_languages = {
+              figure.language for figure in publication.languages_failing_m2_gate()
+          }
+
+          summary = ["# Replay embarrassment gate (M2)", "", "Gate: embarrassing_count == 0 (PRD §5)", ""]
+          for figure in sorted(publication.figures(), key=lambda entry: entry.language):
+              clears = figure.clears_m2_gate
+              summary.append(
+                  f"- `{figure.language}`: embarrassing_count = {figure.embarrassing_count} "
+                  f"({figure.embarrassing_count}/{figure.surfaced_count} surfaced) — "
+                  f"{'pass' if clears else 'FAIL'}"
+              )
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write("\n".join(summary) + "\n")
+          else:
+              print("\n".join(summary))
+
+          if failing_languages:
+              for language, suggestions in GOLDEN_SUGGESTIONS.items():
+                  if language not in failing_languages:
+                      continue
+                  for suggestion in suggestions:
+                      if suggestion["embarrassing"]:
+                          print(
+                              "::error title=non-zero embarrassment count (M2)::"
+                              f"language '{language}' suggestion \"{suggestion['stub']}\" "
+                              "was rated embarrassing; M2 requires exactly zero embarrassing "
+                              "suggestions (PRD §5)"
+                          )
+              sys.exit(1)
+
+          print("embarrassment count is zero for every language")
+          PY
+          uv run python "$RUNNER_TEMP/embarrassment_gate.py"
