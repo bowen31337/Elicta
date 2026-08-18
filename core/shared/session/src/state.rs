@@ -6,8 +6,10 @@
 //! from anything in this file.
 
 /// One utterance in the append-only log (architecture §3.4: "An append-only
-/// log of utterances plus derived views").
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// log of utterances plus derived views"). Serialisable because it is also
+/// the record [`crate::store::FileSessionStore`] writes to disk (PRD
+/// NFR-4.3).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Utterance {
     pub id: String,
     pub speaker: String,
@@ -59,6 +61,17 @@ pub struct SessionState {
 }
 
 impl SessionState {
+    /// Rebuilds state from utterances a [`crate::store::SessionStore`]
+    /// already had durably on disk before this process started (PRD
+    /// NFR-4.3: "restart resumes"). Sequence numbers are re-derived from
+    /// position, which lands them exactly where [`SessionState::apply`]
+    /// originally assigned them, since a store always replays utterances in
+    /// the order they were durably appended.
+    pub fn restore(utterances: Vec<Utterance>) -> Self {
+        let mutations_applied = utterances.len() as u64;
+        Self { utterances, mutations_applied }
+    }
+
     /// Every utterance appended so far, oldest first.
     pub fn utterances(&self) -> &[Utterance] {
         &self.utterances
@@ -129,6 +142,13 @@ mod tests {
         assert_eq!(second.sequence(), 1);
         assert_eq!(third.sequence(), 2);
         assert_eq!(state.mutations_applied(), 3);
+    }
+
+    #[test]
+    fn restoring_from_prior_utterances_continues_the_sequence_where_they_left_off() {
+        let restored = SessionState::restore(vec![utterance("utt-0"), utterance("utt-1")]);
+        assert_eq!(restored.utterances(), &[utterance("utt-0"), utterance("utt-1")]);
+        assert_eq!(restored.mutations_applied(), 2);
     }
 
     #[test]
