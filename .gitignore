@@ -40,8 +40,10 @@ htmlcov/
 .ruff_cache/
 coverage/
 # `coverage/` above targets test-coverage report output, but also matches
-# the desktop panel's coverage feature directory by name -- un-ignore it.
+# the desktop panel's coverage feature directory and the coverage-tracker
+# crate by name -- un-ignore them.
 !apps/desktop/src/features/panel/coverage/
+!core/crates/coverage/
 *.log
 *.bak
 *.tmp
