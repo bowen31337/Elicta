@@ -1,5 +1,89 @@
 # lexicon module — handoff
 
+## Update: interim-hypothesis holding (PRD FR-5.9)
+
+Implements "System runs the lexicon scan against interim hypotheses,
+holding the matched candidate until the endpoint commits or discards it"
+(PRD FR-5.9). This is feature 145's own HANDOFF calling out "interim-
+hypothesis holding (feature 153)" as explicitly out of scope — this change
+is that feature.
+
+`core/crates/trigger-gate/src/lib.rs` already had `pub mod lexicon;` from
+feature 145; no scaffold changes needed.
+
+### What's here
+
+- `hold.rs` — `HeldCandidate`, `Resolution` (`Committed`/`Discarded`),
+  `DiscardReason`, and `CandidateHold`. `CandidateHold::hold_interim` scans
+  an interim hypothesis's tokens through an existing `LexiconRouter` (the
+  same isolation-respecting `run` feature 145 built) and holds every
+  resulting match under that stream's id — it does not act on the match or
+  drop it. `CandidateHold::resolve_endpoint` is what a caller invokes once
+  that stream's endpoint fires: it drains every candidate held for the
+  stream and re-runs the router over the endpoint's own final token vector.
+  A held candidate whose token index/language/term still matches in the
+  final vector resolves to `Resolution::Committed`; one that doesn't (the
+  vendor revised or dropped the matched word before the utterance closed)
+  resolves to `Resolution::Discarded`.
+- `mod.rs` — re-exports `CandidateHold`, `DiscardReason`, `HeldCandidate`,
+  `Resolution` alongside the existing feature-145 exports.
+
+### Why this satisfies "an interim match emits a held candidate the
+endpoint commits or discards"
+
+`hold_interim` never returns anything that has already been committed or
+discarded — a `HeldCandidate` is deliberately the only outcome an interim
+match can produce, mirroring how `asr-live::stream::frozen_match`'s
+`CommittedCandidate` (PRD FR-2.4) is the only outcome a match against
+*frozen* text can produce. The difference is the discard path: FR-2.4's
+frozen case needs none, because frozen text is guaranteed immutable — an
+interim hypothesis's text carries no such guarantee, so `resolve_endpoint`
+is the only path that turns a `HeldCandidate` into either a `Committed` or
+`Discarded` `Resolution`, and it can only be reached by the same stream's
+endpoint supplying its own final tokens.
+`endpoint_confirming_the_same_text_commits_the_held_candidate` and
+`endpoint_revising_the_matched_text_away_discards_the_held_candidate` prove
+both halves directly.
+`resolving_drains_the_stream_so_a_later_endpoint_starts_clean` proves a
+resolved candidate cannot be resolved twice, and
+`resolving_one_streams_endpoint_does_not_touch_another_streams_held_candidates`
+proves resolution is scoped to the endpointing stream, not global.
+
+### What's not done here
+
+- Reconciling a match whose token index shifts between interim and final
+  vectors (e.g. a vendor correction that inserts/removes an earlier word,
+  shifting every later index) is not attempted: `resolve_endpoint` compares
+  token index, language, and term exactly, so a shifted-but-otherwise-
+  identical match discards rather than commits. Every existing test
+  constructs interim/final token vectors with stable indices for the
+  matched word, the same simplifying assumption `asr-live::stream::
+  reevaluate`'s `HANDOFF.md` documents for its own text-merge logic.
+- Deduplicating repeat matches across successive growing interims of the
+  same utterance (a vendor re-emitting a longer hypothesis that still
+  contains an already-held term) is not attempted: `hold_interim` holds
+  whatever the router returns on every call, so the same term appearing in
+  two interims of one utterance produces two `HeldCandidate`s, which
+  `resolve_endpoint` will independently commit or discard. Whoever wires
+  this against a real vendor connection should decide whether the caller
+  suppresses duplicate nudges downstream (the same open question feature
+  145's frozen-match `HANDOFF.md` leaves for "a stream's later endpoint
+  once a `CommittedCandidate` has already fired for it").
+- Wiring this into `parse::gate::gate_span_confidence` or an actual
+  vendor/endpoint event loop — this module only proves the hold/resolve
+  contract over `TaggedToken` vectors, the same "not yet wired" scope
+  feature 145's own HANDOFF left for the overall gate evaluation loop
+  (feature 141).
+
+Verified with `cargo test -p trigger-gate` (51/51 pass — 45 prior tests
+untouched, 6 new `hold` tests), `cargo clippy -p trigger-gate --all-targets
+-- -D warnings` (clean), and `cargo fmt -p trigger-gate -- --check` (clean
+for every file this change touches; `ratelimit/regulation.rs` and
+`ratelimit/storm.rs` already had pre-existing formatting diffs unrelated to
+this change, left alone since they're outside this directory).
+
+## Original: per-language isolation (feature 145)
+
 Implements feature 145: "System runs each language lexicon only over the
 tokens tagged as that language" (PRD section 8.2a). This is the first
 feature to land in `core/crates/trigger-gate` in this worktree — the crate
