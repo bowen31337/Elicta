@@ -93,6 +93,22 @@ required for it specifically.
   `max_turn_silence` is never adjusted by tuning — it is the ceiling this
   run measures p95 against, not a parameter this run searches over; picking
   it is the vendor bake-off itself (see "Deliberately out of scope").
+- `interim_latency.rs` — `check_interim_latency` (PRD FR-2.1). Every
+  `InterimHypothesis` already carries `stream_id`, `text`, and `started_at`
+  (`backend::event`); FR-2.1 additionally requires that the event actually
+  reach a consumer within 400ms of the speech onset `started_at` names
+  (`INTERIM_LATENCY_BUDGET`). `check_interim_latency(interim, observed_at)`
+  is that check: `observed_at` is a stream-relative timestamp the caller
+  supplies (this module has no clock of its own, the same reasoning
+  `turn_silence.rs`'s `TuningReport::from_samples` takes a batch by value
+  rather than instrumenting a live one), and the function returns the
+  observed latency on success or an `InterimLatencyExceeded` — carrying
+  `stream_id`, `started_at`, `observed_at`, and `over_by` — when the budget
+  is missed. Distinct from `FirstPartialDelay` (FR-5.9): that module
+  decides how soon this system *asks the engine* for a first partial; this
+  one measures whether whatever partial actually arrived — first or a
+  later revision — reached a consumer in time, independent of what delay
+  was requested.
 
 ## Suggested integration point
 
@@ -128,6 +144,16 @@ that distribution at runtime, independently of this crate) and feed them to
 `min_turn_silence` via `suggest_next_min_turn_silence` while holding
 `max_turn_silence` at whichever documented ceiling the engine variant in
 use provides.
+
+Whoever wires the integration point above (`UtteranceReevaluator` draining
+`poll_events()`) should call `check_interim_latency` on every
+`StreamEvent::Interim` as it is observed, using that call site's own
+stream-relative clock for `observed_at` — the same clock `InterimHypothesis
+.started_at` and `FinalUtterance.start`/`.end` are already measured against
+elsewhere in this crate. An `InterimLatencyExceeded` is a monitoring signal
+(FR-2.1 compliance), not a reason to drop or delay the event itself — a
+late interim is still the best hypothesis available and should still reach
+the consumer.
 
 ## Deliberately out of scope here
 
@@ -186,8 +212,23 @@ use provides.
   for `interruption_delay`: architecture §14.2 documents defaults for this
   knob, not a vendor-published valid range, so `TUNING_STEP` is a starting
   increment for the bake-off to refine, not a validated bound.
+- Calling `check_interim_latency` from `UtteranceReevaluator::apply` itself
+  is not attempted: `apply` has no notion of wall-clock/"now" today (its
+  whole surface is `TranscriptionEvent -> StreamEvent`, no side clock
+  parameter), and threading one through would change that method's
+  signature for every existing caller, not just interims. Exposing the
+  check as a free function callers can invoke themselves — the same shape
+  `merge` already uses — avoids that, at the cost of nothing enforcing the
+  check is actually called at every integration point (see "Suggested
+  integration point" above).
+- Deciding what happens on an `InterimLatencyExceeded` beyond returning it
+  (alerting, metrics, telemetry export) is not attempted here — this
+  module reports the violation with enough detail (`stream_id`,
+  `started_at`, `observed_at`, `over_by`) for a caller to decide, the same
+  reasoning `TuningReport` reports p50/p95 without prescribing what a
+  caller does with a missed target.
 
-Verified with `cargo test` and `cargo clippy` (67 passing tests, no
+Verified with `cargo test` and `cargo clippy` (72 passing tests, no
 warnings) in a scratch crate mirroring this module tree plus the existing
 `backend` module, since the crate-level `Cargo.toml`/`lib.rs` in this
 worktree only registers `backend` and `tokens` as of this writing. That

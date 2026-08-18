@@ -25,6 +25,11 @@
 //! under-specifies, plus the tuning run that reports p50 and p95 as
 //! independent measurements rather than one blended verdict.
 //!
+//! And [`check_interim_latency`] (PRD FR-2.1): the check that an
+//! `InterimHypothesis` actually reached a consumer within 400ms of the
+//! speech onset it carries in `started_at`, not just that the field itself
+//! is populated.
+//!
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
@@ -32,6 +37,7 @@ mod endpointing_threshold;
 mod event;
 mod fake;
 mod first_partial_delay;
+mod interim_latency;
 mod reevaluate;
 mod turn_silence;
 
@@ -42,6 +48,7 @@ pub use first_partial_delay::{
     FirstPartialDelay, FirstPartialDelayOutOfRange, FIRST_PARTIAL_DELAY, MAX_FIRST_PARTIAL_DELAY,
     MIN_FIRST_PARTIAL_DELAY,
 };
+pub use interim_latency::{check_interim_latency, InterimLatencyExceeded, INTERIM_LATENCY_BUDGET};
 pub use reevaluate::{UtteranceReevaluator, DEFAULT_CONTINUATION_WINDOW};
 pub use turn_silence::{
     LatencyMeasurement, TuningReport, TurnSilenceParameters, DEFAULT_MAX_TURN_SILENCE,
