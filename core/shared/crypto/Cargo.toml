@@ -17,3 +17,9 @@ security-framework = "2"
 security-framework-sys = "2"
 core-foundation = "0.9"
 core-foundation-sys = "0.8"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+] }
