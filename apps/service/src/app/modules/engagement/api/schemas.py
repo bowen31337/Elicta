@@ -41,3 +41,36 @@ class EngagementUpdateResponse(BaseModel):
     purpose: str | None = None
     scope_boundary: str | None = None
     target_requirements_template: str | None = None
+
+
+class EngagementRecord(BaseModel):
+    """The engagement's own context fields, as persisted (PRD FR-3.1, FR-3.5).
+
+    Carries exactly the fields `EngagementCreateRequest` and
+    `EngagementUpdateRequest` capture — nothing document- or vocabulary-related
+    — since those live in sibling packages outside this feature's footprint.
+    `GetEngagement` returns this so `compute_context_completeness_score`
+    (`completeness.py`) has every field it needs without importing a
+    persistence model.
+    """
+
+    client_organisation: str
+    sector: str
+    commercial_context: str
+    purpose: str | None = None
+    scope_boundary: str | None = None
+    target_requirements_template: str | None = None
+
+
+class EngagementDetailResponse(BaseModel):
+    """A single engagement with its document count and context-completeness score."""
+
+    engagement_id: str
+    client_organisation: str
+    sector: str
+    commercial_context: str
+    purpose: str | None = None
+    scope_boundary: str | None = None
+    target_requirements_template: str | None = None
+    document_count: int
+    context_completeness_score: float

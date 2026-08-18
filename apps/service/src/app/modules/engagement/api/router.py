@@ -11,15 +11,27 @@ and mounts the returned router.
 the PATCH route turns into a 404 rather than a 200 with a fabricated body —
 mirroring the not-found handling every other router in this codebase uses
 (`debrief/artifacts/router.py`).
+
+`get_engagement` and `get_document_count` are optional injected dependencies,
+mirroring `get_alignment` in `asr-record/router.py`: a caller that hasn't
+wired engagement or document persistence yet can still mount this router for
+create/update alone. When both are supplied, `GET /{engagement_id}` combines
+the engagement's own context fields with the document count from the sibling
+`documents` package and the context-completeness score `completeness.py`
+computes from those fields — a single read spanning what would otherwise be
+two separate lookups.
 """
 
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 
+from app.modules.engagement.api.completeness import compute_context_completeness_score
 from app.modules.engagement.api.schemas import (
     EngagementCreateRequest,
     EngagementCreateResponse,
+    EngagementDetailResponse,
+    EngagementRecord,
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
@@ -28,11 +40,15 @@ CreateEngagement = Callable[[EngagementCreateRequest], Awaitable[str]]
 UpdateEngagement = Callable[
     [str, EngagementUpdateRequest], Awaitable[EngagementUpdateResponse | None]
 ]
+GetEngagement = Callable[[str], Awaitable[EngagementRecord | None]]
+GetDocumentCount = Callable[[str], Awaitable[int]]
 
 
 def build_engagement_router(
     create_engagement: CreateEngagement,
     update_engagement: UpdateEngagement,
+    get_engagement: GetEngagement | None = None,
+    get_document_count: GetDocumentCount | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/engagements", tags=["engagements"])
 
@@ -60,5 +76,33 @@ def build_engagement_router(
         if updated is None:
             raise HTTPException(status_code=404, detail="engagement not found")
         return updated
+
+    if get_engagement is not None:
+
+        @router.get(
+            "/{engagement_id}",
+            response_model=EngagementDetailResponse,
+            status_code=200,
+        )
+        async def get_engagement_endpoint(engagement_id: str) -> EngagementDetailResponse:
+            engagement = await get_engagement(engagement_id)
+            if engagement is None:
+                raise HTTPException(status_code=404, detail="engagement not found")
+            document_count = (
+                await get_document_count(engagement_id)
+                if get_document_count is not None
+                else 0
+            )
+            return EngagementDetailResponse(
+                engagement_id=engagement_id,
+                client_organisation=engagement.client_organisation,
+                sector=engagement.sector,
+                commercial_context=engagement.commercial_context,
+                purpose=engagement.purpose,
+                scope_boundary=engagement.scope_boundary,
+                target_requirements_template=engagement.target_requirements_template,
+                document_count=document_count,
+                context_completeness_score=compute_context_completeness_score(engagement),
+            )
 
     return router

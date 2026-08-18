@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.modules.engagement.api.router import build_engagement_router
 from app.modules.engagement.api.schemas import (
     EngagementCreateRequest,
+    EngagementRecord,
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
@@ -12,6 +13,8 @@ from app.modules.engagement.api.schemas import (
 def make_client(
     engagement_id: str = "e1",
     existing_engagements: set[str] | None = None,
+    engagements: dict[str, EngagementRecord] | None = None,
+    document_counts: dict[str, int] | None = None,
 ) -> tuple[
     TestClient,
     list[EngagementCreateRequest],
@@ -20,6 +23,8 @@ def make_client(
     received_creates: list[EngagementCreateRequest] = []
     received_updates: list[tuple[str, EngagementUpdateRequest]] = []
     known_ids = existing_engagements if existing_engagements is not None else {engagement_id}
+    records = engagements if engagements is not None else {}
+    counts = document_counts if document_counts is not None else {}
 
     async def create_engagement(payload: EngagementCreateRequest) -> str:
         received_creates.append(payload)
@@ -38,8 +43,21 @@ def make_client(
             target_requirements_template=payload.target_requirements_template,
         )
 
+    async def get_engagement(target_id: str) -> EngagementRecord | None:
+        return records.get(target_id)
+
+    async def get_document_count(target_id: str) -> int:
+        return counts.get(target_id, 0)
+
     app = FastAPI()
-    app.include_router(build_engagement_router(create_engagement, update_engagement))
+    app.include_router(
+        build_engagement_router(
+            create_engagement,
+            update_engagement,
+            get_engagement=get_engagement,
+            get_document_count=get_document_count,
+        )
+    )
     return TestClient(app), received_creates, received_updates
 
 
@@ -187,3 +205,59 @@ def test_updating_with_a_blank_field_is_rejected():
     )
 
     assert response.status_code == 422
+
+
+def test_getting_an_engagement_returns_200_with_document_count_and_score():
+    client, _, _ = make_client(
+        engagements={
+            "eng-123": EngagementRecord(
+                client_organisation="Acme Corp",
+                sector="Manufacturing",
+                commercial_context="Multi-year cost reduction programme",
+                purpose="Reduce manufacturing cost base",
+            )
+        },
+        document_counts={"eng-123": 4},
+    )
+
+    response = client.get("/api/engagements/eng-123")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "engagement_id": "eng-123",
+        "client_organisation": "Acme Corp",
+        "sector": "Manufacturing",
+        "commercial_context": "Multi-year cost reduction programme",
+        "purpose": "Reduce manufacturing cost base",
+        "scope_boundary": None,
+        "target_requirements_template": None,
+        "document_count": 4,
+        "context_completeness_score": 4 / 6,
+    }
+
+
+def test_getting_an_unknown_engagement_returns_404():
+    client, _, _ = make_client(engagements={})
+
+    response = client.get("/api/engagements/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_getting_an_engagement_with_no_documents_returns_zero_count():
+    client, _, _ = make_client(
+        engagements={
+            "eng-123": EngagementRecord(
+                client_organisation="Acme Corp",
+                sector="Manufacturing",
+                commercial_context="Multi-year cost reduction programme",
+            )
+        },
+    )
+
+    response = client.get("/api/engagements/eng-123")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_count"] == 0
+    assert body["context_completeness_score"] == 0.5
