@@ -1,0 +1,8 @@
+[package]
+name = "slow-lane"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "slow_lane"
+path = "src/lib.rs"
