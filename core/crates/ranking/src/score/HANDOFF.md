@@ -1,6 +1,6 @@
-# score module — handoff (authority_match, trigger_match, coverage_urgency, priority, candidate_score)
+# score module — handoff (authority_match, trigger_match, coverage_urgency, priority, candidate_score, weights_config)
 
-Implements two features layered in this module over time:
+Implements three features layered in this module over time:
 
 1. PRD FR-4.7 ("weight candidate ranking by attendee decision authority and
    domain -- surface questions the people actually in the room can
@@ -15,6 +15,14 @@ Implements two features layered in this module over time:
    per-candidate total. This feature's scope is explicitly the four terms
    its own description names -- `recency_penalty` and `asked_penalty` are
    left out on purpose, not overlooked; see "What's not done here."
+3. "System reads ranking weights from configuration rather than from
+   hardcoded constants, so the replay harness can tune them. Done when the
+   run log emits the active weight set" -- `weights_config.rs`, which adds
+   `weights_from_env` (reads all four `w₁..w₄` weights from environment
+   variables, falling back to `DEFAULT_WEIGHTS` field-by-field when unset
+   or unparsable) and `active_weights_log_line` (formats the active weight
+   set into the line whichever binary entry point owns the run log should
+   write, per this feature's acceptance criterion).
 
 `core/crates/ranking` did not exist anywhere else in this repo before this
 feature (no `Cargo.toml`, no `src/lib.rs`). This feature's own footprint is
@@ -40,12 +48,13 @@ changed.
 
 None -- `src/lib.rs` already wires `pub mod score;`. `mod.rs` now declares
 `pub mod candidate_score;`, `pub mod coverage_urgency;`, `pub mod priority;`,
-and `pub mod trigger_match;` alongside the existing `pub mod
-authority_match;`. `authority_match`, `trigger_match`, `coverage_urgency`,
-and `priority` are each independent of one another and of `candidate_score`
--- `candidate_score` is the only module here with an intra-crate
-dependency, importing each term function from its sibling module to sum
-them.
+`pub mod trigger_match;`, and `pub mod weights_config;` alongside the
+existing `pub mod authority_match;`. `authority_match`, `trigger_match`,
+`coverage_urgency`, and `priority` are each independent of one another and
+of `candidate_score` -- `candidate_score` is the only module here with an
+intra-crate dependency besides `weights_config`, importing each term
+function from its sibling module to sum them. `weights_config` depends on
+`candidate_score` for `ScoreWeights`/`DEFAULT_WEIGHTS` only.
 
 ## What's here
 
@@ -103,9 +112,22 @@ them.
   downstream concern this function doesn't decide, mirroring how
   `retrieval::prerequisite`'s filter and `retrieval::cosine`'s ranker stay
   decoupled from each other in the sibling `bank` crate.
+- `weights_config.rs` -- `weights_from_env() -> ScoreWeights` (reads
+  `RANKING_WEIGHT_TRIGGER_MATCH`, `RANKING_WEIGHT_COVERAGE_URGENCY`,
+  `RANKING_WEIGHT_AUTHORITY_MATCH`, and `RANKING_WEIGHT_PRIORITY` from
+  process environment, falling back to `DEFAULT_WEIGHTS`'s matching field
+  when a variable is unset, unparsable, or non-finite),
+  `active_weights_log_line(weights: &ScoreWeights) -> String` (formats the
+  active weight set into one run-log line), and the four `*_WEIGHT_ENV`
+  name constants. Environment variables are the config channel because the
+  replay harness's `SubprocessCoreEngine` (`apps/service/.../replay/
+  harness/subprocess_engine.py`) invokes the shared core over a fixed
+  `--seed`-plus-stdin contract -- setting environment on the subprocess
+  before launch tunes weights per run without touching that contract.
 - `mod.rs` -- declares `pub mod authority_match;`, `pub mod
   candidate_score;`, `pub mod coverage_urgency;`, `pub mod priority;`, `pub
-  mod trigger_match;`, and re-exports every public item from each.
+  mod trigger_match;`, and `pub mod weights_config;`, and re-exports every
+  public item from each.
 
 Tests added: 6 for `authority_match.rs` (a fully-matched candidate scores
 higher than an unmatched one -- the FR-4.7 acceptance criterion itself; a
@@ -130,7 +152,16 @@ against a hand-computed expected value), a maximally-matched candidate
 outscores a maximally-unmatched one even at an extreme priority gap, and
 zeroing one term's weight changes the total by exactly that term's own
 contribution and no more -- proving the four terms are summed independently
-rather than interacting.
+rather than interacting. 9 for `weights_config.rs`: `resolve_weight` falls
+back to default when unset, when unparsable, and for non-finite (`NaN`/
+`inf`) overrides, and reads a valid override; `weights_from_env` reads
+every configured override, falls back to `DEFAULT_WEIGHTS` entirely when
+nothing is set, and ignores an unparsable override on one field while still
+reading a valid override on another; the run-log line names every active
+weight; and a configured weight set reaches the formatted run-log line
+end-to-end (the literal "run log emits the active weight set" acceptance
+criterion). The env-mutating tests share a `Mutex` so they don't interleave
+across `cargo test`'s threads within this binary.
 
 ## What's not done here
 
@@ -171,3 +202,12 @@ rather than interacting.
   to whichever crate/module owns that orchestration; no code in this crate
   wires `store`/`retrieval` to `score` yet, the same gap
   `retrieval/HANDOFF.md` already flags on its side of the boundary.
+- Actually writing `active_weights_log_line`'s output to a run log file or
+  stdout -- there is no binary entry point anywhere in this crate yet (only
+  `src/lib.rs`), and architecture §3.7 requires this crate's functions to
+  stay "pure function, no I/O beyond the local index." `weights_config.rs`
+  provides the environment-reading loader and the formatted line; whichever
+  binary is eventually built to run the shared core against replay input
+  (`apps/service/.../replay/harness/subprocess_engine.py`'s counterpart)
+  owns calling `weights_from_env()` once at startup and writing
+  `active_weights_log_line`'s result into its run log.

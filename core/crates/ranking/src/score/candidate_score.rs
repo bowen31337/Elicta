@@ -38,7 +38,10 @@ pub struct ScoreWeights {
 /// Uncalibrated placeholder weights, one per term's own
 /// `DEFAULT_*_WEIGHT` constant -- see each term module for why weight
 /// calibration is out of scope until the replay harness (architecture §9)
-/// exists.
+/// exists. A caller assembling *live* weights should read
+/// [`super::weights_config::weights_from_env`] instead of this constant --
+/// that function reads each field from environment configuration, falling
+/// back to this constant's matching field only when no override is set.
 pub const DEFAULT_WEIGHTS: ScoreWeights = ScoreWeights {
     trigger_match: super::trigger_match::DEFAULT_TRIGGER_MATCH_WEIGHT,
     coverage_urgency: super::coverage_urgency::DEFAULT_COVERAGE_URGENCY_WEIGHT,
