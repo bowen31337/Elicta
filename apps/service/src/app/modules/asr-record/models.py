@@ -126,6 +126,34 @@ class SessionAlignment(BaseModel):
     computed_at: datetime
 
 
+class RecordPathSourceReference(BaseModel):
+    """Pins one artifact claim, citation, or coverage decision to a record-path span (PRD FR-2.7).
+
+    Every requirements claim, citation, and coverage decision the debrief
+    artifacts (PRD FR-8) produce must trace back to this batch,
+    highest-accuracy transcript rather than the live path's interim, lower-
+    accuracy output — `cite_record_path_span` in `citation.py` is the only
+    way to construct one, and it refuses to build a reference for any span
+    the persisted record-path transcript doesn't actually cover. That makes
+    it structurally impossible for an artifact to carry a reference sourced
+    from the live transcript: this type only ever comes from a `COMPLETE`
+    `RecordPathTranscript`, never from the incremental live-path output.
+
+    `quoted_text` is the record-path wording for the referenced span, kept
+    alongside the pointer rather than requiring a reader to re-fetch and
+    re-slice the transcript to see what was actually cited. `transcript_completed_at`
+    records when the record-path batch run that grounds this reference
+    finished, so a reviewer can tell which batch run backs a given claim.
+    """
+
+    session_id: str
+    engine: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    quoted_text: str
+    transcript_completed_at: datetime
+
+
 class RecordPathTranscriptionJob(BaseModel):
     """Handle for one meeting's record-path transcription job (PRD FR-2.5).
 
