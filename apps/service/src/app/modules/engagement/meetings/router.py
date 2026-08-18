@@ -22,6 +22,17 @@ this package. `update_meeting` returns `None` when the meeting does not
 exist, which the PATCH route turns into a 404 rather than a 200 with a
 fabricated body -- mirroring `app/modules/engagement/api/router.py`'s
 handling of an unknown engagement.
+
+`build_meeting_router` also takes `create_meeting` and
+`get_engagement_context` callbacks for the meeting-creation route (FR-3.7):
+`get_engagement_context` looks up the engagement a new meeting belongs to
+and returns `None` when it does not exist, which the POST route turns into
+a 404 before ever calling `create_meeting` -- a meeting cannot be created
+for an engagement that isn't there to inherit context from. When the
+engagement is found, its context is attached to the 201 response as
+`engagement_context` so the caller can confirm what was inherited rather
+than re-enter it (FR-3.7), and only then is `create_meeting` called to
+persist the new row.
 """
 
 from __future__ import annotations
@@ -34,6 +45,9 @@ from .models import (
     Attendee,
     AttendeeCreateRequest,
     CalendarInvite,
+    EngagementContext,
+    MeetingCreateRequest,
+    MeetingCreateResponse,
     MeetingUpdateRequest,
     MeetingUpdateResponse,
 )
@@ -42,6 +56,8 @@ AddAttendee = Callable[[str, AttendeeCreateRequest], Awaitable[Attendee]]
 UpdateMeeting = Callable[
     [str, MeetingUpdateRequest], Awaitable[MeetingUpdateResponse | None]
 ]
+CreateMeeting = Callable[[MeetingCreateRequest], Awaitable[str]]
+GetEngagementContext = Callable[[str], Awaitable[EngagementContext | None]]
 
 
 def build_meeting_attendees_router(add_attendee: AddAttendee) -> APIRouter:
@@ -76,8 +92,33 @@ def build_meeting_attendees_router(add_attendee: AddAttendee) -> APIRouter:
     return router
 
 
-def build_meeting_router(update_meeting: UpdateMeeting) -> APIRouter:
+def build_meeting_router(
+    create_meeting: CreateMeeting,
+    get_engagement_context: GetEngagementContext,
+    update_meeting: UpdateMeeting,
+) -> APIRouter:
     router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+
+    @router.post(
+        "",
+        response_model=MeetingCreateResponse,
+        status_code=201,
+    )
+    async def create_meeting_endpoint(
+        payload: MeetingCreateRequest,
+    ) -> MeetingCreateResponse:
+        engagement_context = await get_engagement_context(payload.engagement_id)
+        if engagement_context is None:
+            raise HTTPException(status_code=404, detail="engagement not found")
+        meeting_id = await create_meeting(payload)
+        return MeetingCreateResponse(
+            meeting_id=meeting_id,
+            engagement_id=payload.engagement_id,
+            state="planned",
+            capture_mode=payload.capture_mode,
+            scheduled_at=payload.scheduled_at,
+            engagement_context=engagement_context,
+        )
 
     @router.patch(
         "/{meeting_id}",

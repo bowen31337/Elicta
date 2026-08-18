@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 from app.modules.engagement.meetings.models import (
     Attendee,
     AttendeeCreateRequest,
+    EngagementContext,
+    MeetingCreateRequest,
     MeetingUpdateRequest,
     MeetingUpdateResponse,
 )
@@ -251,6 +253,12 @@ def make_update_client(
     received_updates: list[tuple[str, MeetingUpdateRequest]] = []
     known_ids = existing_meetings if existing_meetings is not None else {meeting_id}
 
+    async def create_meeting(payload: MeetingCreateRequest) -> str:
+        raise AssertionError("create_meeting should not be called in these tests")
+
+    async def get_engagement_context(engagement_id: str) -> EngagementContext | None:
+        raise AssertionError("get_engagement_context should not be called in these tests")
+
     async def update_meeting(
         target_id: str, payload: MeetingUpdateRequest
     ) -> MeetingUpdateResponse | None:
@@ -264,8 +272,185 @@ def make_update_client(
         )
 
     app = FastAPI()
-    app.include_router(build_meeting_router(update_meeting))
+    app.include_router(
+        build_meeting_router(create_meeting, get_engagement_context, update_meeting)
+    )
     return TestClient(app), received_updates
+
+
+def make_create_client(
+    engagement_contexts: dict[str, EngagementContext] | None = None,
+) -> tuple[TestClient, list[MeetingCreateRequest]]:
+    received_creates: list[MeetingCreateRequest] = []
+    contexts = engagement_contexts if engagement_contexts is not None else {}
+
+    async def create_meeting(payload: MeetingCreateRequest) -> str:
+        received_creates.append(payload)
+        return "meeting-1"
+
+    async def get_engagement_context(engagement_id: str) -> EngagementContext | None:
+        return contexts.get(engagement_id)
+
+    async def update_meeting(
+        target_id: str, payload: MeetingUpdateRequest
+    ) -> MeetingUpdateResponse | None:
+        raise AssertionError("update_meeting should not be called in these tests")
+
+    app = FastAPI()
+    app.include_router(
+        build_meeting_router(create_meeting, get_engagement_context, update_meeting)
+    )
+    return TestClient(app), received_creates
+
+
+def make_engagement_context(**overrides: object) -> EngagementContext:
+    fields = {
+        "client_organisation": "Acme Corp",
+        "sector": "Manufacturing",
+        "commercial_context": "Cost-out program, phase 2",
+        "purpose": "Reduce warehouse cycle time",
+        "scope_boundary": "Excludes procurement systems",
+        "target_requirements_template": "standard-discovery",
+    }
+    fields.update(overrides)
+    return EngagementContext(**fields)
+
+
+def test_creating_a_meeting_returns_201_with_the_inherited_engagement_context():
+    client, _ = make_create_client(
+        engagement_contexts={"engagement-1": make_engagement_context()}
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={"engagement_id": "engagement-1", "capture_mode": "live"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["meeting_id"] == "meeting-1"
+    assert body["engagement_id"] == "engagement-1"
+    assert body["state"] == "planned"
+    assert body["capture_mode"] == "live"
+    assert body["scheduled_at"] is None
+    assert body["engagement_context"] == {
+        "client_organisation": "Acme Corp",
+        "sector": "Manufacturing",
+        "commercial_context": "Cost-out program, phase 2",
+        "purpose": "Reduce warehouse cycle time",
+        "scope_boundary": "Excludes procurement systems",
+        "target_requirements_template": "standard-discovery",
+    }
+
+
+def test_creating_a_meeting_does_not_require_re_entering_engagement_context():
+    client, received = make_create_client(
+        engagement_contexts={"engagement-1": make_engagement_context()}
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={"engagement_id": "engagement-1", "capture_mode": "live"},
+    )
+
+    assert response.status_code == 201
+    assert len(received) == 1
+    assert received[0].engagement_id == "engagement-1"
+    assert received[0].capture_mode == "live"
+
+
+def test_creating_a_meeting_passes_through_an_optional_scheduled_at():
+    client, received = make_create_client(
+        engagement_contexts={"engagement-1": make_engagement_context()}
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={
+            "engagement_id": "engagement-1",
+            "capture_mode": "live",
+            "scheduled_at": "2026-09-01T14:00:00Z",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["scheduled_at"] == "2026-09-01T14:00:00Z"
+    assert received[0].scheduled_at is not None
+
+
+def test_creating_a_meeting_for_an_unknown_engagement_returns_404():
+    client, received = make_create_client(engagement_contexts={})
+
+    response = client.post(
+        "/api/meetings",
+        json={"engagement_id": "does-not-exist", "capture_mode": "live"},
+    )
+
+    assert response.status_code == 404
+    assert received == []
+
+
+def test_creating_a_meeting_without_a_capture_mode_is_rejected():
+    client, _ = make_create_client(
+        engagement_contexts={"engagement-1": make_engagement_context()}
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={"engagement_id": "engagement-1"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_creating_a_meeting_without_an_engagement_id_is_rejected():
+    client, _ = make_create_client()
+
+    response = client.post(
+        "/api/meetings",
+        json={"capture_mode": "live"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_creating_a_meeting_with_an_unknown_field_is_rejected():
+    client, _ = make_create_client(
+        engagement_contexts={"engagement-1": make_engagement_context()}
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={
+            "engagement_id": "engagement-1",
+            "capture_mode": "live",
+            "client_organisation": "Sneaking this back in",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_creating_a_meeting_with_no_engagement_context_fields_missing_still_confirms_them():
+    client, _ = make_create_client(
+        engagement_contexts={
+            "engagement-1": make_engagement_context(
+                purpose=None, scope_boundary=None, target_requirements_template=None
+            )
+        }
+    )
+
+    response = client.post(
+        "/api/meetings",
+        json={"engagement_id": "engagement-1", "capture_mode": "live"},
+    )
+
+    assert response.status_code == 201
+    context = response.json()["engagement_context"]
+    assert context["purpose"] is None
+    assert context["scope_boundary"] is None
+    assert context["target_requirements_template"] is None
+    assert context["client_organisation"] == "Acme Corp"
 
 
 def test_updating_a_meeting_returns_200_with_updated_fields():
