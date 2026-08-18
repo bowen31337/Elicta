@@ -80,6 +80,7 @@ mod tests {
             vec![TokenEvent::partial(
                 self.participant_id.clone(),
                 format!("{}samples", samples.len()),
+                0.9,
             )]
         }
 
@@ -163,6 +164,22 @@ mod tests {
         assert_eq!(bob_events.len(), 1);
         assert_eq!(bob_events[0].participant_id, "bob");
         assert_ne!(alice_events[0].text, bob_events[0].text);
+    }
+
+    #[test]
+    fn every_dispatched_token_carries_a_confidence_value() {
+        let (factory, _opened, _closed) = MockFactory::new();
+        let mut streams = ParticipantTokenStreams::new(factory);
+
+        let events = streams.dispatch(&"alice".to_string(), &[0; 3]);
+
+        assert!(!events.is_empty());
+        for event in &events {
+            assert!(
+                event.confidence > 0.0,
+                "every token dispatched through the registry must carry a populated confidence"
+            );
+        }
     }
 
     #[test]

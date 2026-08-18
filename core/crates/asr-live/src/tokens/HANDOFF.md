@@ -1,27 +1,32 @@
 # tokens module — handoff
 
 Implements PRD FR-2.10 (one websocket per participant stream when managed
-capture provides separated audio). Self-contained under this directory;
-deliberately does not touch `core/crates/asr-live/Cargo.toml` or
-`core/crates/asr-live/src/lib.rs`, since those are owned by the crate
-scaffold and (per this task's declared footprint) shared with sibling
-plugin submodules of the asr-live crate.
+capture provides separated audio) and, on `TokenEvent`, PRD FR-2.3 /
+NFR-5.6 (every token — partial or final — carries a populated
+`confidence: f32`, since that's what the input-span gate reads to decide
+whether a span is trustworthy). Self-contained under this directory.
 
-Neither the crate manifest nor `src/lib.rs` existed yet in this worktree at
-the time this module was written, so this mirrors the pattern already used
-by `core/crates/language/src/numerals` for the same situation.
+The crate scaffold (`Cargo.toml`, `src/lib.rs`) now exists and already
+wires this module in via `pub mod tokens;` — the wiring note that used to
+live here is done.
 
-## Wiring needed (one line, in the shared `lib.rs`)
+## Confidence on every token (PRD FR-2.3, NFR-5.6)
 
-Whoever owns `core/crates/asr-live/src/lib.rs` needs to add:
+`TokenEvent::confidence` has no default: both `TokenEvent::partial` and
+`TokenEvent::finalized` require a caller to pass one, so a `TokenSocket`
+implementation cannot construct a token that skips it. This mirrors the
+same requirement already enforced independently on `backend::Token` (see
+`core/crates/asr-live/src/backend/event.rs`) for the finalized-utterance
+side of this crate — that module's `Token` is a different type for a
+different event shape (batched tokens inside a `FinalUtterance`), not this
+module's live per-word `TokenEvent`, so both need their own populated
+confidence field rather than one being derivable from the other.
 
-```rust
-pub mod tokens;
-```
-
-This module has no dependency on any other asr-live submodule and no
-external crate dependencies (pure `std`), so no `Cargo.toml` changes are
-required for it specifically.
+A real `TokenSocket` translating vendor wire frames into `TokenEvent`s must
+carry the vendor's own per-word confidence score through rather than
+inventing a placeholder value — see `registry.rs`'s
+`every_dispatched_token_carries_a_confidence_value` test for the shape that
+invariant takes at the `ParticipantTokenStreams::dispatch` boundary.
 
 ## What's here
 
@@ -53,6 +58,6 @@ when a participant leaves. `active_stream_count()` / `is_active()` are
 exposed for whatever surfaces "N participants transcribing" in
 telemetry/UI.
 
-Verified with `cargo test` (4 passing tests) in a scratch crate mirroring
-this module tree, since `core/crates/asr-live/Cargo.toml` /
-`src/lib.rs` don't exist in this worktree yet.
+Verified with `cargo test` and `cargo clippy --all-targets` against the
+real crate (11 passing tests across the whole `asr-live` crate, no
+warnings).
