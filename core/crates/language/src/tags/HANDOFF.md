@@ -9,10 +9,13 @@ inseparably" — see the dedicated section below), FR-2.16 ("System learns
 per-attendee language preference across an engagement, biasing that stream
 on later meetings" — see the dedicated section below), FR-2.12 ("System
 uses an end-to-end multilingual engine so no language decision gates the
-audio path" — see the dedicated section below), and FR-2.11 ("System never
+audio path" — see the dedicated section below), FR-2.11 ("System never
 presents a pre-meeting language selection, because language detection is
-automatic" — see the dedicated section below). Self-contained under
-this directory, same as `numerals/` and `segment/`.
+automatic" — see the dedicated section below), and FR-2.14 ("System
+constrains detection to the engagement expected-language set, ranking
+outside languages lower without excluding them" — see the dedicated section
+below). Self-contained under this directory, same as `numerals/` and
+`segment/`.
 
 `core/crates/language/Cargo.toml` and `src/lib.rs` were created by the
 FR-2.18 segmentation feature (commit `b1516f0`); at that point, and when the
@@ -306,6 +309,69 @@ it, since FR-2.14 is explicit that constraint is *derived* from engagement
 context, never asked of the operator — adding such a field here would look
 identical to the language picker FR-2.11 exists to rule out.
 
+## FR-2.14: constrain detection to the engagement expected-language set (this update)
+
+New file, `expected_language_set.rs`. The service layer already derives and
+persists the engagement's expected-language set (commit `9dd37bb`,
+`apps/service/.../vocabulary/language.py`'s `derive_expected_languages`,
+stored as `engagements.expected_languages`); `pre_meeting.rs`'s own HANDOFF
+section explicitly deferred this half of FR-2.14 as "a separate,
+already-planned feature." Nothing in this directory previously modeled the
+*set itself* or applied it to a detected-language candidate — every existing
+tracker either records single observations (`DetectedLanguagePanel`,
+`ParticipantLanguageTags`, `TierDriftMonitor`) or, in
+`AttendeeLanguagePreferences::bias_confidence`, boosts one attendee's
+observation toward a *learned* preference. None of them take an
+engagement-scoped set of expected languages and apply it across an entire
+candidate list — the specific shape FR-2.14 needs, since the set comes from
+client context (FR-3), not from in-meeting learning.
+
+- `ExpectedLanguageSet` — the engagement's expected languages, BCP-47 primary
+  subtags, deduplicated. `contains(language)` is the membership check.
+- `ExpectedLanguageSet::rank(candidates: &[(String, f32)]) ->
+  Vec<RankedLanguage>` — the actual constraint. Every candidate comes back,
+  exactly once, as a `RankedLanguage` carrying its original `language` and
+  `confidence` untouched, plus `in_expected_set` and a derived `rank`: equal
+  to `confidence` for an expected-set language, `confidence` minus
+  `outside_penalty` (0.15 default, an uncalibrated placeholder like
+  `AttendeeLanguagePreferences::bias_boost`) otherwise. The result is sorted
+  by `rank` descending. This is a bias, not a veto — mirrors
+  `bias_confidence`'s own "never suppress a confident contradicting signal"
+  rule: a sufficiently stronger outside-set candidate can still out-rank a
+  weak expected-set one, and no candidate is ever dropped from the returned
+  list regardless of how it ranks. That is FR-2.14's exact wording made
+  structural: "Languages outside the set still transcribe, but rank lower" —
+  never "are excluded."
+- `RankedLanguage` — the per-candidate result shape described above.
+- BCP-47 primary-subtag matching throughout (both `contains` and `rank`),
+  same convention as every sibling in this directory.
+
+Deliberately out of scope here, same boundary as every other file in this
+directory: constructing the `(String, f32)` candidate list from live ASR
+output or `DetectedLanguagePanel::languages()`, actually biasing a vendor's
+`language_code`/code-switching parameters (architecture §14.1 note 7 — the
+literal implementation of FR-2.14 at the ASR-request layer), and feeding
+`ExpectedLanguageSet::new` from the service's persisted
+`engagements.expected_languages` column all belong to whichever crate owns
+the live pipeline loop and the ASR adapter; this crate has no ASR adapter and
+shouldn't grow one, same reasoning `end_to_end.rs`'s HANDOFF section already
+gives for why `EndToEndToken` construction stops at the crate boundary.
+
+Tests added: 16 (membership for an in-set and an out-of-set language; empty
+set contains nothing; BCP-47 subtag collapsing for `contains`; duplicate
+input languages deduplicated; an outside-set language ranks strictly lower
+than an expected one at equal confidence — the acceptance criterion itself;
+ranking never drops an outside-set candidate; raw confidence is preserved
+unchanged on every ranked candidate regardless of set membership; expected-
+set languages sort ahead of outside ones; a sufficiently stronger outside
+candidate can still out-rank a weak expected one, proving this is a bias and
+not a hard exclusion; multiple outside-set candidates still rank relative to
+each other by confidence; a tie in rank keeps original relative order;
+BCP-47 subtag collapsing for `rank`'s candidate matching; custom
+`outside_penalty` overrides the default; an empty expected set still ranks
+every candidate as outside-set without excluding any; ranking zero
+candidates returns an empty list).
+
 ## What's here
 
 - `attendee_preference.rs` — `AttendeeLanguagePreferences` (FR-2.16, see
@@ -346,13 +412,19 @@ identical to the language picker FR-2.11 exists to rule out.
   `start_meeting` (FR-2.11, see above): proves the pre-meeting flow has no
   language field or parameter anywhere in it, and that starting a meeting
   hands off directly to an empty, auto-detection-driven language panel.
+- `expected_language_set.rs` — `ExpectedLanguageSet` and `RankedLanguage`
+  (FR-2.14, see above): applies an engagement's expected-language set to a
+  candidate list, ranking outside-set languages lower via a confidence
+  penalty without ever excluding them from the result.
 - `mod.rs` — declares `pub mod attendee_preference;`,
-  `pub mod detected_languages;`, `pub mod end_to_end;`, `pub mod
-  pre_meeting;`, and `pub mod retention;`, and re-exports `AttendeeId`,
+  `pub mod detected_languages;`, `pub mod end_to_end;`,
+  `pub mod expected_language_set;`, `pub mod pre_meeting;`, and
+  `pub mod retention;`, and re-exports `AttendeeId`,
   `AttendeeLanguagePreference`, `AttendeeLanguagePreferences`,
   `DetectedLanguage`, `DetectedLanguagePanel`, `DominantLanguage`,
-  `DominantLanguageResolver`, `EndToEndToken`, `MeetingSession`,
-  `PreMeetingSetup`, `RetainedUtterance`, `Translation`, `start_meeting`.
+  `DominantLanguageResolver`, `EndToEndToken`, `ExpectedLanguageSet`,
+  `MeetingSession`, `PreMeetingSetup`, `RankedLanguage`, `RetainedUtterance`,
+  `Translation`, `start_meeting`.
 
 ## Wiring needed
 
@@ -360,8 +432,8 @@ None. `core/crates/language/src/lib.rs` already wires `pub mod tags;` (see
 the wiring-history note at the top of this file) — `detected_languages`
 depends on `tags::tier` and `pre_meeting` depends on both `tags::tier` and
 `tags::detected_languages` (all already in this directory), and
-`retention`, `attendee_preference`, and `end_to_end` have no dependencies on
-any other file in this directory at all.
+`retention`, `attendee_preference`, `end_to_end`, and `expected_language_set`
+have no dependencies on any other file in this directory at all.
 
 ## What's not done here
 
@@ -401,8 +473,16 @@ any other file in this directory at all.
   `MeetingSession` into the live pipeline loop that then drives
   `DetectedLanguagePanel::observe` — both belong to whichever crate/app
   layer owns that flow; out of this crate's footprint.
+- Reading the persisted `engagements.expected_languages` column and
+  constructing an `ExpectedLanguageSet` from it, calling
+  `ExpectedLanguageSet::rank` with a meeting's actual detection candidates,
+  and — the literal ASR-vendor implementation of FR-2.14 (architecture
+  §14.1 note 7) — passing the set through to the `TranscriptionBackend`'s
+  `language_code`/code-switching bias parameters, all belong to whichever
+  crate owns the live pipeline loop and the ASR adapter; this crate has no
+  storage layer or ASR adapter and shouldn't grow either.
 
-Verified locally: `cargo test` — 153/153 pass (9 new for FR-2.11);
+Verified locally: `cargo test` — 169/169 pass (16 new for FR-2.14);
 `cargo clippy --all-targets -- -D warnings` — clean; pre-existing rustfmt
 drift across sibling `tags` files (struct-literal wrapping, method-chain
 wrapping) predates this feature and was left untouched on the new file too,

@@ -2,6 +2,7 @@ pub mod accuracy_fallback;
 pub mod attendee_preference;
 pub mod detected_languages;
 pub mod end_to_end;
+pub mod expected_language_set;
 pub mod participant;
 pub mod pre_meeting;
 pub mod retention;
@@ -12,6 +13,7 @@ pub use accuracy_fallback::{AccuracyBar, AccuracyFallbackNotice, AccuracyFallbac
 pub use attendee_preference::{AttendeeId, AttendeeLanguagePreference, AttendeeLanguagePreferences};
 pub use detected_languages::{DetectedLanguage, DetectedLanguagePanel};
 pub use end_to_end::{DominantLanguage, DominantLanguageResolver, EndToEndToken};
+pub use expected_language_set::{ExpectedLanguageSet, RankedLanguage};
 pub use participant::{ParticipantId, ParticipantLanguageTag, ParticipantLanguageTags};
 pub use pre_meeting::{MeetingSession, PreMeetingSetup, start_meeting};
 pub use retention::{RetainedUtterance, Translation};
