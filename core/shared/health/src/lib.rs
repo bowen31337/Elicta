@@ -3,6 +3,7 @@
 
 mod capture_stream;
 mod device_route;
+mod language_panel;
 mod preflight;
 mod question_bank;
 
@@ -13,6 +14,10 @@ pub use capture_stream::{
 pub use device_route::{
     handle_device_route_change, DeviceId, DeviceRouteChange, DeviceRouteChangeAlert,
     RouteChangeResponse,
+};
+pub use language_panel::{
+    check_language_panel_health, DetectedLanguageState, LanguagePanelDivergence,
+    LanguagePanelDivergenceReason, LanguagePanelHealthStatus, PanelDisplayState, TierDriftSummary,
 };
 pub use preflight::{
     run_disk_space_preflight, DiskSpaceError, DiskSpaceSource, DiskSpaceStatus, DiskSpaceWarning,
