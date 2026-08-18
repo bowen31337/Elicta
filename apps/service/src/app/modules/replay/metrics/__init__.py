@@ -11,12 +11,17 @@ from __future__ import annotations
 
 from .models import LanguageFigure, RatedSuggestion
 from .publication import MetricsPublication
+from .router import build_replay_metrics_router
+from .schemas import LanguagePrecision, ReplayRunMetricsResponse
 from .scoring import group_by_language, score_language
 
 __all__ = [
     "LanguageFigure",
+    "LanguagePrecision",
     "MetricsPublication",
     "RatedSuggestion",
+    "ReplayRunMetricsResponse",
+    "build_replay_metrics_router",
     "group_by_language",
     "score_language",
 ]
