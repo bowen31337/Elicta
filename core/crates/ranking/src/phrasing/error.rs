@@ -25,6 +25,23 @@ pub enum PhrasingError {
     /// needing e.g. an attendee-roster value fails here rather than
     /// rendering a half-filled question.
     UnresolvedSlot { candidate_id: String, slot: String },
+    /// The small-model rewrite fallback (architecture §3.7) failed before
+    /// producing text -- a [`super::fallback::Rewriter`] call raised an
+    /// error rather than a candidate rewrite.
+    RewriteFailed {
+        candidate_id: String,
+        reason: String,
+    },
+    /// The small-model rewrite fallback returned only whitespace -- not a
+    /// question the operator could act on.
+    RewriteEmpty { candidate_id: String },
+    /// The small-model rewrite fallback returned more than FR-6.1's 25-word
+    /// cap -- `max_tokens` truncates on tokens, not words, so this is
+    /// checked independently of whatever the API boundary enforced.
+    RewriteExceedsWordCap {
+        candidate_id: String,
+        word_count: usize,
+    },
 }
 
 impl PhrasingError {
@@ -60,6 +77,21 @@ impl fmt::Display for PhrasingError {
             PhrasingError::UnresolvedSlot { candidate_id, slot } => write!(
                 f,
                 "candidate {candidate_id:?} phrasing needs slot {slot:?}, which the trigger span cannot fill"
+            ),
+            PhrasingError::RewriteFailed { candidate_id, reason } => write!(
+                f,
+                "small-model rewrite fallback failed for candidate {candidate_id:?}: {reason}"
+            ),
+            PhrasingError::RewriteEmpty { candidate_id } => write!(
+                f,
+                "small-model rewrite fallback returned an empty question for candidate {candidate_id:?}"
+            ),
+            PhrasingError::RewriteExceedsWordCap {
+                candidate_id,
+                word_count,
+            } => write!(
+                f,
+                "small-model rewrite fallback for candidate {candidate_id:?} returned {word_count} words, exceeding FR-6.1's 25-word cap"
             ),
         }
     }

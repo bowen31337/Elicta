@@ -29,10 +29,24 @@
 //! so [`slots::format_named`] re-validates defensively rather than
 //! trusting an upstream guarantee it has no way to see across the
 //! service/runtime boundary.
+//!
+//! [`instantiate`] is only ever reachable for a candidate that already has
+//! pre-written phrasing. Architecture §3.7 names the other branch: "falls
+//! back to a small-model rewrite only when the slow lane has injected a
+//! novel candidate lacking pre-written phrasing." [`fallback`] is that
+//! branch, and [`dispatch::render`] is the one entry point that picks
+//! between the two the way §3.7 describes, so the branch is decided in one
+//! place rather than at every call site that hands phrasing a winner.
 
+mod dispatch;
 mod error;
+mod fallback;
 mod instantiate;
 mod slots;
 
+pub use dispatch::{render, WinningCandidate};
 pub use error::PhrasingError;
+pub use fallback::{
+    rewrite_fallback, RewriteError, Rewriter, SlowLaneCandidate, MAX_REWRITE_WORDS,
+};
 pub use instantiate::{instantiate, Candidate, SPAN_SLOT};
