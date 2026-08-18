@@ -11,6 +11,10 @@ exists yet in this codebase.
 `compute_context_completeness` scores how filled-in an engagement's context
 pack is, so the UI can show the operator what quality of support to expect
 before a session starts (PRD FR-3.14).
+
+`select_fallback_bank` falls back to a generic, sector- and
+project-type-keyed elicitation bank for an engagement with no reference
+documents to compile a bank from (PRD FR-3.13).
 """
 
 from __future__ import annotations
@@ -21,6 +25,15 @@ from app.modules.engagement.state.context_completeness import (
     ContextPackSignals,
     compute_context_completeness,
 )
+from app.modules.engagement.state.generic_elicitation_bank import (
+    BASELINE_TEMPLATE_SECTION,
+    PROJECT_TYPE_TEMPLATE_SECTION,
+    SECTOR_TEMPLATE_SECTION,
+    GenericBankCandidate,
+    GenericElicitationBank,
+    build_generic_elicitation_bank,
+    select_fallback_bank,
+)
 from app.modules.engagement.state.models import ReferenceClaim
 from app.modules.engagement.state.reference_claims import (
     LoadReferenceClaim,
@@ -29,12 +42,19 @@ from app.modules.engagement.state.reference_claims import (
 )
 
 __all__ = [
+    "BASELINE_TEMPLATE_SECTION",
+    "PROJECT_TYPE_TEMPLATE_SECTION",
+    "SECTOR_TEMPLATE_SECTION",
     "CompletenessLevel",
     "ContextCompleteness",
     "ContextPackSignals",
+    "GenericBankCandidate",
+    "GenericElicitationBank",
     "LoadReferenceClaim",
     "ReferenceClaim",
     "SaveReferenceClaim",
+    "build_generic_elicitation_bank",
     "compute_context_completeness",
+    "select_fallback_bank",
     "set_verify_with_client",
 ]
