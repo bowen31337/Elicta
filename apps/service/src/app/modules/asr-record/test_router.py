@@ -18,9 +18,12 @@ _router = importlib.import_module("app.modules.asr-record.router")
 
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 RecordPathTranscript = _models.RecordPathTranscript
+RecordPathTranscriptionJob = _models.RecordPathTranscriptionJob
+TranscriptionJobStatus = _models.TranscriptionJobStatus
 TranscriptionStatus = _models.TranscriptionStatus
 TranscriptSegment = _models.TranscriptSegment
 build_record_path_router = _router.build_record_path_router
+build_meeting_transcription_router = _router.build_meeting_transcription_router
 
 
 def make_client(
@@ -136,3 +139,86 @@ def test_a_failed_batch_run_still_persists_a_failed_record():
     assert response.status_code == 500
     assert store["session-1"].status == TranscriptionStatus.FAILED
     assert store["session-1"].error == "vendor engine unavailable"
+
+
+def make_meeting_client(
+    *, engine: str = "highest-accuracy-engine", vocabulary: list[str] | None = None
+) -> tuple[TestClient, dict[str, RecordPathTranscript], list[RecordPathTranscriptionJob], list]:
+    transcript_store: dict[str, RecordPathTranscript] = {}
+    job_store: list[RecordPathTranscriptionJob] = []
+    scheduled: list = []
+
+    async def transcribe(
+        meeting_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        return BatchTranscriptionOutput(
+            engine=engine,
+            segments=[
+                TranscriptSegment(start_seconds=0.0, end_seconds=2.0, text="hello")
+            ],
+            text="hello",
+        )
+
+    async def get_vocabulary(meeting_id: str) -> list[str]:
+        return vocabulary if vocabulary is not None else []
+
+    async def save_transcript(transcript: RecordPathTranscript) -> None:
+        transcript_store[transcript.session_id] = transcript
+
+    async def save_job(job: RecordPathTranscriptionJob) -> None:
+        job_store.append(job)
+
+    def schedule(work) -> None:
+        scheduled.append(work)
+
+    app = FastAPI()
+    app.include_router(
+        build_meeting_transcription_router(
+            transcribe, get_vocabulary, save_transcript, save_job, schedule
+        )
+    )
+    return (
+        TestClient(app, raise_server_exceptions=False),
+        transcript_store,
+        job_store,
+        scheduled,
+    )
+
+
+def test_starting_a_meeting_transcription_returns_202_with_a_job_id():
+    client, _, _, _ = make_meeting_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/record/transcribe",
+        json={"audio_ref": "recordings/meeting-1.wav"},
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["job_id"]
+    assert body["meeting_id"] == "meeting-1"
+    assert body["status"] == "queued"
+
+
+def test_starting_a_meeting_transcription_does_not_block_on_the_batch_run():
+    client, transcript_store, job_store, scheduled = make_meeting_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/record/transcribe",
+        json={"audio_ref": "recordings/meeting-1.wav"},
+    )
+
+    assert response.status_code == 202
+    assert transcript_store == {}
+    assert job_store[-1].status == TranscriptionJobStatus.QUEUED
+    assert len(scheduled) == 1
+
+
+def test_missing_audio_ref_is_rejected_for_meeting_transcription():
+    client, _, _, _ = make_meeting_client()
+
+    response = client.post(
+        "/api/meetings/meeting-1/record/transcribe", json={"audio_ref": ""}
+    )
+
+    assert response.status_code == 422

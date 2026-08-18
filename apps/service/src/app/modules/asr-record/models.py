@@ -60,3 +60,32 @@ class RecordPathTranscript(BaseModel):
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
+
+
+class TranscriptionJobStatus(str, Enum):
+    """Where one record-path transcription job sits in its lifecycle.
+
+    Distinct from `TranscriptionStatus`, which only describes a finished
+    batch run's outcome — a job also has a `QUEUED`/`RUNNING` state between
+    being accepted and the batch engine actually finishing.
+    """
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class RecordPathTranscriptionJob(BaseModel):
+    """Handle for one meeting's record-path transcription job (PRD FR-2.5).
+
+    Returned immediately when a meeting's full-recording re-transcription is
+    accepted, before the (potentially long-running) batch engine call has
+    finished — `job_id` is what a caller polls or correlates against later,
+    since the transcript itself is not ready yet.
+    """
+
+    job_id: str
+    meeting_id: str
+    status: TranscriptionJobStatus
+    created_at: datetime

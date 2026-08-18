@@ -21,9 +21,12 @@ _service = importlib.import_module("app.modules.asr-record.service")
 
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 RecordPathTranscript = _models.RecordPathTranscript
+RecordPathTranscriptionJob = _models.RecordPathTranscriptionJob
+TranscriptionJobStatus = _models.TranscriptionJobStatus
 TranscriptionStatus = _models.TranscriptionStatus
 TranscriptSegment = _models.TranscriptSegment
 run_record_path_transcription = _service.run_record_path_transcription
+start_record_path_transcription_job = _service.start_record_path_transcription_job
 
 
 def make_output(
@@ -177,3 +180,133 @@ def test_a_vocabulary_lookup_failure_also_persists_a_failed_transcript_and_rerai
     assert len(saved) == 1
     assert saved[0].status == TranscriptionStatus.FAILED
     assert saved[0].error == "engagement lookup unavailable"
+
+
+def make_job_deps(*, fail: bool = False):
+    saved_transcripts: list[RecordPathTranscript] = []
+    saved_jobs: list[RecordPathTranscriptionJob] = []
+    scheduled: list = []
+
+    async def transcribe(
+        meeting_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        if fail:
+            raise RuntimeError("vendor engine unavailable")
+        return make_output()
+
+    async def get_vocabulary(meeting_id: str) -> list[str]:
+        return []
+
+    async def save_transcript(transcript: RecordPathTranscript) -> None:
+        saved_transcripts.append(transcript)
+
+    async def save_job(job: RecordPathTranscriptionJob) -> None:
+        saved_jobs.append(job)
+
+    def schedule(work) -> None:
+        scheduled.append(work)
+
+    return {
+        "transcribe": transcribe,
+        "get_vocabulary": get_vocabulary,
+        "save_transcript": save_transcript,
+        "save_job": save_job,
+        "schedule": schedule,
+        "saved_transcripts": saved_transcripts,
+        "saved_jobs": saved_jobs,
+        "scheduled": scheduled,
+    }
+
+
+def test_starting_a_job_persists_it_as_queued_and_returns_without_waiting():
+    deps = make_job_deps()
+    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    job = asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["transcribe"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+            created_at=fixed,
+        )
+    )
+
+    assert job.job_id == "job-1"
+    assert job.meeting_id == "meeting-1"
+    assert job.status == TranscriptionJobStatus.QUEUED
+    assert job.created_at == fixed
+    assert deps["saved_jobs"] == [job]
+    assert len(deps["scheduled"]) == 1
+    # The batch run itself has not happened yet — only scheduled.
+    assert deps["saved_transcripts"] == []
+
+
+def test_a_job_id_is_generated_when_none_is_supplied():
+    deps = make_job_deps()
+
+    job = asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["transcribe"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+        )
+    )
+
+    assert job.job_id
+    assert job.status == TranscriptionJobStatus.QUEUED
+
+
+def test_running_the_scheduled_work_completes_the_job_and_saves_the_transcript():
+    deps = make_job_deps()
+
+    job = asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["transcribe"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+        )
+    )
+
+    asyncio.run(deps["scheduled"][0]())
+
+    assert deps["saved_transcripts"][0].session_id == "meeting-1"
+    assert deps["saved_transcripts"][0].status == TranscriptionStatus.COMPLETE
+    assert deps["saved_jobs"][-1].job_id == job.job_id
+    assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.COMPLETE
+
+
+def test_running_the_scheduled_work_marks_the_job_failed_without_raising():
+    deps = make_job_deps(fail=True)
+
+    asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["transcribe"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+        )
+    )
+
+    # Should not raise even though the batch engine failed.
+    asyncio.run(deps["scheduled"][0]())
+
+    assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.FAILED
+    assert deps["saved_transcripts"][-1].status == TranscriptionStatus.FAILED

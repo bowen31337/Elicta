@@ -15,12 +15,15 @@ prompting on the record path exactly as it is on the live path, so every
 batch request here fetches it and passes it to `transcribe`.
 """
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from .models import (
     BatchTranscriptionOutput,
     RecordPathTranscript,
+    RecordPathTranscriptionJob,
+    TranscriptionJobStatus,
     TranscriptionStatus,
 )
 
@@ -28,6 +31,8 @@ BatchTranscriber = Callable[[str, str, list[str]], Awaitable[BatchTranscriptionO
 SaveRecordPathTranscript = Callable[[RecordPathTranscript], Awaitable[None]]
 GetRecordPathTranscript = Callable[[str], Awaitable[RecordPathTranscript | None]]
 GetEngagementVocabulary = Callable[[str], Awaitable[list[str]]]
+SaveTranscriptionJob = Callable[[RecordPathTranscriptionJob], Awaitable[None]]
+ScheduleTranscriptionWork = Callable[[Callable[[], Awaitable[None]]], None]
 
 
 async def run_record_path_transcription(
@@ -83,3 +88,60 @@ async def run_record_path_transcription(
     )
     await save(transcript)
     return transcript
+
+
+async def start_record_path_transcription_job(
+    meeting_id: str,
+    audio_ref: str,
+    transcribe: BatchTranscriber,
+    get_vocabulary: GetEngagementVocabulary,
+    save_transcript: SaveRecordPathTranscript,
+    save_job: SaveTranscriptionJob,
+    schedule: ScheduleTranscriptionWork,
+    *,
+    job_id: str | None = None,
+    created_at: datetime | None = None,
+) -> RecordPathTranscriptionJob:
+    """Accept a meeting's record-path transcription request without waiting on it.
+
+    A full-meeting batch re-transcription can run far longer than an HTTP
+    caller should have to block for, unlike `run_record_path_transcription`
+    above (which a caller who's fine waiting can still use directly). This
+    persists a `QUEUED` job immediately and hands the actual batch run to
+    `schedule` — an injected callable rather than `BackgroundTasks` or a
+    concrete task queue directly, since neither the worker mechanism nor a
+    durable job queue lives in this package. The caller gets back a job
+    handle they can poll or correlate against once the batch run finishes.
+
+    The scheduled work updates the job to `COMPLETE`/`FAILED` itself and
+    swallows the batch failure rather than re-raising it, since by the time
+    it runs there is no caller left awaiting this coroutine to propagate to.
+    """
+
+    job_id = job_id or uuid.uuid4().hex
+    created_at = created_at or datetime.now(timezone.utc)
+    job = RecordPathTranscriptionJob(
+        job_id=job_id,
+        meeting_id=meeting_id,
+        status=TranscriptionJobStatus.QUEUED,
+        created_at=created_at,
+    )
+    await save_job(job)
+
+    async def run_and_track() -> None:
+        try:
+            await run_record_path_transcription(
+                meeting_id,
+                audio_ref,
+                transcribe,
+                save_transcript,
+                get_vocabulary,
+                requested_at=created_at,
+            )
+        except Exception:
+            await save_job(job.model_copy(update={"status": TranscriptionJobStatus.FAILED}))
+            return
+        await save_job(job.model_copy(update={"status": TranscriptionJobStatus.COMPLETE}))
+
+    schedule(run_and_track)
+    return job
