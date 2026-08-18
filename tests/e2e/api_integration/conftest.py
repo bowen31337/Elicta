@@ -53,12 +53,19 @@ from app.modules.debrief.artifacts.router import (  # noqa: E402
     build_open_questions_router,
     build_project_brief_router,
 )
+from app.modules.compiler.bank.models import BankCandidate  # noqa: E402
+from app.modules.compiler.bank.recompile import InheritedOpenQuestion  # noqa: E402
+from app.modules.compiler.bank.router import build_meeting_bank_router  # noqa: E402
 from app.modules.debrief.pipeline.models import BmadArtifactSet, CitationRow, SessionBmadAnalystChain  # noqa: E402
 from app.modules.debrief.pipeline.router import build_citation_row_router  # noqa: E402
 from app.modules.debrief.session.models import DebriefConversationSession, NudgeDispositionRecord  # noqa: E402
 from app.modules.debrief.session.router import build_debrief_session_router  # noqa: E402
 from app.modules.engagement.api.router import build_engagement_router  # noqa: E402
-from app.modules.engagement.api.schemas import EngagementCreateRequest  # noqa: E402
+from app.modules.engagement.api.schemas import (  # noqa: E402
+    EngagementCreateRequest,
+    EngagementUpdateRequest,
+    EngagementUpdateResponse,
+)
 from app.modules.replay.api.errors import ReplayRunNotFoundError  # noqa: E402
 from app.modules.replay.api.models import ReplayRunStatusResponse, SuggestionRatingRequest  # noqa: E402
 from app.modules.replay.api.router import (  # noqa: E402
@@ -103,6 +110,7 @@ class Backend:
 
     engagement_ids: dict[int, str] = field(default_factory=dict)
     next_engagement_id: int = 0
+    engagement_updates: dict[str, EngagementUpdateResponse] = field(default_factory=dict)
 
     record_path_transcripts: dict[str, list[Any]] = field(default_factory=dict)
     session_alignments: dict[str, Any] = field(default_factory=dict)
@@ -125,6 +133,9 @@ class Backend:
     prd_to_generate: BmadArtifactSet | None = None
 
     bmad_chains: dict[str, SessionBmadAnalystChain] = field(default_factory=dict)
+
+    meeting_base_candidates: dict[str, list[BankCandidate]] = field(default_factory=dict)
+    meeting_inherited_open_questions: dict[str, list[InheritedOpenQuestion]] = field(default_factory=dict)
 
     replay_ratings: list[tuple[str, SuggestionRatingRequest]] = field(default_factory=list)
     replay_statuses: dict[str, ReplayRunStatusResponse] = field(default_factory=dict)
@@ -162,9 +173,29 @@ def build_app(backend: Backend) -> FastAPI:
         backend.next_engagement_id += 1
         engagement_id = f"eng-{backend.next_engagement_id}"
         backend.engagement_ids[backend.next_engagement_id] = engagement_id
+        backend.engagement_updates[engagement_id] = EngagementUpdateResponse(engagement_id=engagement_id)
         return engagement_id
 
-    app.include_router(build_engagement_router(create_engagement))
+    async def update_engagement(
+        engagement_id: str, payload: EngagementUpdateRequest
+    ) -> EngagementUpdateResponse | None:
+        existing = backend.engagement_updates.get(engagement_id)
+        if existing is None:
+            return None
+        updated = EngagementUpdateResponse(
+            engagement_id=engagement_id,
+            purpose=payload.purpose if payload.purpose is not None else existing.purpose,
+            scope_boundary=payload.scope_boundary if payload.scope_boundary is not None else existing.scope_boundary,
+            target_requirements_template=(
+                payload.target_requirements_template
+                if payload.target_requirements_template is not None
+                else existing.target_requirements_template
+            ),
+        )
+        backend.engagement_updates[engagement_id] = updated
+        return updated
+
+    app.include_router(build_engagement_router(create_engagement, update_engagement))
 
     engines = [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
 
@@ -287,6 +318,14 @@ def build_app(backend: Backend) -> FastAPI:
     async def save_rating(run_id: str, payload: SuggestionRatingRequest) -> str:
         backend.replay_ratings.append((run_id, payload))
         return f"rating-{len(backend.replay_ratings)}"
+
+    async def get_base_candidates(meeting_id: str) -> list[BankCandidate]:
+        return backend.meeting_base_candidates.get(meeting_id, [])
+
+    async def get_inherited_open_questions(meeting_id: str) -> list[InheritedOpenQuestion]:
+        return backend.meeting_inherited_open_questions.get(meeting_id, [])
+
+    app.include_router(build_meeting_bank_router(get_base_candidates, get_inherited_open_questions))
 
     app.include_router(build_replay_ratings_router(save_rating))
 
