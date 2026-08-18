@@ -119,3 +119,19 @@ class EngagementQuestionBank(BaseModel):
     engagement_id: str
     sections: list[QuestionBankSection]
     generated_at: datetime
+
+
+class BankCompileTrigger(BaseModel):
+    """Handle for one engagement's bank compile job, returned immediately on trigger (PRD FR-4.8).
+
+    Returned when `POST /api/engagements/{id}/bank/compile` is accepted,
+    before the actual compiling work (extraction, tagging, embedding -- all
+    out of this feature's footprint) has produced any candidates yet.
+    `job_id` is what a caller polls or correlates against later, mirroring
+    `RecordPathTranscriptionJob`'s (`asr-record/models.py`) job-handle
+    convention for an accepted, not-yet-finished run.
+    """
+
+    job_id: str = Field(min_length=1)
+    engagement_id: str
+    triggered_at: datetime

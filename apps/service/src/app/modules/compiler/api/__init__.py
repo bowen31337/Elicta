@@ -14,7 +14,8 @@ if `delete_candidate` raises `CandidateNotFoundError`. `PATCH
 returns 200 with the updated candidate, or 404 if `update_candidate` raises
 the same `CandidateNotFoundError`. `GET /api/engagements/{id}/bank` returns
 200 with the engagement's compiled question bank rendered as a reviewable
-tree grouped by `template_section`.
+tree grouped by `template_section`. `POST /api/engagements/{id}/bank/compile`
+returns 202 with a `job_id` handle for the triggered compile job.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from __future__ import annotations
 from app.modules.compiler.api.errors import CandidateNotFoundError
 from app.modules.compiler.api.models import (
     BankCandidate,
+    BankCompileTrigger,
     CandidatePatchRequest,
     EngagementQuestionBank,
     MeetingQuestionBank,
@@ -37,8 +39,10 @@ from app.modules.compiler.api.router import (
     GetBaseCandidates,
     GetCompiledCandidates,
     GetInheritedOpenQuestions,
+    TriggerBankCompile,
     UpdateCandidate,
     build_bank_candidates_router,
+    build_engagement_bank_compile_router,
     build_engagement_bank_router,
     build_meeting_bank_router,
 )
@@ -47,6 +51,7 @@ from app.modules.compiler.api.tree import build_question_bank_tree
 __all__ = [
     "INHERITED_TEMPLATE_SECTION",
     "BankCandidate",
+    "BankCompileTrigger",
     "CandidateNotFoundError",
     "CandidatePatchRequest",
     "DeleteCandidate",
@@ -57,8 +62,10 @@ __all__ = [
     "InheritedOpenQuestion",
     "MeetingQuestionBank",
     "QuestionBankSection",
+    "TriggerBankCompile",
     "UpdateCandidate",
     "build_bank_candidates_router",
+    "build_engagement_bank_compile_router",
     "build_engagement_bank_router",
     "build_meeting_bank_router",
     "build_question_bank_tree",

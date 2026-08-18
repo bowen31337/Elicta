@@ -34,17 +34,30 @@ rendered as a reviewable tree grouped by `template_section`, rather than
 `MeetingQuestionBank`'s flat per-meeting candidate list. Like
 `get_meeting_bank`, it always returns 200 -- an engagement with no compiled
 candidates yet simply renders an empty tree.
+
+`build_engagement_bank_compile_router` takes a `trigger_bank_compile`
+callable and exposes `POST /api/engagements/{id}/bank/compile`: kicking off
+the engagement-level compile this package's other modules (`tree.py`,
+`recompile.py`) document as their upstream source. Mirrors
+`build_replay_start_router`'s (`replay/api/router.py`) shape for starting a
+long-running run: `trigger_bank_compile` is a synchronous call that hands
+back a job id immediately, the compiling work itself (extraction, tagging,
+embedding) runs to completion later out of this router's view, and the
+route responds 202 rather than 200 or 201 since nothing has been created
+yet at the returned URL -- only accepted for processing.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
 from .errors import CandidateNotFoundError
 from .models import (
     BankCandidate,
+    BankCompileTrigger,
     CandidatePatchRequest,
     EngagementQuestionBank,
     MeetingQuestionBank,
@@ -57,6 +70,7 @@ GetInheritedOpenQuestions = Callable[[str], Awaitable[list[InheritedOpenQuestion
 DeleteCandidate = Callable[[str], Awaitable[None]]
 UpdateCandidate = Callable[[str, CandidatePatchRequest], Awaitable[BankCandidate]]
 GetCompiledCandidates = Callable[[str], Awaitable[list[BankCandidate]]]
+TriggerBankCompile = Callable[[str], Awaitable[str]]
 
 
 def build_meeting_bank_router(
@@ -106,5 +120,20 @@ def build_engagement_bank_router(get_compiled_candidates: GetCompiledCandidates)
     async def get_engagement_bank(engagement_id: str) -> EngagementQuestionBank:
         candidates = await get_compiled_candidates(engagement_id)
         return build_question_bank_tree(engagement_id, candidates)
+
+    return router
+
+
+def build_engagement_bank_compile_router(trigger_bank_compile: TriggerBankCompile) -> APIRouter:
+    router = APIRouter(prefix="/api/engagements", tags=["compiler-bank"])
+
+    @router.post("/{engagement_id}/bank/compile", response_model=BankCompileTrigger, status_code=202)
+    async def compile_engagement_bank(engagement_id: str) -> BankCompileTrigger:
+        job_id = await trigger_bank_compile(engagement_id)
+        return BankCompileTrigger(
+            job_id=job_id,
+            engagement_id=engagement_id,
+            triggered_at=datetime.now(timezone.utc),
+        )
 
     return router
