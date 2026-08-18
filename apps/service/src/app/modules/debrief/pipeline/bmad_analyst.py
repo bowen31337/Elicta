@@ -71,13 +71,17 @@ def normalize_provenance(raw: str) -> ClaimProvenance:
 def resolve_citations(
     utterance_ids: list[str], utterances_by_id: dict[str, ClassifiedUtterance]
 ) -> list[ArtifactCitation]:
-    """Build one `ArtifactCitation` per id, sourced from the session's own classified utterances (PRD FR-2.7).
+    """Build one `ArtifactCitation` per id, sourced from the session's own classified utterances (PRD FR-2.7, FR-8.7a).
 
     Raises `ValueError` for any id that isn't one of `utterances_by_id` — an
     artifact claim citing an utterance the session doesn't have would be
     indistinguishable from one the chain fabricated, which is exactly what
     grounding every field in the actual `ClassifiedUtterance` (rather than
-    the chain's own account of the citation) exists to prevent.
+    the chain's own account of the citation) exists to prevent. Each
+    citation's `original_language` and `translated_text` are likewise copied
+    straight off the utterance, so a claim grounded in a cross-language
+    utterance carries both the original quote and its translation (PRD
+    FR-8.7a).
     """
 
     citations = []
@@ -93,6 +97,8 @@ def resolve_citations(
                 end_seconds=utterance.end_seconds,
                 speaker_tag=utterance.speaker_tag,
                 quoted_text=utterance.verbatim_text,
+                original_language=utterance.original_language,
+                translated_text=utterance.translated_text,
             )
         )
     return citations

@@ -37,6 +37,7 @@ def make_classified_utterances() -> list[ClassifiedUtterance]:
             speaker_tag="alice",
             verbatim_text="um we need the thing by friday",
             cleaned_text="We need the thing by Friday.",
+            original_language="en",
             section_key="timeline",
         ),
         ClassifiedUtterance(
@@ -45,8 +46,10 @@ def make_classified_utterances() -> list[ClassifiedUtterance]:
             start_seconds=1.0,
             end_seconds=2.0,
             speaker_tag="bob",
-            verbatim_text="yeah that works for me",
-            cleaned_text="Yeah, that works for me.",
+            verbatim_text="necesitamos esto para el viernes",
+            cleaned_text="Necesitamos esto para el viernes.",
+            original_language="es",
+            translated_text="We need this by Friday.",
             section_key="timeline",
         ),
     ]
@@ -128,10 +131,15 @@ def test_a_successful_run_persists_the_full_artifact_set_with_resolved_citations
     assert question.citations[0].utterance_id == "utt-1"
     assert question.citations[0].speaker_tag == "alice"
     assert question.citations[0].quoted_text == "um we need the thing by friday"
+    assert question.citations[0].original_language == "en"
+    assert question.citations[0].translated_text is None
 
     decision = result.artifacts.decisions[0]
     assert decision.decided_by == "bob"
     assert decision.citations[0].utterance_id == "utt-2"
+    assert decision.citations[0].quoted_text == "necesitamos esto para el viernes"
+    assert decision.citations[0].original_language == "es"
+    assert decision.citations[0].translated_text == "We need this by Friday."
 
     assert result.artifacts.project_brief.body == "The client needs the thing by Friday."
     assert result.artifacts.follow_up_email.subject == "Recap and next steps"
@@ -234,7 +242,9 @@ def test_resolve_citations_grounds_every_field_in_the_actual_utterance():
     assert citation.speaker_tag == "bob"
     assert citation.start_seconds == 1.0
     assert citation.end_seconds == 2.0
-    assert citation.quoted_text == "yeah that works for me"
+    assert citation.quoted_text == "necesitamos esto para el viernes"
+    assert citation.original_language == "es"
+    assert citation.translated_text == "We need this by Friday."
 
 
 def test_resolve_citations_raises_for_an_unknown_utterance_id():

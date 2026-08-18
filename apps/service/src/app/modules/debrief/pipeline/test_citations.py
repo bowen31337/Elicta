@@ -24,7 +24,13 @@ from app.modules.debrief.pipeline.models import (
 FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def make_citation(utterance_id: str = "utt-1", speaker_tag: str = "alice") -> ArtifactCitation:
+def make_citation(
+    utterance_id: str = "utt-1",
+    speaker_tag: str = "alice",
+    *,
+    original_language: str = "en",
+    translated_text: str | None = None,
+) -> ArtifactCitation:
     return ArtifactCitation(
         utterance_id=utterance_id,
         session_id="session-1",
@@ -32,6 +38,8 @@ def make_citation(utterance_id: str = "utt-1", speaker_tag: str = "alice") -> Ar
         end_seconds=1.0,
         speaker_tag=speaker_tag,
         quoted_text="um we need the thing by friday",
+        original_language=original_language,
+        translated_text=translated_text,
     )
 
 
@@ -91,6 +99,26 @@ def test_build_citation_rows_produces_one_row_per_citation_across_every_claim():
     assert open_question_row.speaker_tag == "alice"
     assert open_question_row.start_seconds == 0.0
     assert open_question_row.end_seconds == 1.0
+    assert open_question_row.original_language == "en"
+    assert open_question_row.translated_text is None
+
+
+def test_build_citation_rows_carries_the_original_language_and_translation_onto_a_cross_language_row():
+    rows = build_citation_rows(
+        "session-1",
+        make_artifacts(
+            decision_citations=[
+                make_citation(
+                    "utt-2", "bob", original_language="es", translated_text="We need this by Friday."
+                )
+            ]
+        ),
+    )
+
+    decision_row = next(row for row in rows if row.claim_kind == ClaimKind.DECISION)
+    assert decision_row.quoted_text == "um we need the thing by friday"
+    assert decision_row.original_language == "es"
+    assert decision_row.translated_text == "We need this by Friday."
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 UNKNOWN_SPEAKER_TAG = "unknown"
+UNKNOWN_LANGUAGE = "und"
 
 
 class DiarizationStatus(str, Enum):
@@ -142,6 +143,79 @@ class SessionTranscriptCleaning(BaseModel):
     error: str | None = None
 
 
+class TranscriptTranslationStatus(str, Enum):
+    """Terminal state of one translation run over a session's cleaned utterances."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class TranslationOutcome(BaseModel):
+    """One cleaned utterance's detected spoken language and translation, as a translation engine returns it (PRD FR-8.7a).
+
+    `translated_text` is `None` when the engine determined the utterance is
+    already in the session's document language and needs no translation.
+    `run_transcript_translation` still normalizes this via
+    `normalize_translated_text` rather than trusting it outright — an engine
+    quirk that returns a same-language "translation" anyway must not make an
+    untranslated utterance look cross-language to a citation.
+    """
+
+    original_language: str
+    translated_text: str | None = None
+
+
+class TranslatedUtterance(BaseModel):
+    """One `CleanedUtterance` with its spoken language tagged and a translation attached, when needed (PRD FR-8.7a).
+
+    `original_language` is the BCP-47 primary subtag of the language the
+    utterance was actually spoken in, and is never null — every utterance was
+    spoken in some language, the same "meaningful signal, not a missing
+    value" reasoning `UNKNOWN_SPEAKER_TAG` and `UNCLASSIFIED_SECTION_KEY` use
+    elsewhere in this package. `translated_text` is `None` whenever
+    `original_language` already matches the session's document language —
+    translating an utterance into the language it's already in would be a
+    redundant copy, not a translation — and only ever carries a real
+    translation of `verbatim_text` otherwise. `verbatim_text` itself (still
+    exactly what `CleanedUtterance.verbatim_text` carried) is never
+    overwritten by a translation: the original-language wording stays
+    reachable on every utterance, translated or not, mirroring the
+    "permanently and inseparably" retention PRD FR-2.19 requires upstream of
+    this pipeline.
+    """
+
+    utterance_id: str
+    session_id: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    speaker_tag: str
+    verbatim_text: str
+    cleaned_text: str
+    original_language: str
+    translated_text: str | None = None
+
+
+class SessionTranscriptTranslation(BaseModel):
+    """Durable record of one translation run over a session's cleaned utterances (PRD FR-8.7a).
+
+    Persisted whether the run succeeded or failed, mirroring
+    `SessionTranscriptCleaning`: a session with no translation record at all
+    would be indistinguishable from one that simply hasn't been translated
+    yet, so `status` and `error` make a failed run visible instead of
+    silent. `utterances` is empty on a `FAILED` run — the cleaned utterances
+    still live on in `SessionTranscriptCleaning`, so nothing is lost.
+    """
+
+    session_id: str
+    status: TranscriptTranslationStatus
+    engine: str
+    document_language: str
+    utterances: list[TranslatedUtterance]
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
+
+
 class FillState(str, Enum):
     """Whether a template section's coverage slot has any classified utterance yet (PRD FR-8.2)."""
 
@@ -175,13 +249,19 @@ class SectionClassificationStatus(str, Enum):
 
 
 class ClassifiedUtterance(BaseModel):
-    """One `CleanedUtterance` with its template section persisted (PRD FR-8.2).
+    """One `TranslatedUtterance` with its template section persisted (PRD FR-8.2).
 
     `section_key` is never null: an utterance the classifier couldn't map to
     any known `TemplateSection` is tagged `UNCLASSIFIED_SECTION_KEY` by
     `normalize_section_key` rather than left empty, the same reasoning
     `tag_span_speaker` uses for `UNKNOWN_SPEAKER_TAG` — "this doesn't belong
     to a known section" is itself meaningful signal, not a missing value.
+    `original_language` and `translated_text` still ride along from
+    `TranslatedUtterance` untouched, so a claim classified from a
+    cross-language utterance can still resolve into a citation carrying both
+    (PRD FR-8.7a). `original_language` defaults to `UNKNOWN_LANGUAGE` rather
+    than being required, since some callers construct a `ClassifiedUtterance`
+    from data that predates this pipeline's translation stage.
     """
 
     utterance_id: str
@@ -191,6 +271,8 @@ class ClassifiedUtterance(BaseModel):
     speaker_tag: str
     verbatim_text: str
     cleaned_text: str
+    original_language: str = UNKNOWN_LANGUAGE
+    translated_text: str | None = None
     section_key: str
 
 
@@ -249,7 +331,7 @@ class ClaimProvenance(str, Enum):
 
 
 class ArtifactCitation(BaseModel):
-    """One BMAD analyst artifact claim's grounding in an actual classified utterance (PRD FR-2.7, FR-8.7).
+    """One BMAD analyst artifact claim's grounding in an actual classified utterance (PRD FR-2.7, FR-8.7, FR-8.7a).
 
     Never constructed from whatever timestamp, speaker, or wording the
     analyst chain claims for a citation — `resolve_citations` in
@@ -258,6 +340,14 @@ class ArtifactCitation(BaseModel):
     record-path-derived data every earlier debrief stage persisted. A chain
     output citing an `utterance_id` that isn't one of them fails the run
     rather than persisting a citation nothing backs.
+
+    `quoted_text` is always the original-language wording (`verbatim_text`),
+    never a translation — PRD FR-8.7a requires the original to remain
+    renderable, not replaced. `translated_text` is `None` when the cited
+    utterance's `original_language` already matches the session's document
+    language; where it differs, `translated_text` carries the translation
+    so a UI can display it by default and render `quoted_text` — the
+    original — on expand.
     """
 
     utterance_id: str
@@ -266,6 +356,8 @@ class ArtifactCitation(BaseModel):
     end_seconds: float = Field(ge=0)
     speaker_tag: str
     quoted_text: str
+    original_language: str
+    translated_text: str | None = None
 
 
 class OpenQuestion(BaseModel):
@@ -433,7 +525,7 @@ class ClaimKind(str, Enum):
 
 
 class CitationRow(BaseModel):
-    """One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7).
+    """One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7, FR-8.7a).
 
     `build_citation_rows` in `citations.py` is the only place these are
     built, one per `ArtifactCitation` already nested on a `BmadArtifactSet`
@@ -446,6 +538,12 @@ class CitationRow(BaseModel):
     `claim_index` is the claim's position within its own category's list —
     always `0` for the singular `project_brief` and `follow_up_email`
     claims, and the list index for `open_questions`/`decisions`.
+
+    `quoted_text` carries the citation's original-language wording and
+    `translated_text` its translation (`None` for a same-language citation),
+    both copied straight from the `ArtifactCitation` this row binds to — a
+    row for a cross-language claim carries both, exactly what PRD FR-8.7a
+    requires the citations table to persist.
     """
 
     session_id: str
@@ -456,6 +554,8 @@ class CitationRow(BaseModel):
     end_seconds: float = Field(ge=0)
     speaker_tag: str
     quoted_text: str
+    original_language: str
+    translated_text: str | None = None
 
 
 class CitationTableStatus(str, Enum):

@@ -9,11 +9,12 @@ is likewise supplied by the caller rather than hardcoded — which taxonomy to
 use (BMAD PRD sections as-is, or an internal variant) is its own open
 decision (PRD D5).
 
-This stage runs after transcript cleaning: it classifies `CleanedUtterance`s,
-not raw diarized `Utterance`s, so the classifier reasons over the same
-punctuated, disfluency-free text an operator or later BMAD analyst chain
-would read, while `verbatim_text` still rides along on every
-`ClassifiedUtterance` for citation purposes (PRD FR-2.7).
+This stage runs after transcript cleaning and translation: it classifies
+`TranslatedUtterance`s, not raw diarized `Utterance`s, so the classifier
+reasons over the same punctuated, disfluency-free text an operator or later
+BMAD analyst chain would read, while `verbatim_text` (and each utterance's
+`original_language`/`translated_text`) still ride along on every
+`ClassifiedUtterance` for citation purposes (PRD FR-2.7, FR-8.7a).
 
 `compute_slot_fill_states` is the coverage-decision counterpart to
 `tag_span_speaker` in `diarization.py`: a pure function, independent of the
@@ -33,15 +34,15 @@ from datetime import datetime, timezone
 from .models import (
     UNCLASSIFIED_SECTION_KEY,
     ClassifiedUtterance,
-    CleanedUtterance,
     CoverageSlotState,
     FillState,
     SectionClassificationStatus,
     SessionSectionClassification,
     TemplateSection,
+    TranslatedUtterance,
 )
 
-ClassifyUtterances = Callable[[str, list[CleanedUtterance], list[TemplateSection]], Awaitable[list[str]]]
+ClassifyUtterances = Callable[[str, list[TranslatedUtterance], list[TemplateSection]], Awaitable[list[str]]]
 SaveSessionSectionClassification = Callable[[SessionSectionClassification], Awaitable[None]]
 
 
@@ -87,7 +88,7 @@ def compute_slot_fill_states(
 
 async def run_section_classification(
     session_id: str,
-    utterances: list[CleanedUtterance],
+    utterances: list[TranslatedUtterance],
     slots: list[TemplateSection],
     engine: str,
     classify: ClassifyUtterances,
@@ -128,6 +129,8 @@ async def run_section_classification(
                 speaker_tag=utterance.speaker_tag,
                 verbatim_text=utterance.verbatim_text,
                 cleaned_text=utterance.cleaned_text,
+                original_language=utterance.original_language,
+                translated_text=utterance.translated_text,
                 section_key=normalize_section_key(section_key, known_keys),
             )
             for utterance, section_key in zip(utterances, section_keys, strict=True)

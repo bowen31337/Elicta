@@ -13,19 +13,19 @@ from app.modules.debrief.pipeline.classification import (
 from app.modules.debrief.pipeline.models import (
     UNCLASSIFIED_SECTION_KEY,
     ClassifiedUtterance,
-    CleanedUtterance,
     FillState,
     SectionClassificationStatus,
     SessionSectionClassification,
     TemplateSection,
+    TranslatedUtterance,
 )
 
 FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def make_cleaned_utterances() -> list[CleanedUtterance]:
+def make_cleaned_utterances() -> list[TranslatedUtterance]:
     return [
-        CleanedUtterance(
+        TranslatedUtterance(
             utterance_id="utt-1",
             session_id="session-1",
             start_seconds=0.0,
@@ -33,8 +33,9 @@ def make_cleaned_utterances() -> list[CleanedUtterance]:
             speaker_tag="alice",
             verbatim_text="um we need the thing by friday",
             cleaned_text="We need the thing by Friday.",
+            original_language="en",
         ),
-        CleanedUtterance(
+        TranslatedUtterance(
             utterance_id="utt-2",
             session_id="session-1",
             start_seconds=1.0,
@@ -42,6 +43,7 @@ def make_cleaned_utterances() -> list[CleanedUtterance]:
             speaker_tag="bob",
             verbatim_text="yeah that works for me",
             cleaned_text="Yeah, that works for me.",
+            original_language="en",
         ),
     ]
 
@@ -55,7 +57,7 @@ def make_slots() -> list[TemplateSection]:
 
 def make_classify(section_keys: list[str], *, fail: bool = False):
     async def classify(
-        session_id: str, utterances: list[CleanedUtterance], slots: list[TemplateSection]
+        session_id: str, utterances: list[TranslatedUtterance], slots: list[TemplateSection]
     ) -> list[str]:
         if fail:
             raise RuntimeError("classification vendor timed out")
@@ -92,6 +94,8 @@ def test_a_successful_run_classifies_every_utterance_and_fills_its_slot():
     assert [u.utterance_id for u in result.utterances] == ["utt-1", "utt-2"]
     assert [u.verbatim_text for u in result.utterances] == [u.verbatim_text for u in utterances]
     assert [u.cleaned_text for u in result.utterances] == [u.cleaned_text for u in utterances]
+    assert [u.original_language for u in result.utterances] == [u.original_language for u in utterances]
+    assert [u.translated_text for u in result.utterances] == [u.translated_text for u in utterances]
     assert all(u.session_id == "session-1" for u in result.utterances)
 
     slots_by_key = {slot.section_key: slot for slot in result.slots}
@@ -238,6 +242,7 @@ def test_compute_slot_fill_states_orders_output_by_the_supplied_slots():
             speaker_tag="alice",
             verbatim_text="v",
             cleaned_text="c",
+            original_language="en",
             section_key="budget",
         )
     ]
@@ -261,6 +266,7 @@ def test_compute_slot_fill_states_ignores_unclassified_utterances():
             speaker_tag="alice",
             verbatim_text="v",
             cleaned_text="c",
+            original_language="en",
             section_key=UNCLASSIFIED_SECTION_KEY,
         )
     ]
@@ -277,3 +283,31 @@ def test_normalize_section_key_passes_through_known_keys():
 
 def test_normalize_section_key_falls_back_to_unclassified_for_unknown_keys():
     assert normalize_section_key("nonsense", {"timeline", "budget"}) == UNCLASSIFIED_SECTION_KEY
+
+
+def test_a_cross_language_utterances_translation_rides_along_onto_the_classified_utterance():
+    async def save(record: SessionSectionClassification) -> None:
+        pass
+
+    utterances = [
+        TranslatedUtterance(
+            utterance_id="utt-1",
+            session_id="session-1",
+            start_seconds=0.0,
+            end_seconds=1.0,
+            speaker_tag="alice",
+            verbatim_text="necesitamos esto para el viernes",
+            cleaned_text="Necesitamos esto para el viernes.",
+            original_language="es",
+            translated_text="We need this by Friday.",
+        )
+    ]
+
+    result = asyncio.run(
+        run_section_classification(
+            "session-1", utterances, make_slots(), "classifier-a", make_classify(["timeline"]), save
+        )
+    )
+
+    assert result.utterances[0].original_language == "es"
+    assert result.utterances[0].translated_text == "We need this by Friday."

@@ -1,4 +1,4 @@
-"""Binds every BMAD analyst claim to a citations-table row of utterance_id, timestamp, and speaker (PRD FR-8.7).
+"""Binds every BMAD analyst claim to a citations-table row of utterance_id, timestamp, and speaker (PRD FR-8.7, FR-8.7a).
 
 `run_bmad_analyst_chain` in `bmad_analyst.py` already resolves every claim's
 citations into `ArtifactCitation`s grounded in the session's own
@@ -7,7 +7,10 @@ step: it flattens those nested citations into individual, durable
 `CitationRow`s — the citations table PRD FR-8.7 asks for — and persists them
 via an injected `save`, mirroring every other stage in this package: no
 durable store exists yet in this codebase, so `SaveSessionCitationTable` is
-supplied by whoever wires the app factory.
+supplied by whoever wires the app factory. Each row carries the citation's
+`original_language` and `translated_text` straight through, so a row for a
+cross-language claim persists both the original-language quote and its
+translation (PRD FR-8.7a).
 
 "A citation row persists for every claim" is an invariant `build_citation_rows`
 enforces, not just documents: a claim whose `citations` list is empty — the
@@ -51,6 +54,8 @@ def _rows_for_claim(
             end_seconds=citation.end_seconds,
             speaker_tag=citation.speaker_tag,
             quoted_text=citation.quoted_text,
+            original_language=citation.original_language,
+            translated_text=citation.translated_text,
         )
         for citation in citations
     ]
