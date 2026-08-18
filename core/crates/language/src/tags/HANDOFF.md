@@ -3,18 +3,89 @@
 Implements PRD FR-2.20 ("Display detected language(s) live in the panel",
 rationale at architecture §8.2 "silent misdetection failure"), FR-2.21
 ("User can override the detected language with a single tap", done when the
-override persists for the rest of the meeting), and FR-2.19 ("Retain the
+override persists for the rest of the meeting), FR-2.19 ("Retain the
 original-language utterance alongside any translation, permanently and
-inseparably" — see the dedicated section below). Self-contained under this
-directory, same as `numerals/` and `segment/`; deliberately does not touch
-`core/crates/language/Cargo.toml` or `core/crates/language/src/lib.rs`. Those
-now exist in this worktree (created by the FR-2.18 segmentation feature,
-commit `b1516f0`) but `lib.rs` only wires `pub mod segment;` so far — `tags`
-(and `numerals`) are still unwired, matching what the sibling HANDOFF.md
-files already flag as pending. Verified locally by temporarily adding
-`pub mod tags;` to `lib.rs`, running `cargo test`/`cargo clippy`, then
+inseparably" — see the dedicated section below), and FR-2.16 ("System learns
+per-attendee language preference across an engagement, biasing that stream
+on later meetings" — see the dedicated section below). Self-contained under
+this directory, same as `numerals/` and `segment/`; deliberately does not
+touch `core/crates/language/Cargo.toml` or `core/crates/language/src/lib.rs`.
+Those now exist in this worktree (created by the FR-2.18 segmentation
+feature, commit `b1516f0`) but `lib.rs` only wires `pub mod segment;` so far
+— `tags` (and `numerals`) are still unwired, matching what the sibling
+HANDOFF.md files already flag as pending. Verified locally by temporarily
+adding `pub mod tags;` to `lib.rs`, running `cargo test`/`cargo clippy`, then
 reverting `lib.rs` to its committed state (`git checkout -- src/lib.rs`) so
 this change stays scoped to `tags/`.
+
+## FR-2.16: learn per-attendee language preference across an engagement (this update)
+
+New file, `attendee_preference.rs`. FR-2.16 operates on a timescale no
+existing sibling covers: `ParticipantLanguageTags` (FR-2.15) deliberately
+starts from nothing at the top of every meeting, since it exists to catch
+code-switching *within* one session — a fresh instance per meeting is
+correct for that job, not a gap to fix. FR-2.16 is the opposite: it is
+exactly that per-meeting memory, carried across every meeting in an
+engagement, so a returning attendee's later meeting starts already biased
+toward what previous meetings established instead of re-learning it from
+zero.
+
+- `AttendeeId` — a plain `String` alias for the `attendees.id` row, kept
+  local for the same reason `ParticipantId` is: this crate has no dependency
+  on the service's storage layer yet. Deliberately distinct from
+  `ParticipantId` (`participant.rs`) — that id names a per-meeting vendor
+  stream and is not guaranteed stable across meetings, so a real caller must
+  resolve `ParticipantId -> AttendeeId` itself (see "Wiring needed" below).
+- `AttendeeLanguagePreferences::observe_meeting(attendee_id, language,
+  confidence)` — records one confident meeting-level observation, gated by
+  `min_confidence` (0.6 default, matching every other confidence gate in
+  this directory) so one noisy meeting can never seed or shift a learned
+  preference. Tracks a per-language meeting count per attendee rather than
+  every raw observation, and recomputes `preferred_language` as whichever
+  language has the most confident meetings behind it. Ties keep whichever
+  language already had the lead — concretely, this means a single later
+  meeting in a different language never overwrites an established
+  preference; only a language observed strictly *more often* takes over.
+  This is the "learns ... across an engagement" half of FR-2.16, and is what
+  makes `preferred_language` the value that persists per attendee.
+- `AttendeeLanguagePreferences::bias_confidence(attendee_id, language,
+  confidence)` — the "biasing that stream on later meetings" half. Boosts
+  `confidence` by `bias_boost` (0.15 default, an uncalibrated placeholder
+  like `AccuracyBar`'s thresholds) when `language` agrees with the
+  attendee's learned preference, so a borderline later-meeting detection
+  that matches history clears a downstream confidence gate (e.g.
+  `ParticipantLanguageTags`'s) that it would otherwise miss. A `language`
+  that disagrees with the learned preference — or an attendee with no
+  learned preference yet — is returned unchanged: never suppress a
+  confident contradicting signal, since a guest or a genuine language
+  switch in one meeting is a real event, not noise, matching every other
+  silent-misdetection guard in this directory.
+- `preferred_language` / `preference_for` — read-only accessors; the latter
+  returns the full `AttendeeLanguagePreference` (attendee id, learned
+  language, total confident meetings observed).
+- BCP-47 primary-subtag matching throughout, same convention as every
+  sibling in this directory.
+
+Tests added: 17 (no preference before any observation; a single confident
+observation becomes the preference; low-confidence observations dropped and
+never shift an existing preference; repeat observations of the same
+language accumulate `meetings_observed`; a single later meeting in a
+different language does not override an established preference; a language
+observed more often than the incumbent does take over; a tie keeps the
+earlier-established language; independent tracking per attendee; BCP-47
+subtag collapsing for both `observe_meeting` and `bias_confidence`; custom
+confidence threshold; `bias_confidence` boosts a matching observation,
+leaves a contradicting one and an unknown attendee unchanged, never exceeds
+1.0, and respects a custom `bias_boost`).
+
+Deliberately out of scope here, same boundary already drawn for
+`RetainedUtterance` persistence below: the `attendees.preferred_language`
+column already exists in the schema (`app_spec.txt` feature 10) — writing a
+learned `AttendeeLanguagePreference` there, and resolving which `AttendeeId`
+a given meeting's `ParticipantId` stream actually belongs to (a calendar
+invite / enrolment concern, not a language-tagging one), both belong to
+whichever crate owns the live pipeline loop and the engagement's storage
+layer. This crate has no storage layer and shouldn't grow one.
 
 ## FR-2.19: retain the original-language utterance alongside any translation (this update)
 
@@ -106,6 +177,10 @@ collapsing, and auto-detection continuing to update the list post-override).
 
 ## What's here
 
+- `attendee_preference.rs` — `AttendeeLanguagePreferences` (FR-2.16, see
+  above): learns each attendee's preferred language across an engagement
+  from confident per-meeting observations, and biases a later meeting's
+  observation confidence toward that learned preference.
 - `detected_languages.rs` — `DetectedLanguagePanel`, the live, panel-facing
   registry of every language detected so far in the meeting:
   - `observe(language, confidence)` adds or refreshes a language's entry
@@ -131,9 +206,11 @@ collapsing, and auto-detection continuing to update the list post-override).
   above): pairs an utterance's original-language text with every
   translation produced from it, structurally preventing the original from
   ever being replaced or discarded once set.
-- `mod.rs` — declares `pub mod detected_languages;` and `pub mod retention;`,
-  and re-exports `DetectedLanguage`, `DetectedLanguagePanel`,
-  `RetainedUtterance`, `Translation`.
+- `mod.rs` — declares `pub mod attendee_preference;`,
+  `pub mod detected_languages;`, and `pub mod retention;`, and re-exports
+  `AttendeeId`, `AttendeeLanguagePreference`, `AttendeeLanguagePreferences`,
+  `DetectedLanguage`, `DetectedLanguagePanel`, `RetainedUtterance`,
+  `Translation`.
 
 ## Wiring needed
 
@@ -147,8 +224,9 @@ pub mod tags;
 ```
 
 No other integration required here — `detected_languages` only depends on
-`tags::tier` (already in this directory), and `retention` has no
-dependencies on any other file in this directory at all.
+`tags::tier` (already in this directory), and `retention` and
+`attendee_preference` have no dependencies on any other file in this
+directory at all.
 
 ## What's not done here
 
@@ -156,6 +234,13 @@ dependencies on any other file in this directory at all.
   `ParticipantLanguageTags` updates) into calls to `observe` — that belongs
   to whichever crate owns the live pipeline loop once `tags` is wired into
   `lib.rs` and can depend on this crate.
+- Resolving a meeting's `ParticipantId` streams to the engagement's
+  `AttendeeId`s, calling `AttendeeLanguagePreferences::observe_meeting` with
+  each meeting's confident final tag, feeding `bias_confidence` back into a
+  later meeting's detection, and persisting the resulting
+  `AttendeeLanguagePreference` to the `attendees.preferred_language` column
+  — all belong to whichever crate owns the live pipeline loop and the
+  engagement's storage layer, same as the `observe()` wiring above.
 - Wiring the actual UI tap gesture (`apps/desktop`) to call
   `override_language` — out of this crate's footprint; this module only
   exposes the state machine the tap should drive.
@@ -171,8 +256,8 @@ dependencies on any other file in this directory at all.
   crate's footprint entirely.
 
 Verified locally (temporarily wiring `pub mod tags;` into `lib.rs`, then
-reverting it — see top of this file): `cargo test` — 115/115 pass (11 new
-for FR-2.19); `cargo clippy --all-targets -- -D warnings` — clean;
+reverting it — see top of this file): `cargo test` — 106/106 pass (17 new
+for FR-2.16); `cargo clippy --all-targets -- -D warnings` — clean;
 pre-existing rustfmt drift across sibling `tags` files (struct-literal
 wrapping) predates this feature and was left untouched, matching
 `numerals/HANDOFF.md`'s prior note.
