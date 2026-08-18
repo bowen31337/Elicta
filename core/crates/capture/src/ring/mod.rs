@@ -6,10 +6,12 @@
 //! module is the single chokepoint downstream of the ring buffer's real-time
 //! write side where that variance is resolved into one uniform shape.
 
+mod buffer;
 mod format;
 mod normalize;
 mod pipeline;
 
+pub use buffer::{RingBuffer, RingBufferMetrics};
 pub use format::{AudioFormat, TARGET_CHANNELS, TARGET_FORMAT, TARGET_SAMPLE_RATE};
 pub use normalize::Normalizer;
 pub use pipeline::{NormalizedFrame, NormalizingPipeline, RawFrame};
