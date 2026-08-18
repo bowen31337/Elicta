@@ -5,11 +5,15 @@
  * question text rendered beneath it at smaller weight. Both fields belong
  * here (rather than being derived) because two-tier rendering is decided
  * upstream, where language and phrasing are chosen (PRD §8.2b).
+ *
+ * `triggerReason` is required, not optional: every surfaced nudge must be
+ * shown with the reason it fired so the operator can calibrate trust in the
+ * system, including after it has receded into history (PRD FR-5.11).
  */
 export interface Nudge {
   id: string;
   stub: string;
   question: string;
-  triggerReason?: string;
+  triggerReason: string;
   createdAt: number;
 }

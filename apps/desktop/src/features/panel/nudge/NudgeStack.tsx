@@ -17,7 +17,10 @@ export function historyOpacity(index: number): number {
 
 /**
  * Renders exactly one nudge prominently; every prior nudge recedes into a
- * dimmed, most-recent-first history list beneath it (PRD FR-6.3).
+ * dimmed, most-recent-first history list beneath it (PRD FR-6.3). The
+ * trigger reason is shown alongside both the active nudge and every history
+ * entry, not just the active one, so trust calibration survives a nudge
+ * receding into history (PRD FR-5.11).
  */
 export function NudgeStack({ active, history }: NudgeStackProps) {
   return (
@@ -26,9 +29,7 @@ export function NudgeStack({ active, history }: NudgeStackProps) {
         <article key={active.id} className="nudge-stack__active" aria-live="polite">
           <p className="nudge-stack__stub">{active.stub}</p>
           <p className="nudge-stack__question">{active.question}</p>
-          {active.triggerReason ? (
-            <p className="nudge-stack__reason">{active.triggerReason}</p>
-          ) : null}
+          <p className="nudge-stack__reason">{active.triggerReason}</p>
         </article>
       ) : (
         <p className="nudge-stack__empty">No active nudge</p>
@@ -43,6 +44,7 @@ export function NudgeStack({ active, history }: NudgeStackProps) {
               style={{ opacity: historyOpacity(index) }}
             >
               <span className="nudge-stack__history-stub">{nudge.stub}</span>
+              <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
             </li>
           ))}
         </ol>

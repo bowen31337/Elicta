@@ -4,7 +4,13 @@ import { useNudgeStack } from '../useNudgeStack';
 import type { Nudge } from '../types';
 
 function makeNudge(id: string): Nudge {
-  return { id, stub: `stub-${id}`, question: `question ${id}?`, createdAt: 0 };
+  return {
+    id,
+    stub: `stub-${id}`,
+    question: `question ${id}?`,
+    triggerReason: `reason-${id}`,
+    createdAt: 0,
+  };
 }
 
 describe('useNudgeStack', () => {

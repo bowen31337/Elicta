@@ -4,7 +4,13 @@ import { NudgeStack, historyOpacity } from '../NudgeStack';
 import type { Nudge } from '../types';
 
 function makeNudge(id: string): Nudge {
-  return { id, stub: `stub-${id}`, question: `question ${id}?`, createdAt: 0 };
+  return {
+    id,
+    stub: `stub-${id}`,
+    question: `question ${id}?`,
+    triggerReason: `reason-${id}`,
+    createdAt: 0,
+  };
 }
 
 describe('NudgeStack', () => {
@@ -12,6 +18,22 @@ describe('NudgeStack', () => {
     render(<NudgeStack active={makeNudge('a')} history={[]} />);
     expect(screen.getByText('stub-a')).toBeInTheDocument();
     expect(screen.getByText('question a?')).toBeInTheDocument();
+  });
+
+  it('shows the trigger reason alongside the active nudge', () => {
+    render(<NudgeStack active={makeNudge('a')} history={[]} />);
+    expect(screen.getByText('reason-a')).toBeInTheDocument();
+  });
+
+  it('shows the trigger reason alongside every history entry', () => {
+    render(
+      <NudgeStack
+        active={makeNudge('c')}
+        history={[makeNudge('b'), makeNudge('a')]}
+      />
+    );
+    expect(screen.getByText('reason-b')).toBeInTheDocument();
+    expect(screen.getByText('reason-a')).toBeInTheDocument();
   });
 
   it('renders exactly one prominent nudge even with a long history', () => {
