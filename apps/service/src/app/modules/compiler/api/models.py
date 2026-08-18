@@ -89,3 +89,33 @@ class MeetingQuestionBank(BaseModel):
     meeting_id: str
     candidates: list[BankCandidate]
     generated_at: datetime
+
+
+class QuestionBankSection(BaseModel):
+    """One template section's branch in the reviewable question bank tree (PRD FR-4.8).
+
+    `candidates` carries a section's candidates in the same relative order
+    they arrived in from the compiled candidate set -- the same ascending,
+    lower-ranks-higher `priority` convention `BankCandidate` already uses --
+    so a section's order in the tree matches the order a reviewer would rank
+    them in.
+    """
+
+    template_section: str
+    candidates: list[BankCandidate]
+
+
+class EngagementQuestionBank(BaseModel):
+    """An engagement's compiled question bank, rendered as a reviewable tree grouped by template section (PRD FR-4.8).
+
+    Grouped into `sections` rather than returned as `MeetingQuestionBank`'s
+    flat candidate list: this is the engagement's own compiled set (from
+    `POST /api/engagements/{id}/bank/compile`, out of this feature's
+    footprint) as a reviewer inspects it once, before any individual
+    meeting recompiles from it -- so it renders as branches a reviewer can
+    expand and act on rather than one long list.
+    """
+
+    engagement_id: str
+    sections: list[QuestionBankSection]
+    generated_at: datetime

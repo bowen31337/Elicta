@@ -12,7 +12,9 @@ persisted row does. `DELETE /api/bank/candidates/{id}` returns 204, or 404
 if `delete_candidate` raises `CandidateNotFoundError`. `PATCH
 /api/bank/candidates/{id}` edits, reorders, or prunes a candidate and
 returns 200 with the updated candidate, or 404 if `update_candidate` raises
-the same `CandidateNotFoundError`.
+the same `CandidateNotFoundError`. `GET /api/engagements/{id}/bank` returns
+200 with the engagement's compiled question bank rendered as a reviewable
+tree grouped by `template_section`.
 """
 
 from __future__ import annotations
@@ -21,7 +23,9 @@ from app.modules.compiler.api.errors import CandidateNotFoundError
 from app.modules.compiler.api.models import (
     BankCandidate,
     CandidatePatchRequest,
+    EngagementQuestionBank,
     MeetingQuestionBank,
+    QuestionBankSection,
 )
 from app.modules.compiler.api.recompile import (
     INHERITED_TEMPLATE_SECTION,
@@ -31,11 +35,14 @@ from app.modules.compiler.api.recompile import (
 from app.modules.compiler.api.router import (
     DeleteCandidate,
     GetBaseCandidates,
+    GetCompiledCandidates,
     GetInheritedOpenQuestions,
     UpdateCandidate,
     build_bank_candidates_router,
+    build_engagement_bank_router,
     build_meeting_bank_router,
 )
+from app.modules.compiler.api.tree import build_question_bank_tree
 
 __all__ = [
     "INHERITED_TEMPLATE_SECTION",
@@ -43,12 +50,17 @@ __all__ = [
     "CandidateNotFoundError",
     "CandidatePatchRequest",
     "DeleteCandidate",
+    "EngagementQuestionBank",
     "GetBaseCandidates",
+    "GetCompiledCandidates",
     "GetInheritedOpenQuestions",
     "InheritedOpenQuestion",
     "MeetingQuestionBank",
+    "QuestionBankSection",
     "UpdateCandidate",
     "build_bank_candidates_router",
+    "build_engagement_bank_router",
     "build_meeting_bank_router",
+    "build_question_bank_tree",
     "recompile_meeting_bank",
 ]

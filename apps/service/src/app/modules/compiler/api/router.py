@@ -26,6 +26,14 @@ editing, reordering, or pruning a candidate before its meeting starts
 (`PATCH /api/bank/candidates/{id}`, returns 200 with the updated candidate).
 It raises the same `CandidateNotFoundError` as `delete_candidate` for an
 unknown `candidate_id`, which this router turns into a 404 the same way.
+
+`build_engagement_bank_router` takes a `get_compiled_candidates` callable,
+the same injected-callable shape as the rest of this module, and exposes
+`GET /api/engagements/{id}/bank`: an engagement's compiled question bank
+rendered as a reviewable tree grouped by `template_section`, rather than
+`MeetingQuestionBank`'s flat per-meeting candidate list. Like
+`get_meeting_bank`, it always returns 200 -- an engagement with no compiled
+candidates yet simply renders an empty tree.
 """
 
 from __future__ import annotations
@@ -35,13 +43,20 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 
 from .errors import CandidateNotFoundError
-from .models import BankCandidate, CandidatePatchRequest, MeetingQuestionBank
+from .models import (
+    BankCandidate,
+    CandidatePatchRequest,
+    EngagementQuestionBank,
+    MeetingQuestionBank,
+)
 from .recompile import InheritedOpenQuestion, recompile_meeting_bank
+from .tree import build_question_bank_tree
 
 GetBaseCandidates = Callable[[str], Awaitable[list[BankCandidate]]]
 GetInheritedOpenQuestions = Callable[[str], Awaitable[list[InheritedOpenQuestion]]]
 DeleteCandidate = Callable[[str], Awaitable[None]]
 UpdateCandidate = Callable[[str, CandidatePatchRequest], Awaitable[BankCandidate]]
+GetCompiledCandidates = Callable[[str], Awaitable[list[BankCandidate]]]
 
 
 def build_meeting_bank_router(
@@ -80,5 +95,16 @@ def build_bank_candidates_router(
             return await update_candidate(candidate_id, payload)
         except CandidateNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return router
+
+
+def build_engagement_bank_router(get_compiled_candidates: GetCompiledCandidates) -> APIRouter:
+    router = APIRouter(prefix="/api/engagements", tags=["compiler-bank"])
+
+    @router.get("/{engagement_id}/bank", response_model=EngagementQuestionBank, status_code=200)
+    async def get_engagement_bank(engagement_id: str) -> EngagementQuestionBank:
+        candidates = await get_compiled_candidates(engagement_id)
+        return build_question_bank_tree(engagement_id, candidates)
 
     return router
