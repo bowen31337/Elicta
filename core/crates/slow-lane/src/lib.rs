@@ -20,10 +20,12 @@
 
 pub mod orchestrator;
 pub mod replay;
+pub mod request;
 pub mod ticker;
 
 pub use orchestrator::{SlowLaneOrchestrator, TickDecision};
 pub use replay::ReplayRun;
+pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
 
 /// End-to-end proof that the two halves of this crate compose into what
@@ -90,6 +92,38 @@ mod orchestrator_ticks_end_to_end {
             orchestrator.on_tick(second),
             TickDecision::CancelInFlightAndStart(second),
             "the next tick still arrives on schedule and is flagged to cancel-and-replace"
+        );
+
+        ticker.stop();
+    }
+
+    /// Ties §14.3's two guarantees together end to end: every tick the
+    /// orchestrator decides to act on — whether a clean start or a
+    /// cancel-and-replace of a hung pass — is paired with a
+    /// [`SlowLaneRequestConfig`] that sends its effort setting. Nothing
+    /// about a cancelled/replaced tick should ever produce a request that
+    /// skips it.
+    #[test]
+    fn every_slow_lane_request_built_for_a_tick_decision_sends_its_effort_setting() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let mut orchestrator = SlowLaneOrchestrator::new();
+        let format = ResponseSchema::new("slow_lane_pass", "{\"type\":\"object\"}");
+
+        let first = ticks.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(orchestrator.on_tick(first), TickDecision::Start(first));
+        // Deliberately never call mark_complete(), forcing the next tick
+        // into the cancel-and-replace branch below.
+
+        let second = ticks.recv_timeout(Duration::from_secs(1)).unwrap();
+        let decision = orchestrator.on_tick(second);
+        assert_eq!(decision, TickDecision::CancelInFlightAndStart(second));
+
+        let config = SlowLaneRequestConfig::new(format);
+        assert_eq!(
+            config.effort(),
+            Effort::Low,
+            "a cancelled-and-replaced tick must still send an effort setting, not skip it"
         );
 
         ticker.stop();
