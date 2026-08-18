@@ -1,6 +1,7 @@
 //! Reliability and failure-mode checks shared across the desktop core
 //! (architecture §10).
 
+mod asr_backend_crash;
 mod capture_stream;
 mod device_route;
 mod language_panel;
@@ -8,6 +9,9 @@ mod preflight;
 mod question_bank;
 mod session_resume;
 
+pub use asr_backend_crash::{
+    AsrBackendCrashAlert, AsrHeartbeatMonitor, TranscriptGapMarker, DEFAULT_HEARTBEAT_TIMEOUT,
+};
 pub use capture_stream::{
     reconcile_roster, CaptureStreamDropAlert, FallbackAction, ParticipantId, RosterEntry,
     DEFAULT_MISSED_HEARTBEAT_THRESHOLD,
