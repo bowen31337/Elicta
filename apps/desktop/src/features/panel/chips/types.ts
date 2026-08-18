@@ -59,3 +59,18 @@ export interface FollowOnCandidate {
   readonly threadId: string;
   readonly question: string;
 }
+
+/**
+ * Confirmation that tapping `Park it` on a `Thread` deferred it to the
+ * `open_questions` table (PRD FR-6.8). Carried as its own type rather than
+ * a field on `Thread`, mirroring `FollowOnCandidate`: parking is something
+ * that happens to the thread, not a fact about it the way
+ * `operatorAskedAt` is, and it deliberately leaves `operatorAskedAt`
+ * untouched -- parking defers a thread for later without resolving or
+ * dismissing it, so the thread stays live in the panel exactly as it was
+ * before the tap.
+ */
+export interface ParkedThread {
+  readonly threadId: string;
+  readonly openQuestionId: string;
+}
