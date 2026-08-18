@@ -259,6 +259,9 @@ def make_meeting_client(
     async def save_alignment(alignment: SessionAlignment) -> None:
         alignment_store[alignment.session_id] = alignment
 
+    async def get_alignment(meeting_id: str) -> SessionAlignment | None:
+        return alignment_store.get(meeting_id)
+
     app = FastAPI()
     app.include_router(
         build_meeting_transcription_router(
@@ -268,6 +271,7 @@ def make_meeting_client(
             save_job,
             schedule,
             save_alignment=save_alignment if with_alignment else None,
+            get_alignment=get_alignment if with_alignment else None,
         )
     )
     return (
@@ -346,3 +350,107 @@ def test_running_the_scheduled_meeting_work_persists_an_alignment_when_wired():
 
     assert "meeting-1" in alignment_store
     assert len(alignment_store["meeting-1"].spans) > 0
+
+
+def make_diverging_meeting_client():
+    """A meeting client whose two engines agree on one span and diverge on another.
+
+    `make_meeting_client`'s stub engines always produce identical output, so
+    every span comes back non-divergent — no good for exercising the
+    divergences endpoint's filtering. This builds two engines directly (skipping
+    `make_engine`) that disagree on the second segment.
+    """
+
+    transcript_store: dict[str, list[RecordPathTranscript]] = {}
+    job_store: list[RecordPathTranscriptionJob] = []
+    scheduled: list = []
+    alignment_store: dict[str, SessionAlignment] = {}
+
+    async def transcribe_a(meeting_id: str, audio_ref: str, keyterms: list[str]) -> BatchTranscriptionOutput:
+        return BatchTranscriptionOutput(
+            engine="engine-a",
+            segments=[
+                TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there"),
+                TranscriptSegment(start_seconds=1.0, end_seconds=2.0, text="apple banana"),
+            ],
+            text="hello there apple banana",
+        )
+
+    async def transcribe_b(meeting_id: str, audio_ref: str, keyterms: list[str]) -> BatchTranscriptionOutput:
+        return BatchTranscriptionOutput(
+            engine="engine-b",
+            segments=[
+                TranscriptSegment(start_seconds=0.0, end_seconds=1.0, text="hello there"),
+                TranscriptSegment(start_seconds=1.0, end_seconds=2.0, text="xylophone zebra"),
+            ],
+            text="hello there xylophone zebra",
+        )
+
+    engines = [("engine-a", transcribe_a), ("engine-b", transcribe_b)]
+
+    async def get_vocabulary(meeting_id: str) -> list[str]:
+        return []
+
+    async def save_transcript(transcript: RecordPathTranscript) -> None:
+        transcript_store.setdefault(transcript.session_id, []).append(transcript)
+
+    async def save_job(job: RecordPathTranscriptionJob) -> None:
+        job_store.append(job)
+
+    def schedule(work) -> None:
+        scheduled.append(work)
+
+    async def save_alignment(alignment: SessionAlignment) -> None:
+        alignment_store[alignment.session_id] = alignment
+
+    async def get_alignment(meeting_id: str) -> SessionAlignment | None:
+        return alignment_store.get(meeting_id)
+
+    app = FastAPI()
+    app.include_router(
+        build_meeting_transcription_router(
+            engines,
+            get_vocabulary,
+            save_transcript,
+            save_job,
+            schedule,
+            save_alignment=save_alignment,
+            get_alignment=get_alignment,
+        )
+    )
+    return TestClient(app, raise_server_exceptions=False), scheduled
+
+
+def test_getting_meeting_divergences_returns_only_the_divergent_spans_with_200():
+    client, scheduled = make_diverging_meeting_client()
+
+    client.post(
+        "/api/meetings/meeting-1/record/transcribe",
+        json={"audio_ref": "recordings/meeting-1.wav"},
+    )
+    asyncio.run(scheduled[0]())
+
+    response = client.get("/api/meetings/meeting-1/record/divergences")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["spans"]) == 1
+    assert body["spans"][0]["reference_text"] == "apple banana"
+    assert body["spans"][0]["is_divergent"] is True
+
+
+def test_getting_meeting_divergences_for_unknown_meeting_returns_404_when_wired():
+    client, _, _, _, _ = make_meeting_client(with_alignment=True)
+
+    response = client.get("/api/meetings/unknown-meeting/record/divergences")
+
+    assert response.status_code == 404
+
+
+def test_the_meeting_divergences_route_is_not_registered_when_get_alignment_is_not_supplied():
+    client, _, _, _, _ = make_meeting_client()
+
+    response = client.get("/api/meetings/meeting-1/record/divergences")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] != "record-path alignment not found"

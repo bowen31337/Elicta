@@ -100,6 +100,18 @@ def align_transcripts(
     )
 
 
+def divergent_spans(alignment: SessionAlignment) -> list[AlignedSpan]:
+    """The subset of `alignment`'s spans PRD FR-2.8 requires surfacing for debrief review.
+
+    `is_divergent` already is the divergent-or-low-confidence flag (see its
+    docstring on `AlignedSpan`) — this just selects on it, rather than
+    re-deriving anything from `agreement_score`, so the debrief view and the
+    threshold that produced `is_divergent` can never disagree.
+    """
+
+    return [span for span in alignment.spans if span.is_divergent]
+
+
 def align_completed_transcripts(
     transcripts: list[RecordPathTranscript],
     *,

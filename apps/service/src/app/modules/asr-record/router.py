@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from fastapi import APIRouter, HTTPException
 
+from .alignment import divergent_spans
 from .models import RecordPathTranscript, RecordPathTranscriptionJob, SessionAlignment
 from .schemas import RecordPathTranscriptionRequest
 from .service import (
@@ -98,6 +99,7 @@ def build_meeting_transcription_router(
     save_job: SaveTranscriptionJob,
     schedule: ScheduleTranscriptionWork,
     save_alignment: SaveSessionAlignment | None = None,
+    get_alignment: GetSessionAlignment | None = None,
 ) -> APIRouter:
     """Async, job-based entry point for starting one meeting's record-path run.
 
@@ -129,5 +131,30 @@ def build_meeting_transcription_router(
             schedule,
             save_alignment=save_alignment,
         )
+
+    if get_alignment is not None:
+
+        @router.get(
+            "/{meeting_id}/record/divergences",
+            response_model=SessionAlignment,
+        )
+        async def get_meeting_record_divergences(meeting_id: str) -> SessionAlignment:
+            """The divergent/low-confidence spans from this meeting's alignment (PRD FR-2.8).
+
+            Reuses `SessionAlignment` as the response shape rather than a
+            bespoke schema — `meeting_id` already lands in its `session_id`
+            field, the same way the async job path above already treats a
+            meeting id as the session id for every other persisted record.
+            Narrows `spans` down to `divergent_spans(alignment)` so a debrief
+            reviewer only sees what PRD FR-2.8 requires surfacing, not every
+            aligned span including the ones the two engines agreed on.
+            """
+
+            alignment = await get_alignment(meeting_id)
+            if alignment is None:
+                raise HTTPException(
+                    status_code=404, detail="record-path alignment not found"
+                )
+            return alignment.model_copy(update={"spans": divergent_spans(alignment)})
 
     return router
