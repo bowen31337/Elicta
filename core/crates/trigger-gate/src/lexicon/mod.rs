@@ -34,11 +34,13 @@
 //! types once crate wiring lands — the field sets are deliberately
 //! identical.
 
+pub mod evaluation;
 pub mod grouping;
 pub mod hold;
 pub mod router;
 pub mod terms;
 
+pub use evaluation::{evaluate_utterance, FinalisedUtterance, GateDecision, SpeakerTag};
 pub use grouping::{group_by_language, LanguageGroup, PositionedToken, TaggedToken};
 pub use hold::{CandidateHold, DiscardReason, HeldCandidate, Resolution};
 pub use router::LexiconRouter;

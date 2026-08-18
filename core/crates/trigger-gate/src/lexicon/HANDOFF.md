@@ -1,5 +1,100 @@
 # lexicon module — handoff
 
+## Update: the gate evaluation loop (PRD FR-5.1)
+
+Implements "System evaluates every finalised utterance whose speaker tag is
+not operator against the trigger gate (PRD FR-5.1). Done when every
+non-operator utterance emits a gate decision." This is "feature 141" —
+"the overall gate evaluation loop that decides which utterances reach this
+module at all" — that every prior HANDOFF in this crate (`lexicon`'s own
+feature-145 and FR-5.9 sections below, `parse/HANDOFF.md`,
+`ratelimit/HANDOFF.md`) named and explicitly deferred. Architecture §3.5
+states it plainly: "FR-5.1 requires every finalised utterance to be
+evaluated; the gate refines this by evaluating only utterances whose
+`speaker` is not `Operator`, since a nudge prompting the operator to
+interrogate their own sentence is never useful."
+
+### What's here
+
+- `evaluation.rs` — `SpeakerTag` (`Operator` / `Participant(String)` /
+  `Unknown`, mirroring `asr-live::backend::event::SpeakerTag` field-for-field
+  for the same no-Cargo-dependency-yet reason `grouping::TaggedToken`
+  mirrors `language::segment`'s type), `FinalisedUtterance` (`id`,
+  `speaker`, `tokens`), `GateDecision` (`utterance_id`, `events`), and
+  `evaluate_utterance`. `evaluate_utterance` is the first place a `speaker`
+  tag and a lexicon match ever meet in this crate: it returns `None` for an
+  `Operator`-tagged utterance without touching the router at all, and
+  `Some(GateDecision)` for every other utterance — routing its tokens
+  through an existing `LexiconRouter` (feature 145), then running each
+  resulting match through `parse::gate_span_confidence` (NFR-5.6) to produce
+  one `TriggerEvent` per match. A `GateDecision` is returned even when
+  `events` is empty: "nothing matched" is itself the gate's decision for
+  that utterance, not the absence of one.
+- `mod.rs` — re-exports `evaluate_utterance`, `FinalisedUtterance`,
+  `GateDecision`, `SpeakerTag` alongside the existing exports.
+
+A private `token_span` helper turns a `LexiconMatch`'s `token_index` into
+the `Range<usize>` `gate_span_confidence` needs, by reconstructing the
+utterance's tokens as one ASCII-space-joined string and locating that
+token's own slice within it. This is a genuinely new answer to a question
+`parse/HANDOFF.md` left open ("Turning a `lexicon::LexiconMatch` plus the
+`TaggedToken`s it was matched from into the `(span, word_confidences)`
+`gate_span_confidence` takes ... not decided here") — neither `TaggedToken`
+nor `asr-live`'s own `Token` carry a byte offset into the source utterance
+text at all, so there is no byte-perfect ground truth to reconstruct against
+regardless of which crate this landed in. Space-joining is a simplifying
+assumption, documented on `token_span` itself, not a guarantee that it
+matches a vendor's original spacing/punctuation byte-for-byte.
+
+### Why this satisfies "every non-operator utterance emits a gate decision"
+
+`evaluate_utterance`'s two-branch shape makes the contract structural:
+speaker is checked exactly once, before anything else runs, and the only
+two possible returns are `None` (never evaluated, `Operator` only) or
+`Some(GateDecision)` (evaluated, always carrying a decision even with zero
+events). There is no third path that evaluates a non-operator utterance and
+returns nothing.
+`an_operator_utterance_is_never_evaluated_even_with_a_matching_term` proves
+the exclusion holds even when the lexicon would otherwise fire.
+`an_unknown_speaker_utterance_is_also_evaluated` proves the exclusion is
+exactly `Operator`, not "any speaker tag short of a confirmed participant" —
+FR-5.1's own "not operator" phrasing, taken literally.
+`a_participant_utterance_with_no_lexicon_match_still_emits_a_decision`
+proves the "decision" is the `GateDecision` wrapper itself, not contingent
+on at least one match.
+`a_match_below_span_confidence_is_suppressed_not_dropped` and
+`a_code_switched_utterance_emits_one_event_per_language_match` prove the
+loop actually threads a real match through `gate_span_confidence` and the
+per-language router respectively, rather than short-circuiting either.
+
+### What's not done here
+
+- FR-5.7's rolling pass-rate self-regulation and FR-5.8's storm absorption
+  (`ratelimit/`) are not consumed by `evaluate_utterance` — it produces
+  `TriggerEvent`s but does not feed them into a `PassRateCounter` or
+  `ThresholdRegulator`. Both HANDOFFs already named this as "the caller's
+  decision, made at the same integration point" as this loop; wiring it in
+  is a natural next step but changes files outside this directory
+  (`ratelimit/`), out of scope for a change scoped to `lexicon/`.
+- FR-5.9's interim-hypothesis holding (`hold.rs`, above) is not threaded
+  through `evaluate_utterance` — this loop only evaluates a *finalised*
+  utterance's already-final token vector, matching FR-5.1's own wording. A
+  caller wanting interim-hold behavior for a given stream still calls
+  `CandidateHold` directly against that stream's interim/endpoint sequence.
+- Sourcing a real `FinalisedUtterance` from `asr-live`'s
+  `FinalUtteranceEvent` — this module proves the evaluation contract over
+  its own local `SpeakerTag`/`FinalisedUtterance` types, not a live
+  conversion from the ASR crate's event stream (no Cargo dependency exists
+  yet, same gap `grouping.rs` already flags for `TaggedToken`).
+
+Verified with `cargo test -p trigger-gate` (60/60 pass — 51 prior tests
+untouched, 9 new `evaluation` tests), `cargo clippy -p trigger-gate
+--all-targets -- -D warnings` (clean), `cargo fmt -p trigger-gate -- --check`
+on `evaluation.rs` and `mod.rs` (clean; `ratelimit/regulation.rs` and
+`ratelimit/storm.rs` still carry the same pre-existing, unrelated formatting
+diffs the FR-5.9 update above already noted and left alone), and
+`cargo build --workspace` (still succeeds).
+
 ## Update: interim-hypothesis holding (PRD FR-5.9)
 
 Implements "System runs the lexicon scan against interim hypotheses,
