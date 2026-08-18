@@ -214,6 +214,29 @@ mod tests {
         assert!(warning.is_none());
     }
 
+    /// The architecture §14.1 requirement in the shape the operator-facing
+    /// capture profile view checks: whichever kind gets selected, its
+    /// voice-processing profile shows every option disabled.
+    #[test]
+    fn every_capture_path_reports_a_fully_disabled_voice_processing_profile() {
+        let mut registry = registry_with_every_kind();
+
+        for kind in [
+            AudioSourceKind::LineIn,
+            AudioSourceKind::Loopback,
+            AudioSourceKind::ManagedParticipant,
+            AudioSourceKind::AcousticFallback,
+        ] {
+            let source = registry.select(kind).expect("registered above");
+            let profile = source.voice_processing_profile();
+
+            assert!(
+                profile.every_option_disabled(),
+                "kind {kind:?} should disable every voice-processing option"
+            );
+        }
+    }
+
     #[test]
     fn selecting_an_unregistered_kind_with_warning_returns_none() {
         let mut registry = AudioSourceRegistry::new(vec![Box::new(MockSource {

@@ -12,6 +12,7 @@
 use crate::ring::{AudioFormat, RawFrame};
 
 use super::kind::AudioSourceKind;
+use super::profile::CaptureProfile;
 
 /// A capture backend failed to produce the next frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,4 +45,15 @@ pub trait AudioSource {
     /// (no more frames, not an error); `Err` when the underlying device or
     /// stream failed.
     fn next_frame(&mut self) -> Result<Option<RawFrame>, AudioSourceError>;
+
+    /// The platform voice-processing profile this source captures under
+    /// (architecture §14.1). Defaults to [`CaptureProfile::all_disabled`]
+    /// because no capture path in this system instantiates the platform's
+    /// voice-processing IO unit — AGC, noise suppression, and beamforming
+    /// all stay off so the acoustic model sees the raw input. A backend only
+    /// overrides this if its native API cannot be configured to skip voice
+    /// processing entirely, which none currently require.
+    fn voice_processing_profile(&self) -> CaptureProfile {
+        CaptureProfile::all_disabled()
+    }
 }

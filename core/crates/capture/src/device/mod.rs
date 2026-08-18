@@ -17,9 +17,11 @@
 //! trait, not part of this module.
 
 mod kind;
+mod profile;
 mod registry;
 mod source;
 
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
+pub use profile::{CaptureProfile, ProcessingState, VoiceProcessingOption, VOICE_PROCESSING_OPTIONS};
 pub use registry::AudioSourceRegistry;
 pub use source::{AudioSource, AudioSourceError};
