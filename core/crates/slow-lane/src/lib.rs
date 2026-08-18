@@ -18,6 +18,7 @@
 //! separate features that consume the events and decisions this crate
 //! produces — this crate owns the tick and the overlap invariant only.
 
+pub mod cache_lifetime;
 pub mod model;
 pub mod orchestrator;
 pub mod prompt;
@@ -25,6 +26,7 @@ pub mod replay;
 pub mod request;
 pub mod ticker;
 
+pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
 pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
 pub use prompt::{MeetingPromptContext, PromptBlock, SlowLanePrompt};
@@ -205,6 +207,63 @@ mod orchestrator_ticks_end_to_end {
             let prompt = context.for_tick(variable);
             run.run_tick(event, &prompt, usage);
         }
+
+        ticker.stop();
+    }
+
+    /// This crate's version of the settings half of the caching guarantee:
+    /// a meeting configured with a non-default cache lifetime must keep
+    /// sending that lifetime on every tick, including one that hits the
+    /// cancel-and-replace branch, the same way §14.3's model-pinning
+    /// guarantee holds across a hung-pass retry. Also checks the plain
+    /// default case -- a context that never configures anything -- sends
+    /// the Messages API's own five-minute default, and that the crate's
+    /// 60-second tick interval keeps that default alive continuously for
+    /// the length of a meeting.
+    #[test]
+    fn a_meetings_configured_cache_lifetime_persists_in_settings_across_every_tick_even_after_a_cancel_and_replace() {
+        assert!(
+            CacheLifetime::default().is_kept_alive_by(DEFAULT_TICK_INTERVAL),
+            "the 60-second tick must refresh the five-minute default continuously for the length of a meeting"
+        );
+
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let mut orchestrator = SlowLaneOrchestrator::new();
+
+        let mut settings = CacheLifetimeSettings::new();
+        settings.set(CacheLifetime::OneHour);
+        let context = MeetingPromptContext::pin_with_cache_lifetime(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+            settings.configured(),
+        );
+
+        let mut lifetimes_sent = Vec::new();
+        for tick_index in 0..4 {
+            let event = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+            let decision = orchestrator.on_tick(event);
+            if !matches!(decision, TickDecision::CancelInFlightAndStart(_)) {
+                orchestrator.mark_complete();
+            }
+            // Tick 1 is deliberately left in flight to force tick 2 into
+            // the cancel-and-replace branch, mirroring a hung pass.
+            if tick_index == 2 {
+                orchestrator.mark_complete();
+            }
+
+            let prompt = context.for_tick(format!("tick {} fired at {:?}", event.sequence, event.fired_at));
+            let boundary = prompt.cache_boundary_index();
+            lifetimes_sent.push(prompt.blocks()[boundary].cache_lifetime());
+        }
+
+        assert!(
+            lifetimes_sent.iter().all(|lifetime| *lifetime == Some(CacheLifetime::OneHour)),
+            "a configured cache lifetime must persist in settings across every tick, never drifting back to the \
+             five-minute default: {lifetimes_sent:?}"
+        );
 
         ticker.stop();
     }

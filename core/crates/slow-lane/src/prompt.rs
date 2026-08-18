@@ -16,18 +16,33 @@
 //! `cache_control` marker on the last stable segment -- the attendee
 //! roster -- so the boundary always falls in the same place: after every
 //! stable segment, before the variable one.
+//!
+//! That `cache_control` marker carries a [`crate::cache_lifetime::CacheLifetime`]
+//! (architecture §3.8; five minutes by default, matching the Messages
+//! API's own default). A [`SlowLanePrompt`] built via
+//! [`SlowLanePrompt::new`] carries that default unless
+//! [`SlowLanePrompt::with_cache_lifetime`] overrides it, and a
+//! [`MeetingPromptContext`] pinned via
+//! [`MeetingPromptContext::pin_with_cache_lifetime`] carries whatever it
+//! was configured with into every tick's prompt for the rest of the
+//! meeting.
+
+use crate::cache_lifetime::CacheLifetime;
+#[cfg(test)]
+use crate::cache_lifetime::CacheLifetimeSettings;
 
 /// One block of the Messages API's `content` array. Mirrors the wire
 /// shape (`{"type": "text", "text": ..., "cache_control": {"type":
-/// "ephemeral"}}`) closely enough to check a request's shape without a
-/// caller needing to inspect a full JSON payload: `cached()` is true
-/// exactly when this block carries the `cache_control` marker, which is
-/// what makes everything up to and including it the prefix the API
-/// caches.
+/// "ephemeral", "ttl": ...}}`) closely enough to check a request's shape
+/// without a caller needing to inspect a full JSON payload: `cached()` is
+/// true exactly when this block carries the `cache_control` marker, which
+/// is what makes everything up to and including it the prefix the API
+/// caches, and [`Self::cache_lifetime`] carries the `ttl` that marker
+/// sends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptBlock {
     text: String,
-    cached: bool,
+    cache_control: Option<CacheLifetime>,
 }
 
 impl PromptBlock {
@@ -39,7 +54,13 @@ impl PromptBlock {
     /// marker -- the point up to and including this block is what the API
     /// caches as one prefix.
     pub fn cached(&self) -> bool {
-        self.cached
+        self.cache_control.is_some()
+    }
+
+    /// The `ttl` the `cache_control` marker sends, or `None` for a block
+    /// that carries no marker at all.
+    pub fn cache_lifetime(&self) -> Option<CacheLifetime> {
+        self.cache_control
     }
 }
 
@@ -57,6 +78,7 @@ pub struct SlowLanePrompt {
     template: String,
     attendee_roster: String,
     variable: String,
+    cache_lifetime: CacheLifetime,
 }
 
 impl SlowLanePrompt {
@@ -65,7 +87,9 @@ impl SlowLanePrompt {
     /// be identical to the previous tick's for the cache to hit at all;
     /// `variable` is the per-tick content (e.g. the newest transcript
     /// window) that is expected to change every time and so is never
-    /// cached.
+    /// cached. The cache boundary carries [`CacheLifetime::default`] --
+    /// the Messages API's own five-minute default -- unless
+    /// [`Self::with_cache_lifetime`] overrides it.
     pub fn new(
         system_instruction: impl Into<String>,
         engagement_digest: impl Into<String>,
@@ -79,7 +103,21 @@ impl SlowLanePrompt {
             template: template.into(),
             attendee_roster: attendee_roster.into(),
             variable: variable.into(),
+            cache_lifetime: CacheLifetime::default(),
         }
+    }
+
+    /// Overrides the cache lifetime the boundary block carries, e.g. to
+    /// configure the extended one-hour lifetime instead of the five-minute
+    /// default.
+    pub fn with_cache_lifetime(mut self, cache_lifetime: CacheLifetime) -> Self {
+        self.cache_lifetime = cache_lifetime;
+        self
+    }
+
+    /// The cache lifetime this prompt's boundary block carries.
+    pub fn cache_lifetime(&self) -> CacheLifetime {
+        self.cache_lifetime
     }
 
     pub fn system_instruction(&self) -> &str {
@@ -112,11 +150,11 @@ impl SlowLanePrompt {
     /// segment varies.
     pub fn blocks(&self) -> Vec<PromptBlock> {
         vec![
-            PromptBlock { text: self.system_instruction.clone(), cached: false },
-            PromptBlock { text: self.engagement_digest.clone(), cached: false },
-            PromptBlock { text: self.template.clone(), cached: false },
-            PromptBlock { text: self.attendee_roster.clone(), cached: true },
-            PromptBlock { text: self.variable.clone(), cached: false },
+            PromptBlock { text: self.system_instruction.clone(), cache_control: None },
+            PromptBlock { text: self.engagement_digest.clone(), cache_control: None },
+            PromptBlock { text: self.template.clone(), cache_control: None },
+            PromptBlock { text: self.attendee_roster.clone(), cache_control: Some(self.cache_lifetime) },
+            PromptBlock { text: self.variable.clone(), cache_control: None },
         ]
     }
 
@@ -147,29 +185,58 @@ pub struct MeetingPromptContext {
     engagement_digest: String,
     template: String,
     attendee_roster: String,
+    cache_lifetime: CacheLifetime,
 }
 
 impl MeetingPromptContext {
-    /// Pins the four stable segments for the rest of the meeting.
+    /// Pins the four stable segments for the rest of the meeting, using
+    /// [`CacheLifetime::default`] -- the Messages API's own five-minute
+    /// default -- for the cache boundary. Use
+    /// [`Self::pin_with_cache_lifetime`] to configure a different one.
     pub fn pin(
         system_instruction: impl Into<String>,
         engagement_digest: impl Into<String>,
         template: impl Into<String>,
         attendee_roster: impl Into<String>,
     ) -> Self {
+        Self::pin_with_cache_lifetime(system_instruction, engagement_digest, template, attendee_roster, CacheLifetime::default())
+    }
+
+    /// Pins the four stable segments plus an explicitly configured cache
+    /// lifetime (e.g. [`CacheLifetime::OneHour`]) for the rest of the
+    /// meeting. Every tick built from the resulting context via
+    /// [`Self::for_tick`] carries that same lifetime -- the same "pinned
+    /// for the meeting, never drifts" guarantee
+    /// [`crate::model::MeetingModel`] holds for the model identifier --
+    /// which is what lets a configured lifetime persist in settings across
+    /// a meeting rather than reset to the default on each tick.
+    pub fn pin_with_cache_lifetime(
+        system_instruction: impl Into<String>,
+        engagement_digest: impl Into<String>,
+        template: impl Into<String>,
+        attendee_roster: impl Into<String>,
+        cache_lifetime: CacheLifetime,
+    ) -> Self {
         Self {
             system_instruction: system_instruction.into(),
             engagement_digest: engagement_digest.into(),
             template: template.into(),
             attendee_roster: attendee_roster.into(),
+            cache_lifetime,
         }
+    }
+
+    /// The cache lifetime this meeting is configured with.
+    pub fn cache_lifetime(&self) -> CacheLifetime {
+        self.cache_lifetime
     }
 
     /// Builds one tick's prompt from the pinned stable segments plus
     /// `variable`, the only thing that may change tick to tick. Every
     /// prompt built from the same context, no matter how many ticks apart,
-    /// carries byte-identical stable segments -- there is no other way to
-    /// construct a [`SlowLanePrompt`] from this type.
+    /// carries byte-identical stable segments and the same configured
+    /// cache lifetime -- there is no other way to construct a
+    /// [`SlowLanePrompt`] from this type.
     pub fn for_tick(&self, variable: impl Into<String>) -> SlowLanePrompt {
         SlowLanePrompt::new(
             self.system_instruction.clone(),
@@ -178,6 +245,7 @@ impl MeetingPromptContext {
             self.attendee_roster.clone(),
             variable,
         )
+        .with_cache_lifetime(self.cache_lifetime)
     }
 }
 
@@ -324,5 +392,86 @@ mod tests {
         assert_eq!(prompt.template(), "extraction template v4");
         assert_eq!(prompt.attendee_roster(), "attendees: alice, bob, carol");
         assert_eq!(prompt.variable(), "utterance window 41-52");
+    }
+
+    #[test]
+    fn a_prompt_built_with_new_carries_the_five_minute_default_cache_lifetime() {
+        let prompt = prompt();
+        assert_eq!(prompt.cache_lifetime(), CacheLifetime::FiveMinutes);
+
+        let boundary = prompt.cache_boundary_index();
+        assert_eq!(prompt.blocks()[boundary].cache_lifetime(), Some(CacheLifetime::FiveMinutes));
+    }
+
+    #[test]
+    fn with_cache_lifetime_overrides_the_boundary_blocks_ttl_and_nothing_else() {
+        let default_prompt = prompt();
+        let overridden = prompt().with_cache_lifetime(CacheLifetime::OneHour);
+
+        assert_eq!(overridden.cache_lifetime(), CacheLifetime::OneHour);
+
+        let boundary = overridden.cache_boundary_index();
+        assert_eq!(overridden.blocks()[boundary].cache_lifetime(), Some(CacheLifetime::OneHour));
+
+        // Every other block, cached or not, is unaffected by the override.
+        for index in 0..overridden.blocks().len() {
+            if index != boundary {
+                assert_eq!(overridden.blocks()[index].text(), default_prompt.blocks()[index].text());
+                assert_eq!(overridden.blocks()[index].cache_lifetime(), default_prompt.blocks()[index].cache_lifetime());
+            }
+        }
+    }
+
+    #[test]
+    fn a_context_pinned_with_plain_pin_carries_the_five_minute_default_into_every_tick() {
+        let context = MeetingPromptContext::pin(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+        );
+        assert_eq!(context.cache_lifetime(), CacheLifetime::FiveMinutes);
+        assert_eq!(context.for_tick("utterance window 1-12").cache_lifetime(), CacheLifetime::FiveMinutes);
+    }
+
+    #[test]
+    fn a_configured_cache_lifetime_persists_in_settings_across_every_tick_a_context_builds() {
+        let context = MeetingPromptContext::pin_with_cache_lifetime(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+            CacheLifetime::OneHour,
+        );
+
+        let first_tick = context.for_tick("utterance window 1-12");
+        let second_tick = context.for_tick("utterance window 13-24");
+        let fortieth_tick = context.for_tick("utterance window 480-491");
+
+        for prompt in [&first_tick, &second_tick, &fortieth_tick] {
+            assert_eq!(
+                prompt.cache_lifetime(),
+                CacheLifetime::OneHour,
+                "a configured cache lifetime must persist across every tick, never drifting back to the default"
+            );
+            let boundary = prompt.cache_boundary_index();
+            assert_eq!(prompt.blocks()[boundary].cache_lifetime(), Some(CacheLifetime::OneHour));
+        }
+    }
+
+    #[test]
+    fn cache_lifetime_settings_configured_value_flows_unchanged_into_a_pinned_context() {
+        let mut settings = CacheLifetimeSettings::new();
+        settings.set(CacheLifetime::OneHour);
+
+        let context = MeetingPromptContext::pin_with_cache_lifetime(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+            settings.configured(),
+        );
+
+        assert_eq!(context.cache_lifetime(), settings.configured());
     }
 }
