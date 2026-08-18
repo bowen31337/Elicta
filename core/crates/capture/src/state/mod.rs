@@ -16,11 +16,17 @@
 //! machine ([`CaptureStateMachine`]) — a separate concern from segment
 //! retention above, but one that lives here because both are "what capture
 //! is doing right now" facts the record pipeline reads.
+//!
+//! [`CaptureIndicator`] is the third concern this module owns: the at-a-glance
+//! presentation of a [`CaptureState`] the UI's status indicator renders from
+//! (PRD FR-1.4).
 
+mod indicator;
 mod machine;
 mod segment;
 mod store;
 
+pub use indicator::{indicator_is_unambiguous, CaptureIndicator, IndicatorTone};
 pub use machine::{CaptureState, CaptureStateMachine, CaptureTransitionEvent, InvalidTransition};
 pub use segment::{AudioSegmentId, AudioSegmentRef};
 pub use store::SegmentStore;
