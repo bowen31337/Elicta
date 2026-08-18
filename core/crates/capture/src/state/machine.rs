@@ -15,8 +15,16 @@
 //! being appended to the log first. A caller (or a test) can always answer
 //! "what changed, and in what order" by reading the log, rather than having
 //! to infer history from the current state alone.
+//!
+//! Pausing carries a second guarantee beyond the log (PRD FR-1.3): every
+//! transition also flips a [`super::PauseSignal`] as its first observable
+//! effect, so a real-time audio callback holding a handle from
+//! [`CaptureStateMachine::pause_signal`] sees a pause take effect within one
+//! buffer period without ever touching a lock.
 
 use std::fmt;
+
+use super::signal::PauseSignal;
 
 /// The three states a capture session can be in at any moment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,20 +98,31 @@ impl std::error::Error for InvalidTransition {}
 pub struct CaptureStateMachine {
     state: CaptureState,
     log: Vec<CaptureTransitionEvent>,
+    signal: PauseSignal,
 }
 
 impl CaptureStateMachine {
-    /// A freshly constructed session always starts `Idle` with an empty log.
+    /// A freshly constructed session always starts `Idle` with an empty log
+    /// and a not-paused [`PauseSignal`].
     pub fn new() -> Self {
         Self {
             state: CaptureState::Idle,
             log: Vec::new(),
+            signal: PauseSignal::new(),
         }
     }
 
     /// The state this session is in right now.
     pub fn state(&self) -> CaptureState {
         self.state
+    }
+
+    /// A cheap, cloneable handle onto this session's pause bit, safe to hand
+    /// to a real-time audio callback (PRD FR-1.3). The handle stays live and
+    /// current for the session's whole lifetime — every future transition on
+    /// this machine updates the same underlying atomic every clone shares.
+    pub fn pause_signal(&self) -> PauseSignal {
+        self.signal.clone()
     }
 
     /// Every transition this session has undergone, oldest first. Reading
@@ -158,6 +177,11 @@ impl CaptureStateMachine {
             to,
         };
         self.state = to;
+        // Flip the signal before anything else about this transition is
+        // recorded: a single atomic store, so any reader polling
+        // `pause_signal()` once per buffer period observes it on their very
+        // next poll (PRD FR-1.3), well ahead of the `Vec` push below.
+        self.signal.set(to == CaptureState::Paused);
         self.log.push(event);
         Ok(event)
     }
@@ -299,6 +323,76 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "cannot transition from capturing to capturing"
+        );
+    }
+
+    #[test]
+    fn a_fresh_machine_reports_a_not_paused_signal() {
+        let machine = CaptureStateMachine::new();
+        assert!(!machine.pause_signal().is_paused());
+    }
+
+    #[test]
+    fn pause_flips_the_signal_and_resume_flips_it_back() {
+        let mut machine = CaptureStateMachine::new();
+        // Obtained before either transition, exactly like a real-time
+        // callback would grab its handle once at session start.
+        let signal = machine.pause_signal();
+
+        machine.start().unwrap();
+        assert!(!signal.is_paused(), "capturing must not read as paused");
+
+        machine.pause().unwrap();
+        assert!(signal.is_paused(), "pause must be visible on the pre-obtained handle");
+
+        machine.resume().unwrap();
+        assert!(!signal.is_paused(), "resume must clear the signal");
+    }
+
+    #[test]
+    fn stop_from_paused_also_clears_the_signal() {
+        let mut machine = CaptureStateMachine::new();
+        let signal = machine.pause_signal();
+        machine.start().unwrap();
+        machine.pause().unwrap();
+        assert!(signal.is_paused());
+
+        machine.stop().unwrap();
+        assert!(!signal.is_paused(), "a stopped session is not paused, it's gone");
+    }
+
+    #[test]
+    fn a_rejected_transition_leaves_the_signal_untouched() {
+        let mut machine = CaptureStateMachine::new();
+        let signal = machine.pause_signal();
+
+        // Pausing an idle session is rejected -- the signal must not move.
+        machine.pause().unwrap_err();
+        assert!(!signal.is_paused());
+    }
+
+    #[test]
+    fn pause_takes_effect_within_one_buffer_period() {
+        use super::super::signal::BUFFER_PERIOD;
+        use std::time::Instant;
+
+        let mut machine = CaptureStateMachine::new();
+        let signal = machine.pause_signal();
+        machine.start().unwrap();
+
+        let started_pause = Instant::now();
+        machine.pause().unwrap();
+        // By the time `pause()` returns, the signal must already read
+        // paused -- there is no window where a caller who just requested a
+        // pause could poll the handle and still see capturing.
+        assert!(signal.is_paused());
+        let elapsed = started_pause.elapsed();
+
+        assert!(
+            elapsed < BUFFER_PERIOD,
+            "pause must take effect within one buffer period ({:?}), took {:?}",
+            BUFFER_PERIOD,
+            elapsed
         );
     }
 }

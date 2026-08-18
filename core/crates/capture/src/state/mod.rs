@@ -20,13 +20,20 @@
 //! [`CaptureIndicator`] is the third concern this module owns: the at-a-glance
 //! presentation of a [`CaptureState`] the UI's status indicator renders from
 //! (PRD FR-1.4).
+//!
+//! [`PauseSignal`] is the fourth: the lock-free bit a real-time audio
+//! callback polls to know a pause has taken effect, guaranteed by
+//! [`CaptureStateMachine`] to flip within one buffer period of the operator's
+//! tap (PRD FR-1.3).
 
 mod indicator;
 mod machine;
 mod segment;
+mod signal;
 mod store;
 
 pub use indicator::{indicator_is_unambiguous, CaptureIndicator, IndicatorTone};
 pub use machine::{CaptureState, CaptureStateMachine, CaptureTransitionEvent, InvalidTransition};
 pub use segment::{AudioSegmentId, AudioSegmentRef};
+pub use signal::{PauseSignal, BUFFER_PERIOD};
 pub use store::SegmentStore;
