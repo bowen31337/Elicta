@@ -49,6 +49,25 @@ def test_zero_surfaced_suggestions_scores_zero_rather_than_dividing_by_zero():
     assert figure.embarrassment_rate == 0.0
 
 
+def test_zero_embarrassing_suggestions_clears_the_m2_gate():
+    ratings = [rating("en", useful=True), rating("en", useful=True)]
+
+    figure = score_language("en", ratings)
+
+    assert figure.embarrassing_count == 0
+    assert figure.clears_m2_gate is True
+
+
+def test_a_single_embarrassing_suggestion_out_of_many_still_fails_the_gate():
+    ratings = [rating("en", embarrassing=True)] + [rating("en") for _ in range(999)]
+
+    figure = score_language("en", ratings)
+
+    # A 0.1% rate would read as negligible; the gate has no such tolerance.
+    assert figure.embarrassment_rate < 0.01
+    assert figure.clears_m2_gate is False
+
+
 def test_a_rating_s_own_language_is_ignored_in_favour_of_the_caller_s_partition():
     ratings = [rating("vi", useful=True)]
 

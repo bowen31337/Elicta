@@ -60,6 +60,18 @@ class MetricsPublication:
 
         return self._figures.get(language)
 
+    def languages_failing_m2_gate(self) -> list[LanguageFigure]:
+        """Every published figure whose M2 does not clear the release gate.
+
+        Returns the failing `LanguageFigure`s themselves rather than a count
+        or a single pass/fail boolean — a release decision needs to name
+        which language(s) are blocking, not just that some language is
+        (PRD §5, T13). An empty list means every published language clears
+        the gate; it does not mean the gate was never checked.
+        """
+
+        return [figure for figure in self._figures.values() if not figure.clears_m2_gate]
+
     def __len__(self) -> int:
         return len(self._figures)
 

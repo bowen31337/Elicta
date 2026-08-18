@@ -67,3 +67,17 @@ class LanguageFigure:
         if self.surfaced_count == 0:
             return 0.0
         return self.embarrassing_count / self.surfaced_count
+
+    @property
+    def clears_m2_gate(self) -> bool:
+        """Whether this language's M2 clears the release gate (PRD §5).
+
+        M2 is a gate, not a target: there is no "low enough" nonzero
+        embarrassment count that passes, only exactly zero. A language with
+        one embarrassing suggestion out of a thousand surfaced fails this
+        just as surely as one with one out of one — `embarrassment_rate`
+        would make the former look negligible, which is precisely the
+        target-style reasoning PRD §5 rules out for M2.
+        """
+
+        return self.embarrassing_count == 0

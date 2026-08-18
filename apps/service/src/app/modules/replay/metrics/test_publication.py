@@ -66,6 +66,26 @@ def test_figures_names_its_own_language():
     assert languages == {"en", "vi"}
 
 
+def test_languages_failing_m2_gate_names_only_the_blocking_languages():
+    publication = MetricsPublication()
+
+    publication.publish("en", [rating("en", embarrassing=True)])
+    publication.publish("vi", [rating("vi", embarrassing=False)])
+
+    failing = publication.languages_failing_m2_gate()
+
+    assert [figure.language for figure in failing] == ["en"]
+
+
+def test_languages_failing_m2_gate_is_empty_when_every_language_clears_it():
+    publication = MetricsPublication()
+
+    publication.publish("en", [rating("en", useful=True)])
+    publication.publish("vi", [rating("vi", useful=True)])
+
+    assert publication.languages_failing_m2_gate() == []
+
+
 def test_there_is_no_method_that_returns_a_combined_global_figure():
     public_names = {
         name for name in dir(MetricsPublication) if not name.startswith("_")
