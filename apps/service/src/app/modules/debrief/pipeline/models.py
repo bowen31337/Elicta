@@ -142,6 +142,94 @@ class SessionTranscriptCleaning(BaseModel):
     error: str | None = None
 
 
+class FillState(str, Enum):
+    """Whether a template section's coverage slot has any classified utterance yet (PRD FR-8.2)."""
+
+    EMPTY = "empty"
+    FILLED = "filled"
+
+
+UNCLASSIFIED_SECTION_KEY = "unclassified"
+
+
+class TemplateSection(BaseModel):
+    """One coverage slot in the requirements template taxonomy a session is classified against (PRD FR-8.2).
+
+    The taxonomy itself (BMAD PRD sections as-is, or an internal variant) is
+    an open decision (PRD D5), so `TemplateSection`s are always supplied by
+    the caller rather than hardcoded here — mirroring how `DiarizeAudio` and
+    `CleanTranscript` keep their vendor decisions out of this package.
+    `key` is the stable identifier `classify` must return for an utterance
+    belonging to this section; `title` is only for display.
+    """
+
+    key: str
+    title: str
+
+
+class SectionClassificationStatus(str, Enum):
+    """Terminal state of one section-classification run over a session's cleaned utterances."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class ClassifiedUtterance(BaseModel):
+    """One `CleanedUtterance` with its template section persisted (PRD FR-8.2).
+
+    `section_key` is never null: an utterance the classifier couldn't map to
+    any known `TemplateSection` is tagged `UNCLASSIFIED_SECTION_KEY` by
+    `normalize_section_key` rather than left empty, the same reasoning
+    `tag_span_speaker` uses for `UNKNOWN_SPEAKER_TAG` — "this doesn't belong
+    to a known section" is itself meaningful signal, not a missing value.
+    """
+
+    utterance_id: str
+    session_id: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    speaker_tag: str
+    verbatim_text: str
+    cleaned_text: str
+    section_key: str
+
+
+class CoverageSlotState(BaseModel):
+    """One template section's coverage slot and the fill_state it ended a classification run in (PRD FR-8.2).
+
+    `utterance_ids` lists every utterance classified into this slot, in
+    classification order, so a coverage matrix can link a `FILLED` slot back
+    to the utterances that filled it without a second lookup.
+    """
+
+    section_key: str
+    title: str
+    fill_state: FillState
+    utterance_ids: list[str]
+
+
+class SessionSectionClassification(BaseModel):
+    """Durable record of one section-classification run over a session's cleaned utterances (PRD FR-8.2).
+
+    Persisted whether the run succeeded or failed, mirroring
+    `SessionTranscriptCleaning`: a session with no classification record at
+    all would be indistinguishable from one that simply hasn't been
+    classified yet, so `status` and `error` make a failed run visible instead
+    of silent. `utterances` and `slots` are both empty on a `FAILED` run — the
+    cleaned utterances still live on in `SessionTranscriptCleaning`, so
+    nothing is lost.
+    """
+
+    session_id: str
+    status: SectionClassificationStatus
+    engine: str
+    utterances: list[ClassifiedUtterance]
+    slots: list[CoverageSlotState]
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
+
+
 class AudioDestructionStatus(str, Enum):
     """Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4)."""
 
