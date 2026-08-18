@@ -11,19 +11,26 @@ section, each `FILLED` entry grounded in a record-path citation (PRD
 FR-2.7/FR-8.7). `require_prd_generation_coverage` then gates full PRD
 generation on that coverage accumulated across an engagement's meetings (PRD
 FR-8.10), and `build_full_prd_router` is the HTTP surface that turns a
-failed gate into a 409.
+failed gate into a 409. `merge_requirements_state_forward` is the last
+pipeline stage: it folds one meeting's coverage matrix and BMAD artifacts
+into the engagement's standing `RequirementsState`, carrying confirmed
+requirements, contradictions, and decisions forward into the next meeting
+(PRD FR-8.9).
 """
 
 from __future__ import annotations
 
 from app.modules.debrief.artifacts.matrix import CiteFilledSlot, SaveCoverageMatrix, build_coverage_matrix
 from app.modules.debrief.artifacts.models import (
+    ConfirmedRequirement,
     CoverageCitation,
     CoverageGapSection,
     CoverageMatrixEntry,
     CoverageMatrixStatus,
     EngagementCoverageSummary,
     RequirementsCoverageMatrix,
+    RequirementsContradiction,
+    RequirementsState,
 )
 from app.modules.debrief.artifacts.prd_gate import (
     DEFAULT_PRD_COVERAGE_THRESHOLD,
@@ -36,10 +43,12 @@ from app.modules.debrief.artifacts.router import (
     GetEngagementCoverageMatrices,
     build_full_prd_router,
 )
+from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
 
 __all__ = [
     "DEFAULT_PRD_COVERAGE_THRESHOLD",
     "CiteFilledSlot",
+    "ConfirmedRequirement",
     "CoverageCitation",
     "CoverageGapSection",
     "CoverageMatrixEntry",
@@ -48,10 +57,14 @@ __all__ = [
     "GenerateFullPrd",
     "GetEngagementCoverageMatrices",
     "PrdGenerationRefused",
+    "RequirementsContradiction",
     "RequirementsCoverageMatrix",
+    "RequirementsState",
     "SaveCoverageMatrix",
+    "SaveRequirementsState",
     "build_coverage_matrix",
     "build_full_prd_router",
+    "merge_requirements_state_forward",
     "require_prd_generation_coverage",
     "summarize_engagement_coverage",
 ]

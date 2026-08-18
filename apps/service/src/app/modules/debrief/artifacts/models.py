@@ -16,7 +16,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from app.modules.debrief.pipeline.models import FillState
+from app.modules.debrief.pipeline.models import DecisionLogEntry, FillState
 
 
 class CoverageMatrixStatus(str, Enum):
@@ -106,3 +106,50 @@ class EngagementCoverageSummary(BaseModel):
     covered_sections: int = Field(ge=0)
     coverage_ratio: float = Field(ge=0, le=1)
     missing_sections: list[CoverageGapSection]
+
+
+class ConfirmedRequirement(BaseModel):
+    """One BMAD taxonomy section an engagement's standing requirements state treats as confirmed (PRD FR-8.9).
+
+    Sourced only from a `FILLED` `CoverageMatrixEntry` of a `COMPLETE`
+    `RequirementsCoverageMatrix` — never from the chain's own account of what
+    it discussed — so `citations` always carries at least one grounding
+    citation, the same grounding-in-persisted-data reasoning `matrix.py` uses
+    for a filled coverage slot.
+    """
+
+    section_key: str
+    title: str
+    citations: list[CoverageCitation]
+
+
+class RequirementsContradiction(BaseModel):
+    """One section a later meeting confirmed differently than the standing requirements state already had it (PRD FR-8.9).
+
+    `merge_requirements_state_forward` in `state.py` raises this whenever a
+    meeting's confirmation of `section_key` quotes something other than the
+    citation already on record for it — the state merge does not silently let
+    the newer meeting overwrite the earlier one, it keeps both citations
+    visible as a contradiction the operator can resolve.
+    """
+
+    section_key: str
+    previous_citation: CoverageCitation
+    new_citation: CoverageCitation
+
+
+class RequirementsState(BaseModel):
+    """Durable, engagement-scoped standing requirements state carried forward across meetings (PRD FR-8.9).
+
+    Unlike every other artifact in this package, this is not scoped to one
+    session/meeting: there is exactly one `RequirementsState` per engagement,
+    upserted by `merge_requirements_state_forward` each time a meeting's
+    debrief pipeline completes, so the next meeting in the engagement always
+    reads the latest merged state rather than starting from nothing (PRD G4).
+    """
+
+    engagement_id: str
+    confirmed_requirements: list[ConfirmedRequirement]
+    contradictions: list[RequirementsContradiction]
+    decisions: list[DecisionLogEntry]
+    updated_at: datetime
