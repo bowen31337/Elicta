@@ -11,6 +11,7 @@
 
 mod event;
 mod fake;
+mod region;
 mod transcription_backend;
 
 pub use event::{
@@ -18,4 +19,8 @@ pub use event::{
     StreamId, Token, TranscriptionEvent, UtteranceId,
 };
 pub use fake::{ImmutablePartialFakeBackend, RevisablePartialFakeBackend};
+pub use region::{
+    EndpointResolutionError, EngagementId, EngagementRegionRegistry, Region, RegionPinError,
+    RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver, VendorRegionEndpoints,
+};
 pub use transcription_backend::{BackendError, TranscriptionBackend};

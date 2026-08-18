@@ -33,8 +33,11 @@ value types it operates on:
 
 ```rust
 pub use backend::{
-    AudioSegmentRef, BackendError, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag,
+    AudioSegmentRef, BackendError, EndpointResolutionError, EngagementId,
+    EngagementRegionRegistry, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag, Region,
+    RegionPinError, RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver,
     SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
+    VendorRegionEndpoints,
 };
 ```
 
@@ -65,19 +68,38 @@ pub use backend::{
   `keyterms_sent`) and reject `send_audio` before that handshake has
   happened. These are exported, not test-only, so whoever wires the trigger
   gate can develop against them before a real vendor connection exists.
+- `region.rs` — per-engagement ASR vendor region pinning (architecture
+  §14.2 "Pin the region", PRD NFR-2.2). `EngagementRegionRegistry` pins an
+  `EngagementId` to a `Region` once and rejects a mid-engagement repin to a
+  *different* region; `VendorRegionEndpoints` maps a vendor's known regions
+  to their endpoint URLs; `RegionalEndpointResolver` composes the two to
+  resolve the one endpoint an engagement's requests must reach.
+  `RegionPinnedBackend<B>` wraps any `TranscriptionBackend` and resolves
+  that endpoint exactly once, in `open`, at the same moment the connection
+  itself is opened (architecture §14.2's "open the socket before the
+  meeting") — every `start_stream` / `send_audio` / `poll_events` call
+  afterwards delegates to that same bound `inner` connection, so "every
+  request sends to the pinned regional endpoint" holds structurally rather
+  than by call-site convention. `open` never calls its `connect` closure at
+  all if the engagement has no region pinned or the pinned region has no
+  known vendor endpoint, so a connection is never opened against the wrong
+  (or no) endpoint.
 
 ## Deliberately out of scope here
 
 Everything about how a *real* vendor connection is opened and driven —
 pre-opened websocket at capture start, keepalive frames, linear16 PCM
-framing at 20-50ms, regional endpoint pinning — is separately scoped work
-against this same `backend/` directory (see the adjacent features in the
-"Streaming Transcription" category). This handoff covers only the trait,
-event shape, and the keyterm handshake; a real `DeepgramBackend` /
-`AssemblyAiBackend` implements `TranscriptionBackend` the same way the fakes
-here do, translating its own wire format into `TranscriptionEvent` inside
-`poll_events` and sending `start_stream`'s keyterms as that vendor's own
-keyterm-prompting mechanism on connection open.
+framing at 20-50ms — is separately scoped work against this same
+`backend/` directory (see the adjacent features in the "Streaming
+Transcription" category). This handoff covers the trait, event shape, the
+keyterm handshake, and region pinning; a real `DeepgramBackend` /
+`AssemblyAiBackend` implements `TranscriptionBackend` the same way the
+fakes here do, translating its own wire format into `TranscriptionEvent`
+inside `poll_events` and sending `start_stream`'s keyterms as that
+vendor's own keyterm-prompting mechanism on connection open — and is
+opened via `RegionPinnedBackend::open` so its actual websocket connect
+target is the resolved regional endpoint rather than a hardcoded default
+host.
 
 `capture::enrol::SpeakerIdentity` and this module's `SpeakerTag` currently
 have the same shape (`Operator` / `Participant(String)` / `Unknown`) but are
@@ -87,5 +109,5 @@ be reconsidered against `capture::enrol::SpeakerIdentity` directly rather
 than keeping a parallel local type.
 
 Verified with `cargo test -p asr-live` and `cargo clippy -p asr-live
---all-targets` against the real crate (7 passing tests in this module, no
+--all-targets` against the real crate (23 passing tests in this module, no
 warnings).
