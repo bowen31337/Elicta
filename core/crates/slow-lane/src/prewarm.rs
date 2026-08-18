@@ -71,9 +71,16 @@ pub struct WarmedMeeting {
 
 impl WarmedMeeting {
     /// Builds one tick's prompt from the same pinned stable segments the
-    /// pre-warm request already wrote to the cache.
-    pub fn for_tick(&self, variable: impl Into<String>) -> SlowLanePrompt {
-        self.context.for_tick(variable)
+    /// pre-warm request already wrote to the cache, plus the tick's three
+    /// volatile segments: the rolling transcript window, the structured
+    /// state summary, and the recent nudges.
+    pub fn for_tick(
+        &self,
+        rolling_window: impl Into<String>,
+        state_summary: impl Into<String>,
+        recent_nudges: impl Into<String>,
+    ) -> SlowLanePrompt {
+        self.context.for_tick(rolling_window, state_summary, recent_nudges)
     }
 }
 
@@ -101,7 +108,7 @@ impl UnwarmedMeeting {
     /// can build any tick's prompt, so the pre-warm is always sent before
     /// tick 1 -- there is no other way to reach a [`WarmedMeeting`].
     pub fn issue(self) -> (PreWarmRequest, WarmedMeeting) {
-        let prompt = self.context.for_tick(String::new());
+        let prompt = self.context.for_tick(String::new(), String::new(), String::new());
         let boundary = prompt.cache_boundary_index();
         let blocks = prompt.blocks()[..=boundary].to_vec();
         let request = PreWarmRequest { blocks, model: self.model.model().clone(), max_tokens: 0 };
@@ -132,7 +139,7 @@ mod tests {
     fn issuing_the_prewarm_sends_the_assembled_stable_prefix() {
         let (request, _warmed) = meeting().issue();
 
-        let expected = context().for_tick(String::new());
+        let expected = context().for_tick(String::new(), String::new(), String::new());
         let boundary = expected.cache_boundary_index();
         assert_eq!(
             request.blocks(),
@@ -161,7 +168,7 @@ mod tests {
     fn the_warmed_meetings_first_tick_shares_a_byte_identical_prefix_with_the_prewarm_request() {
         let (request, warmed) = meeting().issue();
 
-        let first_tick = warmed.for_tick("utterance window 1-12");
+        let first_tick = warmed.for_tick("utterance window 1-12", "state summary v1", "nudge v1");
         let boundary = first_tick.cache_boundary_index();
         assert_eq!(
             request.blocks(),
@@ -186,7 +193,11 @@ mod tests {
         let (request, warmed) = meeting().issue();
 
         let first_tick = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
-        let prompt = warmed.for_tick(format!("tick {} fired at {:?}", first_tick.sequence, first_tick.fired_at));
+        let prompt = warmed.for_tick(
+            format!("tick {} fired at {:?}", first_tick.sequence, first_tick.fired_at),
+            "state summary v1",
+            "nudge v1",
+        );
         let boundary = prompt.cache_boundary_index();
         assert_eq!(
             request.blocks(),

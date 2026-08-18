@@ -116,9 +116,9 @@ mod tests {
         let context = context();
         let mut run = ReplayRun::new();
         // first tick writes the cache
-        run.run_tick(event(0), &context.for_tick("utterance window 1-12"), usage(1800, 0));
+        run.run_tick(event(0), &context.for_tick("utterance window 1-12", "state summary v1", "nudge v1"), usage(1800, 0));
         // second tick reads it back
-        run.run_tick(event(1), &context.for_tick("utterance window 13-24"), usage(0, 1800));
+        run.run_tick(event(1), &context.for_tick("utterance window 13-24", "state summary v2", "nudge v2"), usage(0, 1800));
     }
 
     #[test]
@@ -126,29 +126,39 @@ mod tests {
     fn a_zero_cache_read_on_the_second_tick_of_a_replay_run_fails_the_assertion() {
         let context = context();
         let mut run = ReplayRun::new();
-        run.run_tick(event(0), &context.for_tick("utterance window 1-12"), usage(1800, 0));
+        run.run_tick(event(0), &context.for_tick("utterance window 1-12", "state summary v1", "nudge v1"), usage(1800, 0));
         // The prefix silently stopped caching on the second tick even
         // though its stable segments are still byte-identical -- this must
         // fail the replay run rather than pass quietly.
-        run.run_tick(event(1), &context.for_tick("utterance window 13-24"), usage(1800, 0));
+        run.run_tick(event(1), &context.for_tick("utterance window 13-24", "state summary v2", "nudge v2"), usage(1800, 0));
     }
 
     #[test]
     #[should_panic(expected = "prefix drifted")]
     fn a_stable_segment_that_drifts_between_ticks_fails_the_assertion_even_with_a_healthy_cache_read() {
         let mut run = ReplayRun::new();
-        let first_tick =
-            SlowLanePrompt::new("you are the slow-lane extractor", "engagement digest: acme renewal, q3", "extraction template v4", "attendees: alice, bob, carol", "utterance window 1-12");
+        let first_tick = SlowLanePrompt::new(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+            "utterance window 1-12",
+            "state summary v1",
+            "nudge v1",
+        );
         // A refactor accidentally threads the tick's own timestamp into a
-        // stable segment (here, the engagement digest) instead of the
-        // variable one -- the exact failure mode architecture §14.3 warns
-        // about, and it must fail even though the cache read is nonzero.
+        // stable segment (here, the engagement digest) instead of one of
+        // the volatile ones -- the exact failure mode architecture §14.3
+        // warns about, and it must fail even though the cache read is
+        // nonzero.
         let second_tick = SlowLanePrompt::new(
             "you are the slow-lane extractor",
             "engagement digest: acme renewal, q3 (as of tick 1)",
             "extraction template v4",
             "attendees: alice, bob, carol",
             "utterance window 13-24",
+            "state summary v2",
+            "nudge v2",
         );
         run.run_tick(event(0), &first_tick, usage(1800, 0));
         run.run_tick(event(1), &second_tick, usage(0, 1800));
@@ -158,8 +168,8 @@ mod tests {
     fn a_replay_run_that_recovers_after_a_healthy_third_tick_does_not_panic_again() {
         let context = context();
         let mut run = ReplayRun::new();
-        run.run_tick(event(0), &context.for_tick("utterance window 1-12"), usage(1800, 0));
-        run.run_tick(event(1), &context.for_tick("utterance window 13-24"), usage(0, 1800));
-        run.run_tick(event(2), &context.for_tick("utterance window 25-36"), usage(0, 1790));
+        run.run_tick(event(0), &context.for_tick("utterance window 1-12", "state summary v1", "nudge v1"), usage(1800, 0));
+        run.run_tick(event(1), &context.for_tick("utterance window 13-24", "state summary v2", "nudge v2"), usage(0, 1800));
+        run.run_tick(event(2), &context.for_tick("utterance window 25-36", "state summary v3", "nudge v3"), usage(0, 1790));
     }
 }

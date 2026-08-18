@@ -179,8 +179,9 @@ mod orchestrator_ticks_end_to_end {
     /// the four stable prompt segments once via [`MeetingPromptContext`],
     /// builds each tick's prompt from real [`TickEvent`]s the ticker
     /// fires -- folding the tick's own sequence and fired-at instant into
-    /// the *variable* segment, the only place [`MeetingPromptContext::for_tick`]
-    /// lets a caller put them -- and feeds every tick through a
+    /// the rolling-window segment, one of the three volatile segments
+    /// [`MeetingPromptContext::for_tick`] lets a caller put them in -- and
+    /// feeds every tick through a
     /// [`ReplayRun`] alongside the usage the Messages API would report.
     /// Because no timestamp or request identifier can reach a stable
     /// segment, the prefix stays byte-identical tick over tick and the
@@ -205,8 +206,8 @@ mod orchestrator_ticks_end_to_end {
 
         for usage in usages {
             let event = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
-            let variable = format!("tick {} fired at {:?}", event.sequence, event.fired_at);
-            let prompt = context.for_tick(variable);
+            let rolling_window = format!("tick {} fired at {:?}", event.sequence, event.fired_at);
+            let prompt = context.for_tick(rolling_window, "state summary unchanged", "nudge unchanged");
             run.run_tick(event, &prompt, usage);
         }
 
@@ -256,7 +257,11 @@ mod orchestrator_ticks_end_to_end {
                 orchestrator.mark_complete();
             }
 
-            let prompt = context.for_tick(format!("tick {} fired at {:?}", event.sequence, event.fired_at));
+            let prompt = context.for_tick(
+                format!("tick {} fired at {:?}", event.sequence, event.fired_at),
+                "state summary unchanged",
+                "nudge unchanged",
+            );
             let boundary = prompt.cache_boundary_index();
             lifetimes_sent.push(prompt.blocks()[boundary].cache_lifetime());
         }
@@ -301,7 +306,11 @@ mod orchestrator_ticks_end_to_end {
 
         let mut run = ReplayRun::new();
         let first_tick = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
-        let prompt = warmed.for_tick(format!("tick {} fired at {:?}", first_tick.sequence, first_tick.fired_at));
+        let prompt = warmed.for_tick(
+            format!("tick {} fired at {:?}", first_tick.sequence, first_tick.fired_at),
+            "state summary v1",
+            "nudge v1",
+        );
 
         let boundary = prompt.cache_boundary_index();
         assert_eq!(
