@@ -1,0 +1,255 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Elicta Service",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/api/meetings/{meeting_id}/consent-gate": {
+      "get": {
+        "tags": [
+          "consent"
+        ],
+        "summary": "Get Consent Gate",
+        "operationId": "get_consent_gate_api_meetings__meeting_id__consent_gate_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "engagement_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentGate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements": {
+      "post": {
+        "tags": [
+          "engagements"
+        ],
+        "summary": "Create Engagement Endpoint",
+        "operationId": "create_engagement_endpoint_api_engagements_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngagementCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ConsentGate": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ConsentGateStatus"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsentPrompt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ConsentGate",
+        "description": "Result of evaluating whether a meeting may begin capture.\n\n``capture_may_begin`` is the single field a capture-start flow needs to\ncheck. ``prompt`` is populated only when the operator must confirm\nconsent before capture is allowed to proceed."
+      },
+      "ConsentGateStatus": {
+        "type": "string",
+        "enum": [
+          "not_required",
+          "awaiting_confirmation",
+          "confirmed"
+        ],
+        "title": "ConsentGateStatus",
+        "description": "Where a given meeting sits relative to the consent gate."
+      },
+      "ConsentPrompt": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "legal_basis": {
+            "type": "string",
+            "title": "Legal Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "body",
+          "legal_basis"
+        ],
+        "title": "ConsentPrompt",
+        "description": "Operator-facing copy shown before capture begins (PRD L2)."
+      },
+      "EngagementCreateRequest": {
+        "properties": {
+          "client_organisation": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Client Organisation"
+          },
+          "sector": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Sector"
+          },
+          "commercial_context": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Commercial Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_organisation",
+          "sector",
+          "commercial_context"
+        ],
+        "title": "EngagementCreateRequest",
+        "description": "Client background captured once, at engagement creation (PRD FR-3.1)."
+      },
+      "EngagementCreateResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id"
+        ],
+        "title": "EngagementCreateResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
