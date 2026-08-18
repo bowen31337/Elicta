@@ -45,3 +45,17 @@ export interface OperatorUtterance {
   readonly text: string;
   readonly finalizedAt: number;
 }
+
+/**
+ * A follow-on question surfaced by tapping `Go deeper` on a `Thread` (PRD
+ * FR-6.8). Carried as its own type rather than a field grafted onto
+ * `Thread`: the request is scoped by `threadId` but the candidate itself
+ * isn't a fact about the thread the way `operatorAskedAt` is -- it's a
+ * suggestion the panel renders alongside the thread it came from, and a
+ * second tap can replace it with a different candidate without disturbing
+ * the thread's own resolution state.
+ */
+export interface FollowOnCandidate {
+  readonly threadId: string;
+  readonly question: string;
+}

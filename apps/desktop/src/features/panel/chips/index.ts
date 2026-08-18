@@ -26,3 +26,13 @@ export type {
   UseOperatorAskedThreadOptions,
   UseOperatorAskedThreadResult,
 } from './useOperatorAskedThread';
+export type { FollowOnCandidate } from './types';
+export { requestFollowOnCandidate } from './requestFollowOnCandidate';
+export type {
+  RequestFollowOnFetch,
+  RequestFollowOnCandidateOptions,
+} from './requestFollowOnCandidate';
+export { GoDeeperChip } from './GoDeeperChip';
+export type { GoDeeperChipProps } from './GoDeeperChip';
+export { useGoDeeperChip } from './useGoDeeperChip';
+export type { GoDeeperStatus, UseGoDeeperChipOptions, UseGoDeeperChipResult } from './useGoDeeperChip';
