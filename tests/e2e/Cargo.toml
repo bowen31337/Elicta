@@ -11,3 +11,5 @@ path = "src/lib.rs"
 [dependencies]
 language = { path = "../../core/crates/language" }
 trigger-gate = { path = "../../core/crates/trigger-gate" }
+capture = { path = "../../core/crates/capture" }
+asr-live = { path = "../../core/crates/asr-live" }
