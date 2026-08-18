@@ -5,9 +5,11 @@ rationale at architecture §8.2 "silent misdetection failure"), FR-2.21
 ("User can override the detected language with a single tap", done when the
 override persists for the rest of the meeting), FR-2.19 ("Retain the
 original-language utterance alongside any translation, permanently and
-inseparably" — see the dedicated section below), and FR-2.16 ("System learns
+inseparably" — see the dedicated section below), FR-2.16 ("System learns
 per-attendee language preference across an engagement, biasing that stream
-on later meetings" — see the dedicated section below). Self-contained under
+on later meetings" — see the dedicated section below), and FR-2.12 ("System
+uses an end-to-end multilingual engine so no language decision gates the
+audio path" — see the dedicated section below). Self-contained under
 this directory, same as `numerals/` and `segment/`; deliberately does not
 touch `core/crates/language/Cargo.toml` or `core/crates/language/src/lib.rs`.
 Those now exist in this worktree (created by the FR-2.18 segmentation
@@ -17,6 +19,74 @@ HANDOFF.md files already flag as pending. Verified locally by temporarily
 adding `pub mod tags;` to `lib.rs`, running `cargo test`/`cargo clippy`, then
 reverting `lib.rs` to its committed state (`git checkout -- src/lib.rs`) so
 this change stays scoped to `tags/`.
+
+## FR-2.12: no language decision gates the audio path (this update)
+
+New file, `end_to_end.rs`. Every existing tracker in this directory
+(`ParticipantLanguageTags`, `DetectedLanguagePanel`, `TierDriftMonitor`,
+`AccuracyFallbackWatcher`) takes a `language: &str, confidence: f32`
+observation as an opaque input — none of them show where that value comes
+from, and nothing in this directory demonstrated that it is derived from
+already-transcribed text rather than decided before transcription. FR-2.12
+("Handle intra-sentential code-switching without language-ID routing — an
+end-to-end multilingual model, not a detect-then-route pipeline") is
+architecture §3.5's explicit prohibition on the audio path: routing and
+aggregation must happen strictly *after* transcription, over tags the model
+emits as a by-product. `segment::group_by_language` already embodies this at
+the token-routing layer, but that lives in a different module with a
+different footprint (`segment/**`); nothing analogous existed at the
+`tags/**` layer that feeds this directory's trackers.
+
+- `EndToEndToken` — text plus its per-token BCP-47 language tag and
+  confidence, mirroring `segment::TaggedToken`'s fields. Duplicated locally
+  rather than imported, same reasoning as every other cross-file
+  duplication in this directory (e.g. `primary_subtag`): `tags` and
+  `segment` are independent modules, each wired into `lib.rs` on its own.
+- `transcript_text(tokens: &[EndToEndToken]) -> String` — the structural
+  proof itself. It reconstructs the utterance's text by joining `tokens` in
+  order and never reads `language` or `lang_confidence` at all, so a token
+  with an absent, unknown, or low-confidence language tag contributes its
+  text exactly as readily as a confidently-tagged one. There is no function
+  anywhere in this crate that requires a language to be known, chosen, or
+  confident before text is available — language identification is strictly
+  a downstream, optional annotation on text that already exists, never a
+  gate on producing it.
+- `DominantLanguageResolver::resolve(tokens: &[EndToEndToken]) ->
+  Option<DominantLanguage>` — the derivation those opaque
+  `language`/`confidence` observations actually need: aggregates confident
+  per-token tags (gated by the same 0.6 `min_confidence` default as every
+  sibling in this directory) into the single BCP-47 language with the
+  highest total confidence, reporting its mean confidence across the tokens
+  that counted toward it. A tie in total confidence keeps whichever
+  language was seen first in `tokens`, matching
+  `AttendeeLanguagePreferences`'s tie-breaking convention. Its input type is
+  what makes the "no preceding language decision" guarantee load-bearing
+  rather than aspirational: an `EndToEndToken` cannot exist until the ASR
+  model has already produced `text`, so there is no call site in this crate
+  that could hand this function a language before transcription has run.
+- `DominantLanguage` — the resulting `{ language, confidence }` pair, shaped
+  to pass directly into `ParticipantLanguageTags::observe`,
+  `DetectedLanguagePanel::observe`, or `TierDriftMonitor::observe`.
+
+Tests added: 12 (text reconstruction preserves order, including a
+code-switched utterance's exact interleaving; text reconstruction ignores
+language and confidence entirely, including empty/negative/absent values;
+empty input produces empty text; resolving with no tokens or all tokens
+below threshold returns `None`; a single language reports its mean
+confidence; a code-switched utterance picks the language with more
+confidence weight behind it; low-confidence tokens are dropped before
+aggregating rather than merely down-weighted; a tie keeps the first-seen
+language; BCP-47 subtag collapsing; custom confidence threshold).
+
+Deliberately out of scope here, same boundary already drawn throughout this
+directory: wiring live ASR output into `EndToEndToken` and calling
+`DominantLanguageResolver::resolve` to actually drive
+`ParticipantLanguageTags`/`DetectedLanguagePanel`/`TierDriftMonitor` belongs
+to whichever crate owns the live pipeline loop, once `tags` is wired into
+`lib.rs` and can depend on this crate. This crate has no ASR adapter and
+shouldn't grow one — the audio path itself (architecture §3.2's
+`TranscriptionBackend`) lives elsewhere entirely; this directory's job stops
+at proving nothing here would require it to make a language decision first.
 
 ## FR-2.16: learn per-attendee language preference across an engagement (this update)
 
@@ -206,10 +276,17 @@ collapsing, and auto-detection continuing to update the list post-override).
   above): pairs an utterance's original-language text with every
   translation produced from it, structurally preventing the original from
   ever being replaced or discarded once set.
+- `end_to_end.rs` — `EndToEndToken`, `transcript_text`,
+  `DominantLanguageResolver`, and `DominantLanguage` (FR-2.12, see above):
+  proves transcript text is never gated on a language decision, and derives
+  the aggregate `(language, confidence)` observation every other tracker in
+  this directory consumes from already-transcribed per-token tags.
 - `mod.rs` — declares `pub mod attendee_preference;`,
-  `pub mod detected_languages;`, and `pub mod retention;`, and re-exports
-  `AttendeeId`, `AttendeeLanguagePreference`, `AttendeeLanguagePreferences`,
-  `DetectedLanguage`, `DetectedLanguagePanel`, `RetainedUtterance`,
+  `pub mod detected_languages;`, `pub mod end_to_end;`, and
+  `pub mod retention;`, and re-exports `AttendeeId`,
+  `AttendeeLanguagePreference`, `AttendeeLanguagePreferences`,
+  `DetectedLanguage`, `DetectedLanguagePanel`, `DominantLanguage`,
+  `DominantLanguageResolver`, `EndToEndToken`, `RetainedUtterance`,
   `Translation`.
 
 ## Wiring needed
@@ -224,9 +301,9 @@ pub mod tags;
 ```
 
 No other integration required here — `detected_languages` only depends on
-`tags::tier` (already in this directory), and `retention` and
-`attendee_preference` have no dependencies on any other file in this
-directory at all.
+`tags::tier` (already in this directory), and `retention`,
+`attendee_preference`, and `end_to_end` have no dependencies on any other
+file in this directory at all.
 
 ## What's not done here
 
@@ -254,10 +331,17 @@ directory at all.
   (`original_utterance_id`/`translated_text` columns) — a separate,
   already-planned DB-migration task (`app_spec.txt` feature 20); out of this
   crate's footprint entirely.
+- Constructing `EndToEndToken`s from live ASR output and calling
+  `DominantLanguageResolver::resolve` to actually drive the other trackers
+  in this directory, plus the `TranscriptionBackend`/ASR adapter itself
+  (architecture §3.2) that must genuinely be end-to-end multilingual for
+  FR-2.12's audio-path guarantee to hold in production — this crate has no
+  ASR adapter and shouldn't grow one; it can only prove that nothing on its
+  side would require a language decision before text exists.
 
 Verified locally (temporarily wiring `pub mod tags;` into `lib.rs`, then
-reverting it — see top of this file): `cargo test` — 106/106 pass (17 new
-for FR-2.16); `cargo clippy --all-targets -- -D warnings` — clean;
+reverting it — see top of this file): `cargo test` — 118/118 pass (12 new
+for FR-2.12); `cargo clippy --all-targets -- -D warnings` — clean;
 pre-existing rustfmt drift across sibling `tags` files (struct-literal
 wrapping) predates this feature and was left untouched, matching
 `numerals/HANDOFF.md`'s prior note.
