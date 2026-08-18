@@ -68,6 +68,24 @@ def _validate_citation(documents: dict[str, str], citation: CitedSpan) -> None:
         )
 
 
+def format_source_doc(citation: CitedSpan) -> str:
+    """Format one validated citation as the `candidate.source_doc` TEXT value (architecture §3.6, §14.4).
+
+    Architecture §14.4: native citations let the compiler populate
+    `source_doc` "with a location rather than a filename" -- a bare
+    `document_id` alone would regress to exactly the filename-only
+    provenance that section calls out as insufficient, so this also encodes
+    the `[start_char_index, end_char_index)` span that
+    `_validate_citation` has already confirmed grounds in that document's
+    text. Downstream candidate builders (`agent/bmad_analyst.py`,
+    `techniques/hypothesis_verification.py`) are the ones that assign this
+    string to a candidate's `source_doc`; wiring that assignment is out of
+    this feature's footprint.
+    """
+
+    return f"{citation.document_id}#{citation.start_char_index}-{citation.end_char_index}"
+
+
 def build_extracted_claims(
     documents: list[ExtractionSourceDocument], drafts: list[ExtractedClaimDraft]
 ) -> list[ExtractedClaim]:

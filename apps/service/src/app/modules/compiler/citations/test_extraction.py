@@ -9,6 +9,7 @@ import pytest
 
 from app.modules.compiler.citations.extraction import (
     build_extracted_claims,
+    format_source_doc,
     run_document_extraction_pass,
 )
 from app.modules.compiler.citations.models import (
@@ -173,6 +174,25 @@ def test_an_ungrounded_citation_fails_the_run_instead_of_persisting_a_bad_span()
     assert result.claims is None
     assert "does not match" in result.error
     assert saved == [result]
+
+
+def test_format_source_doc_encodes_the_document_id_and_char_span():
+    citation = make_citation()
+
+    source_doc = format_source_doc(citation)
+
+    start = DOC_TEXT.index("a new billing system")
+    end = start + len("a new billing system")
+    assert source_doc == f"doc-1#{start}-{end}"
+
+
+def test_format_source_doc_differs_for_citations_naming_different_spans():
+    first = format_source_doc(make_citation())
+    second = format_source_doc(
+        make_citation(cited_text="Q3.", start_char_index=len(DOC_TEXT) - 3, end_char_index=len(DOC_TEXT))
+    )
+
+    assert first != second
 
 
 def test_requested_at_defaults_and_completed_at_is_not_before_it():

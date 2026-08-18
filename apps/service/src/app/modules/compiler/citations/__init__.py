@@ -6,6 +6,7 @@ from app.modules.compiler.citations.extraction import (
     RunDocumentExtractionPass,
     SaveEngagementDocumentExtractionPass,
     build_extracted_claims,
+    format_source_doc,
     run_document_extraction_pass,
 )
 from app.modules.compiler.citations.models import (
@@ -29,5 +30,6 @@ __all__ = [
     "RunDocumentExtractionPass",
     "SaveEngagementDocumentExtractionPass",
     "build_extracted_claims",
+    "format_source_doc",
     "run_document_extraction_pass",
 ]
