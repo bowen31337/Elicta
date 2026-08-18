@@ -1,0 +1,138 @@
+name: Replay Ranking Precision Gate
+
+# Fails the build when precision@surfaced (M1, PRD §5) drops below the 70%
+# target for any language in the fixed golden replay regression corpus
+# below. M1 is scored per language and never blended (architecture T13 —
+# see app.modules.replay.metrics.publication's module docstring), so a
+# regression hiding under a healthy blended average must still fail this
+# gate; GOLDEN_RATINGS is scored one language at a time and every language
+# is checked against the threshold independently.
+#
+# GOLDEN_RATINGS is the senior-BA verdicts recorded for a fixed golden
+# replay run the last time this corpus was reviewed by a human — the same
+# "fixed input, not full-corpus coverage" approach parity.yml takes with its
+# own GOLDEN_TRANSCRIPT/GOLDEN_SEED. A ranking change that alters which
+# suggestions the golden run surfaces is exactly what this gate exists to
+# catch: whoever re-reviews the golden run updates this corpus's verdicts,
+# and this workflow re-scores whatever verdicts are checked in here against
+# the 70% bar. It does not itself replay the golden transcript or generate
+# new verdicts.
+#
+# The gate script below imports and calls the real production code
+# (app.modules.replay.metrics.router.build_replay_metrics_router,
+# .scoring.score_language) rather than reimplementing M1 — the same
+# reasoning parity.yml gives for reusing
+# assert_identical_suggestion_logs: the CI gate and the metrics endpoint's
+# own definition of M1 can't drift apart if they're the same code.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: replay-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PRECISION_THRESHOLD: "0.70"
+
+jobs:
+  precision-gate:
+    name: precision@surfaced >= 70%
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install service dependencies
+        working-directory: apps/service
+        run: uv sync --locked
+
+      - name: Score golden replay corpus against the M1 threshold
+        working-directory: apps/service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/replay_gate.py" <<'PY'
+          import os
+          import sys
+
+          from fastapi import FastAPI
+          from fastapi.testclient import TestClient
+
+          from app.modules.replay.metrics.models import RatedSuggestion
+          from app.modules.replay.metrics.router import build_replay_metrics_router
+
+          RUN_ID = "replay-gate-golden-v1"
+          THRESHOLD = float(os.environ["PRECISION_THRESHOLD"])
+
+          # Golden regression corpus (see this workflow's header comment for
+          # what this represents and how it's meant to be maintained).
+          GOLDEN_RATINGS = {
+              "en": (
+                  [RatedSuggestion(language="en", useful=True, embarrassing=False)] * 9
+                  + [RatedSuggestion(language="en", useful=False, embarrassing=False)] * 1
+              ),
+              "vi": (
+                  [RatedSuggestion(language="vi", useful=True, embarrassing=False)] * 8
+                  + [RatedSuggestion(language="vi", useful=False, embarrassing=False)] * 2
+              ),
+          }
+          FLAT_RATINGS = [rating for group in GOLDEN_RATINGS.values() for rating in group]
+
+          async def get_golden_ratings(run_id: str):
+              if run_id != RUN_ID:
+                  raise KeyError(f"no golden replay corpus for run: {run_id}")
+              return FLAT_RATINGS
+
+          app = FastAPI()
+          app.include_router(build_replay_metrics_router(get_golden_ratings))
+          client = TestClient(app)
+
+          response = client.get(f"/api/replay/runs/{RUN_ID}/metrics")
+          response.raise_for_status()
+          languages = response.json()["languages"]
+
+          summary = ["# Replay ranking precision gate (M1)", "", f"Threshold: {THRESHOLD:.0%}", ""]
+          failing = []
+          for language in sorted(languages, key=lambda entry: entry["language"]):
+              precision = language["precision_at_surfaced"]
+              clears = precision >= THRESHOLD
+              if not clears:
+                  failing.append(language)
+              summary.append(
+                  f"- `{language['language']}`: precision@surfaced = {precision:.2%} "
+                  f"({language['useful_count']}/{language['surfaced_count']} useful) — "
+                  f"{'pass' if clears else 'FAIL'}"
+              )
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write("\n".join(summary) + "\n")
+          else:
+              print("\n".join(summary))
+
+          if failing:
+              for language in failing:
+                  precision = language["precision_at_surfaced"]
+                  print(
+                      f"::error title=precision@surfaced below {THRESHOLD:.0%} threshold::"
+                      f"language '{language['language']}' measured precision@surfaced="
+                      f"{precision:.2%} ({language['useful_count']}/{language['surfaced_count']} "
+                      f"useful), below the {THRESHOLD:.0%} threshold (PRD §5, M1)"
+                  )
+              sys.exit(1)
+
+          print(f"precision@surfaced clears the {THRESHOLD:.0%} threshold for every language")
+          PY
+          uv run python "$RUNNER_TEMP/replay_gate.py"
