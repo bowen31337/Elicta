@@ -10,6 +10,7 @@ mod language_panel;
 mod preflight;
 mod question_bank;
 mod service_tier_degraded;
+mod service_tier_retry_queue;
 mod session_resume;
 
 pub use asr_auto_restart::{
@@ -45,5 +46,8 @@ pub use question_bank::{
 pub use service_tier_degraded::{
     badge_for_service_tier_outcome, ServiceTierHealthBadge, ServiceTierHealthMonitor,
     ServiceTierOutcome,
+};
+pub use service_tier_retry_queue::{
+    QueuedServiceTierWork, ServiceTierRetryQueue, ServiceTierWorkKind,
 };
 pub use session_resume::{describe_session_resume, SessionResumeStatus};
