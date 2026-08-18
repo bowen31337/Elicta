@@ -19,3 +19,10 @@ export type {
   WhatAmIMissingResult,
 } from './useWhatAmIMissingChip';
 export { pickHighestUrgencySlot } from './pickHighestUrgencySlot';
+export type { OperatorUtterance, Thread } from './types';
+export { isOperatorAskingThreadQuestion } from './operatorAskedThread';
+export { useOperatorAskedThread } from './useOperatorAskedThread';
+export type {
+  UseOperatorAskedThreadOptions,
+  UseOperatorAskedThreadResult,
+} from './useOperatorAskedThread';
