@@ -79,3 +79,30 @@ class RequirementsCoverageMatrix(BaseModel):
     is_fully_covered: bool
     generated_at: datetime
     error: str | None = None
+
+
+class CoverageGapSection(BaseModel):
+    """One BMAD taxonomy section no meeting in an engagement has filled yet (PRD FR-8.10)."""
+
+    section_key: str
+    title: str
+
+
+class EngagementCoverageSummary(BaseModel):
+    """Aggregate requirements coverage across every meeting in an engagement (PRD FR-8.10).
+
+    A section counts as covered once *any* of the engagement's meetings has
+    filled it in its own `RequirementsCoverageMatrix` — coverage accumulates
+    across meetings rather than requiring a single meeting to cover the whole
+    taxonomy alone, matching FR-8.10's premise that one discovery call does
+    not contain a PRD but a sufficiently covered engagement does.
+    `coverage_ratio` is the number `require_prd_generation_coverage` checks
+    against the FR-8.10 threshold; `missing_sections` is what its refusal
+    message is built from.
+    """
+
+    meeting_count: int = Field(ge=0)
+    total_sections: int = Field(ge=0)
+    covered_sections: int = Field(ge=0)
+    coverage_ratio: float = Field(ge=0, le=1)
+    missing_sections: list[CoverageGapSection]
