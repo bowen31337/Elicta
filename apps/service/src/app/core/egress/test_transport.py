@@ -17,6 +17,7 @@ class StubInnerTransport:
 def sample_request(**overrides: object) -> ProcessorRequest:
     defaults = {
         "processor_name": "transcription-vendor",
+        "engagement_id": "engagement-1",
         "destination": "https://processor.example/run",
         "body_bytes": 10,
     }

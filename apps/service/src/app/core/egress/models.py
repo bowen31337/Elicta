@@ -13,12 +13,20 @@ class ProcessorRequest(BaseModel):
     that ends up in the audit row's ``processor_name`` column, so callers
     should pass a stable identifier rather than a free-form description.
 
+    ``engagement_id`` identifies which engagement this call is made on
+    behalf of. The chokepoint uses it to look up that engagement's pinned
+    processing region (PRD NFR-2.2) rather than accepting a region on the
+    request itself — the pin lives with the engagement, not with each call,
+    so a call can't drift to a different region than the one already
+    agreed with the client.
+
     ``destination`` is restricted to ``https://`` so that "every request
     sends over TLS only" is a guarantee this type enforces on construction,
     rather than something every caller has to remember to check.
     """
 
     processor_name: str
+    engagement_id: str
     destination: str
     body_bytes: int = Field(ge=0)
 
@@ -50,6 +58,13 @@ class ProcessorSuccess(BaseModel):
 class EgressLogRow(BaseModel):
     """One row as written to the `egress_log` table.
 
+    ``region`` is the processing region pinned for the call's engagement
+    (PRD NFR-2.2), recorded on every row so residency can be audited after
+    the fact rather than only enforced at call time. It is ``None`` only
+    for the row of a call the chokepoint refused outright because its
+    engagement had no region pinned — such a call never reaches the
+    transport, so there is no region to record.
+
     ``byte_count`` is the total bytes moved for this call: the request body
     sent, plus the response body received when the call succeeded. A failed
     call still counts the bytes that were sent before it failed.
@@ -57,6 +72,7 @@ class EgressLogRow(BaseModel):
 
     timestamp_ms: int
     processor_name: str
+    region: str | None = None
     byte_count: int = Field(ge=0)
     success: bool
     error: str | None = None

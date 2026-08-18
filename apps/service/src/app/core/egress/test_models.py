@@ -7,6 +7,7 @@ from app.core.egress.models import ProcessorRequest
 def test_an_https_destination_is_accepted():
     request = ProcessorRequest(
         processor_name="transcription-vendor",
+        engagement_id="engagement-1",
         destination="https://processor.example/run",
         body_bytes=10,
     )
@@ -27,6 +28,7 @@ def test_a_non_tls_destination_is_rejected(destination):
     with pytest.raises(ValidationError, match="TLS"):
         ProcessorRequest(
             processor_name="transcription-vendor",
+            engagement_id="engagement-1",
             destination=destination,
             body_bytes=10,
         )
