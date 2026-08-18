@@ -151,6 +151,26 @@ class BmadAnalystBatchSubmissionStatus(str, Enum):
     FAILED = "failed"
 
 
+class AnalystBatchResult(BaseModel):
+    """One request's raw result within a completed Analyst pass batch job, before its engagement is known (architecture §14.4).
+
+    A batch job's results endpoint returns every submitted request's outcome
+    in arbitrary order, each carrying back only the `custom_id` the request
+    was submitted under -- never its position in the batch -- so `custom_id`
+    here is the correlation key a collector must key results by (architecture
+    §14.4). This module's convention is to submit each engagement's Analyst
+    pass request under its own `engagement_id` as `custom_id`, mirroring
+    `EngagementBmadAnalystBatchSubmission`'s one-record-per-engagement shape.
+    Exactly one of `output`/`error` is populated, mirroring how a request can
+    either succeed or fail independently of every other request sharing its
+    batch job.
+    """
+
+    custom_id: str = Field(min_length=1)
+    output: BmadAnalystPassOutput | None = None
+    error: str | None = None
+
+
 class EngagementBmadAnalystBatchSubmission(BaseModel):
     """Durable record of one attempt to submit an engagement's Analyst pass to the Batch API (architecture §14.4).
 
