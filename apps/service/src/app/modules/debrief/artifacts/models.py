@@ -153,3 +153,54 @@ class RequirementsState(BaseModel):
     contradictions: list[RequirementsContradiction]
     decisions: list[DecisionLogEntry]
     updated_at: datetime
+
+
+class TranscriptArtifactStatus(str, Enum):
+    """Terminal state of one attempt to build a session's transcript artifact."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class TranscriptArtifactEntry(BaseModel):
+    """One speaker-tagged, timestamped line of the transcript artifact (PRD FR-8.1).
+
+    Shaped like `ArtifactCitation` rather than a bare string: `quoted_text` is
+    always the utterance's original-language wording, and `translated_text`
+    carries its translation whenever `original_language` differs from the
+    artifact's `artifact_language` (PRD FR-8.7a) — a transcript line loses
+    exactly the same "original stays reachable" guarantee every other
+    citation in this pipeline already carries if it collapses to one
+    rendering of the text.
+    """
+
+    utterance_id: str
+    speaker_tag: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    quoted_text: str
+    original_language: str
+    translated_text: str | None = None
+
+
+class TranscriptArtifact(BaseModel):
+    """Durable full-session transcript artifact, speaker-attributed and timestamped (PRD FR-8.1).
+
+    Persisted whether the underlying translation run succeeded or failed,
+    mirroring `RequirementsCoverageMatrix`: a session with no transcript
+    artifact at all would be indistinguishable from one that simply hasn't
+    had one built yet, so `status` and `error` make a failed build visible
+    instead of silent. `entries` is empty on a `FAILED` build.
+    `artifact_language` is fixed at generation time from the translation
+    run's `document_language`, mirroring the `artifacts` table's
+    "artifact_language is an explicit engagement setting" contract: a later
+    change to that setting must not silently reattribute the language of a
+    transcript already produced.
+    """
+
+    session_id: str
+    status: TranscriptArtifactStatus
+    artifact_language: str
+    entries: list[TranscriptArtifactEntry]
+    generated_at: datetime
+    error: str | None = None

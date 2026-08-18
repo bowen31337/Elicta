@@ -36,6 +36,12 @@ callers always see it ranked by impact on the build (PRD FR-8.3).
 email the same way: a plain `GET /api/sessions/{session_id}/follow-up-email`
 reading the `FollowUpEmailDraft` the chain already persisted, covering what
 the meeting heard plus what is still needed (PRD FR-8.6).
+
+`build_transcript_artifact` turns one `COMPLETE` `SessionTranscriptTranslation`
+(PRD FR-8.7a, from `debrief/pipeline`) into the full-session transcript
+artifact: one entry per utterance, speaker-attributed and timestamped (PRD
+FR-8.1), mirroring `build_coverage_matrix`'s persist-on-success-or-failure
+shape.
 """
 
 from __future__ import annotations
@@ -51,6 +57,9 @@ from app.modules.debrief.artifacts.models import (
     RequirementsCoverageMatrix,
     RequirementsContradiction,
     RequirementsState,
+    TranscriptArtifact,
+    TranscriptArtifactEntry,
+    TranscriptArtifactStatus,
 )
 from app.modules.debrief.artifacts.prd_gate import (
     DEFAULT_PRD_COVERAGE_THRESHOLD,
@@ -70,6 +79,7 @@ from app.modules.debrief.artifacts.router import (
     build_project_brief_router,
 )
 from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
+from app.modules.debrief.artifacts.transcript import SaveTranscriptArtifact, build_transcript_artifact
 
 __all__ = [
     "DEFAULT_PRD_COVERAGE_THRESHOLD",
@@ -90,12 +100,17 @@ __all__ = [
     "RequirementsState",
     "SaveCoverageMatrix",
     "SaveRequirementsState",
+    "SaveTranscriptArtifact",
+    "TranscriptArtifact",
+    "TranscriptArtifactEntry",
+    "TranscriptArtifactStatus",
     "build_coverage_matrix",
     "build_decision_log_router",
     "build_follow_up_email_router",
     "build_full_prd_router",
     "build_open_questions_router",
     "build_project_brief_router",
+    "build_transcript_artifact",
     "merge_requirements_state_forward",
     "require_prd_generation_coverage",
     "summarize_engagement_coverage",
