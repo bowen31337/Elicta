@@ -1,6 +1,7 @@
 //! Reliability and failure-mode checks shared across the desktop core
 //! (architecture §10).
 
+mod asr_auto_restart;
 mod asr_backend_crash;
 mod capture_stream;
 mod device_route;
@@ -9,6 +10,10 @@ mod preflight;
 mod question_bank;
 mod session_resume;
 
+pub use asr_auto_restart::{
+    AsrAutoRestarter, AsrRestartStatus, DEFAULT_MAX_RESTART_ATTEMPTS,
+    DEFAULT_RESTART_RETRY_INTERVAL,
+};
 pub use asr_backend_crash::{
     AsrBackendCrashAlert, AsrHeartbeatMonitor, TranscriptGapMarker, DEFAULT_HEARTBEAT_TIMEOUT,
 };
