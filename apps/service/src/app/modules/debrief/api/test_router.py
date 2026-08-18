@@ -3,10 +3,18 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.modules.debrief.api.models import ArtifactDetail, ArtifactSummary, ArtifactType
+from app.modules.debrief.api.models import (
+    ArtifactDetail,
+    ArtifactSummary,
+    ArtifactType,
+    MeetingAttendee,
+    MeetingCoverageSummary,
+    MeetingDetail,
+)
 from app.modules.debrief.api.router import (
     build_artifact_detail_router,
     build_meeting_artifacts_router,
+    build_meeting_detail_router,
 )
 
 
@@ -21,6 +29,20 @@ def make_client(
 
     app = FastAPI()
     app.include_router(build_meeting_artifacts_router(get_artifacts))
+    return TestClient(app), received
+
+
+def make_meeting_detail_client(
+    meeting: MeetingDetail | None,
+) -> tuple[TestClient, list[str]]:
+    received: list[str] = []
+
+    async def get_meeting_detail(meeting_id: str) -> MeetingDetail | None:
+        received.append(meeting_id)
+        return meeting
+
+    app = FastAPI()
+    app.include_router(build_meeting_detail_router(get_meeting_detail))
     return TestClient(app), received
 
 
@@ -126,3 +148,76 @@ def test_getting_unknown_artifact_id_returns_404():
 
     assert response.status_code == 404
     assert received == ["missing"]
+
+
+def test_getting_meeting_returns_200_with_attendees_coverage_and_nudge_count():
+    meeting = MeetingDetail(
+        meeting_id="m1",
+        engagement_id="e1",
+        state="completed",
+        capture_mode="record_path",
+        scheduled_at=datetime(2026, 8, 18, 9, 0, tzinfo=UTC),
+        attendees=[
+            MeetingAttendee(id="a-1", display_name="Jordan Lee", role="Sponsor"),
+        ],
+        coverage_summary=MeetingCoverageSummary(
+            filled_sections=4, total_sections=6, is_fully_covered=False
+        ),
+        nudge_count=3,
+    )
+    client, received = make_meeting_detail_client(meeting)
+
+    response = client.get("/api/meetings/m1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meeting_id"] == "m1"
+    assert body["attendees"] == [
+        {
+            "id": "a-1",
+            "display_name": "Jordan Lee",
+            "role": "Sponsor",
+            "business_function": None,
+            "decision_authority": None,
+            "domain_expertise": [],
+        }
+    ]
+    assert body["coverage_summary"] == {
+        "filled_sections": 4,
+        "total_sections": 6,
+        "is_fully_covered": False,
+    }
+    assert body["nudge_count"] == 3
+    assert received == ["m1"]
+
+
+def test_getting_unknown_meeting_id_returns_404():
+    client, received = make_meeting_detail_client(None)
+
+    response = client.get("/api/meetings/missing")
+
+    assert response.status_code == 404
+    assert received == ["missing"]
+
+
+def test_getting_meeting_with_no_coverage_run_or_nudges_returns_200_with_null_summary_and_zero_count():
+    meeting = MeetingDetail(
+        meeting_id="m2",
+        engagement_id="e1",
+        state="planned",
+        capture_mode="live",
+        scheduled_at=None,
+        attendees=[],
+        coverage_summary=None,
+        nudge_count=0,
+    )
+    client, _ = make_meeting_detail_client(meeting)
+
+    response = client.get("/api/meetings/m2")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["attendees"] == []
+    assert body["coverage_summary"] is None
+    assert body["nudge_count"] == 0
+    assert body["scheduled_at"] is None

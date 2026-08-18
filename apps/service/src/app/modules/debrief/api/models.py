@@ -16,6 +16,18 @@ table (PRD FR-8.7 citation expansion happens where that row is assembled,
 out of this footprint) — it just plumbs the already-expanded JSONB body
 through, the same "no transformation, just an injected lookup" contract
 `ArtifactSummary`'s router uses.
+
+`MeetingAttendee`, `MeetingCoverageSummary`, and `MeetingDetail` back the
+single-meeting-by-id route (GET /api/meetings/{meeting_id}). `MeetingDetail`
+aggregates across the `meetings`, `attendees`, and coverage-matrix/
+nudge-disposition state, none of which this package owns, so it is filled in
+by a single injected lookup rather than three separate table reads --
+mirroring `ArtifactDetail`'s "no transformation, just an injected lookup"
+contract. `MeetingAttendee` is a local mirror of `engagement/meetings`'s
+persisted `Attendee` row (that package's record type does not live here) and
+`MeetingCoverageSummary` condenses `debrief/artifacts`'s
+`RequirementsCoverageMatrix` down to the counts a meeting-detail caller
+needs at a glance, without the full per-section entry list.
 """
 
 from __future__ import annotations
@@ -24,7 +36,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ArtifactType(str, Enum):
@@ -61,3 +73,60 @@ class ArtifactDetail(BaseModel):
     artifact_language: str
     body: dict[str, Any]
     generated_at: datetime
+
+
+class MeetingAttendee(BaseModel):
+    """One attendee on the meeting being read back (PRD FR-3.9, FR-3.10).
+
+    Mirrors `engagement/meetings`'s persisted `Attendee` row rather than
+    importing it, since that package's record type does not live in this
+    package (`app/modules/debrief/api`) -- the same cross-module boundary
+    `EngagementContext` draws in `engagement/meetings/models.py`.
+    """
+
+    id: str
+    display_name: str | None = None
+    role: str | None = None
+    business_function: str | None = None
+    decision_authority: str | None = None
+    domain_expertise: list[str] = Field(default_factory=list)
+
+
+class MeetingCoverageSummary(BaseModel):
+    """A condensed readout of one meeting's requirements coverage matrix (PRD FR-8.2).
+
+    Carries only the counts a meeting-detail caller needs to gauge progress
+    at a glance -- how many BMAD taxonomy sections this meeting has filled
+    versus how many exist -- rather than the full per-section
+    `CoverageMatrixEntry` list `debrief/artifacts` already exposes on its own
+    routes. `is_fully_covered` mirrors `RequirementsCoverageMatrix`'s own
+    field of the same name.
+    """
+
+    filled_sections: int = Field(ge=0)
+    total_sections: int = Field(ge=0)
+    is_fully_covered: bool
+
+
+class MeetingDetail(BaseModel):
+    """A single meeting read back with its attendees, coverage summary, and nudge count.
+
+    Aggregates across the `meetings` and `attendees` tables and the
+    coverage-matrix/nudge-disposition state, none of which this package
+    owns, so it is assembled by a single injected lookup rather than three
+    separate reads -- the same "no transformation, just an injected lookup"
+    contract `ArtifactDetail`'s router uses. `coverage_summary` is `None`
+    until the meeting's debrief pipeline has run a section classification;
+    `nudge_count` is the number of live-mode nudges that fired during the
+    meeting's capture (PRD FR-7.4), `0` for a meeting with no live-mode
+    capture yet.
+    """
+
+    meeting_id: str
+    engagement_id: str
+    state: str
+    capture_mode: str
+    scheduled_at: datetime | None = None
+    attendees: list[MeetingAttendee]
+    coverage_summary: MeetingCoverageSummary | None = None
+    nudge_count: int = Field(ge=0)
