@@ -7,18 +7,23 @@ override persists for the rest of the meeting), FR-2.19 ("Retain the
 original-language utterance alongside any translation, permanently and
 inseparably" — see the dedicated section below), FR-2.16 ("System learns
 per-attendee language preference across an engagement, biasing that stream
-on later meetings" — see the dedicated section below), and FR-2.12 ("System
+on later meetings" — see the dedicated section below), FR-2.12 ("System
 uses an end-to-end multilingual engine so no language decision gates the
-audio path" — see the dedicated section below). Self-contained under
-this directory, same as `numerals/` and `segment/`; deliberately does not
-touch `core/crates/language/Cargo.toml` or `core/crates/language/src/lib.rs`.
-Those now exist in this worktree (created by the FR-2.18 segmentation
-feature, commit `b1516f0`) but `lib.rs` only wires `pub mod segment;` so far
-— `tags` (and `numerals`) are still unwired, matching what the sibling
-HANDOFF.md files already flag as pending. Verified locally by temporarily
-adding `pub mod tags;` to `lib.rs`, running `cargo test`/`cargo clippy`, then
-reverting `lib.rs` to its committed state (`git checkout -- src/lib.rs`) so
-this change stays scoped to `tags/`.
+audio path" — see the dedicated section below), and FR-2.11 ("System never
+presents a pre-meeting language selection, because language detection is
+automatic" — see the dedicated section below). Self-contained under
+this directory, same as `numerals/` and `segment/`.
+
+`core/crates/language/Cargo.toml` and `src/lib.rs` were created by the
+FR-2.18 segmentation feature (commit `b1516f0`); at that point, and when the
+FR-2.12/2.16/2.19/2.21 sections below were first written, `lib.rs` only
+wired `pub mod segment;` and this directory verified itself by temporarily
+adding `pub mod tags;`, testing, then reverting. That is no longer the case:
+the workspace-scaffolding feature (commit `c602003`) rewired `lib.rs` to
+`pub mod numerals; pub mod segment; pub mod tags;` for real, so `tags` has
+been genuinely compiled into the crate since that commit — the "Wiring
+needed" section below is kept only as a record of that history, not as a
+pending action.
 
 ## FR-2.12: no language decision gates the audio path (this update)
 
@@ -245,6 +250,62 @@ absent an override, immediate effect of a tap, persistence against further
 other detected languages, re-tapping a different language, BCP-47 subtag
 collapsing, and auto-detection continuing to update the list post-override).
 
+## FR-2.11: no pre-meeting language selection (this update)
+
+New file, `pre_meeting.rs`. Every existing tracker in this directory
+requires a `language: &str` argument to `observe`/`resolve` — that is
+correct for all of them, because they all sit downstream of transcription
+(the record/live paths), which is exactly where FR-2.12 says a language is
+allowed to fall out of the model's output. Nothing in this directory
+modeled the *other* side of that boundary: the pre-meeting flow, before
+anything has been transcribed, where FR-2.11 says no language decision may
+be asked for or made at all. Without a type for that flow, "no language
+picker" was only true by omission — there was no pre-meeting concept here
+for a language field to have been added to in the first place, so nothing
+demonstrated the absence was deliberate.
+
+- `PreMeetingSetup` — the operator-facing configuration collected before a
+  meeting starts: a title and a participant roster, built via `new()` and
+  the additive `with_participant()`. This is FR-2.11's structural proof, the
+  same way `EndToEndToken`/`transcript_text` are FR-2.12's: there is no
+  field on this type for a language, no constructor parameter that accepts
+  one, and no method that sets one, so a caller cannot construct a
+  pre-meeting setup that carries a language choice — the guarantee holds
+  because the type has nowhere to put it, not because callers remember a
+  rule.
+- `MeetingSession` — the result of starting a meeting: the setup's title and
+  roster carried through unchanged, plus a freshly constructed
+  `DetectedLanguagePanel` (`tags::tier::LanguageTierTable::launch_default()`)
+  with nothing detected and no active language yet.
+- `start_meeting(setup: PreMeetingSetup) -> MeetingSession` — the transition
+  from pre-meeting to in-meeting. Its signature is the rest of the proof:
+  there is no parameter here through which a caller could hand it a
+  language, so every meeting this crate can construct starts with its
+  language panel empty, ready for automatic detection (FR-2.20) to populate
+  from the first transcribed utterance onward. This function's job stops
+  there — it does not itself call ASR or `DominantLanguageResolver`, same
+  boundary as `EndToEndToken` construction below.
+
+Tests added: 9 (a new setup starts with no participants; `with_participant`
+appends to the roster in order; `PreMeetingSetup::default()` is an empty
+title and roster; starting a meeting carries the title and roster through
+unchanged; a started meeting's language panel has no detected languages, no
+active language, and is not overridden; a meeting with no roster still
+starts; a started session's panel still auto-detects normally once
+`observe()` is called on it; two sessions started from the same setup have
+independent panels).
+
+Deliberately out of scope here, same boundary as `EndToEndToken` below:
+wiring an actual pre-meeting UI screen (`apps/desktop`) that collects a
+title and roster and calls `start_meeting` — out of this crate's footprint,
+which only exposes the data shape and the transition function for that
+screen to drive. Likewise, constraining detection to an engagement's
+expected-language set (PRD FR-2.14) is a separate, already-planned feature;
+`PreMeetingSetup` deliberately does not grow an expected-language field for
+it, since FR-2.14 is explicit that constraint is *derived* from engagement
+context, never asked of the operator — adding such a field here would look
+identical to the language picker FR-2.11 exists to rule out.
+
 ## What's here
 
 - `attendee_preference.rs` — `AttendeeLanguagePreferences` (FR-2.16, see
@@ -281,29 +342,26 @@ collapsing, and auto-detection continuing to update the list post-override).
   proves transcript text is never gated on a language decision, and derives
   the aggregate `(language, confidence)` observation every other tracker in
   this directory consumes from already-transcribed per-token tags.
+- `pre_meeting.rs` — `PreMeetingSetup`, `MeetingSession`, and
+  `start_meeting` (FR-2.11, see above): proves the pre-meeting flow has no
+  language field or parameter anywhere in it, and that starting a meeting
+  hands off directly to an empty, auto-detection-driven language panel.
 - `mod.rs` — declares `pub mod attendee_preference;`,
-  `pub mod detected_languages;`, `pub mod end_to_end;`, and
-  `pub mod retention;`, and re-exports `AttendeeId`,
+  `pub mod detected_languages;`, `pub mod end_to_end;`, `pub mod
+  pre_meeting;`, and `pub mod retention;`, and re-exports `AttendeeId`,
   `AttendeeLanguagePreference`, `AttendeeLanguagePreferences`,
   `DetectedLanguage`, `DetectedLanguagePanel`, `DominantLanguage`,
-  `DominantLanguageResolver`, `EndToEndToken`, `RetainedUtterance`,
-  `Translation`.
+  `DominantLanguageResolver`, `EndToEndToken`, `MeetingSession`,
+  `PreMeetingSetup`, `RetainedUtterance`, `Translation`, `start_meeting`.
 
 ## Wiring needed
 
-`core/crates/language/src/lib.rs` exists but currently only has
-`pub mod segment;`. It needs:
-
-```rust
-pub mod numerals;
-pub mod segment;
-pub mod tags;
-```
-
-No other integration required here — `detected_languages` only depends on
-`tags::tier` (already in this directory), and `retention`,
-`attendee_preference`, and `end_to_end` have no dependencies on any other
-file in this directory at all.
+None. `core/crates/language/src/lib.rs` already wires `pub mod tags;` (see
+the wiring-history note at the top of this file) — `detected_languages`
+depends on `tags::tier` and `pre_meeting` depends on both `tags::tier` and
+`tags::detected_languages` (all already in this directory), and
+`retention`, `attendee_preference`, and `end_to_end` have no dependencies on
+any other file in this directory at all.
 
 ## What's not done here
 
@@ -338,10 +396,14 @@ file in this directory at all.
   FR-2.12's audio-path guarantee to hold in production — this crate has no
   ASR adapter and shouldn't grow one; it can only prove that nothing on its
   side would require a language decision before text exists.
+- Wiring an actual pre-meeting UI screen (`apps/desktop`) that collects a
+  title/roster and calls `start_meeting`, and feeding its resulting
+  `MeetingSession` into the live pipeline loop that then drives
+  `DetectedLanguagePanel::observe` — both belong to whichever crate/app
+  layer owns that flow; out of this crate's footprint.
 
-Verified locally (temporarily wiring `pub mod tags;` into `lib.rs`, then
-reverting it — see top of this file): `cargo test` — 118/118 pass (12 new
-for FR-2.12); `cargo clippy --all-targets -- -D warnings` — clean;
-pre-existing rustfmt drift across sibling `tags` files (struct-literal
-wrapping) predates this feature and was left untouched, matching
-`numerals/HANDOFF.md`'s prior note.
+Verified locally: `cargo test` — 153/153 pass (9 new for FR-2.11);
+`cargo clippy --all-targets -- -D warnings` — clean; pre-existing rustfmt
+drift across sibling `tags` files (struct-literal wrapping, method-chain
+wrapping) predates this feature and was left untouched on the new file too,
+matching `numerals/HANDOFF.md`'s prior note.
