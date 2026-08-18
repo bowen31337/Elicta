@@ -20,14 +20,25 @@
 //! breakdown. The two targets are reported separately, because a different
 //! knob governs each: mean-silence tuning drives p50, while the forced
 //! turn-end ceiling drives p95.
+//!
+//! [`PipelineSpan`] names the four arrows that make up that end-to-end
+//! span -- capture-to-send, send-to-first-partial, first-partial-to-final,
+//! and final-to-render -- and records each as its own interval in
+//! [`StageTimers`] so a slow run points at which arrow is slow rather than
+//! only that the total was slow.
 
 mod cache_health;
 mod histogram;
+mod pipeline_span;
 mod registry;
 mod total_latency;
 
 pub use cache_health::{CacheHealthSnapshot, CachePrefixMonitor, CacheTickUsage};
 pub use histogram::{LatencyHistogram, Snapshot};
+pub use pipeline_span::{
+    PipelineSpan, CAPTURE_TO_SEND, FINAL_TO_RENDER, FIRST_PARTIAL_TO_FINAL, PIPELINE_STAGES,
+    SEND_TO_FIRST_PARTIAL,
+};
 pub use registry::{StageTimerGuard, StageTimers};
 pub use total_latency::{
     TotalLatencyGuard, TotalLatencySnapshot, TotalLatencyTracker, P50_TARGET_MS, P95_TARGET_MS,
