@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from .errors import DocumentNotFoundError, EngagementNotFoundError
-from .models import DocumentStatus, EngagementDocument
+from .models import DocumentStatus, DocumentUploadRequest, EngagementDocument
 from .router import build_document_status_router, build_engagement_documents_router
 
 
@@ -18,6 +18,7 @@ def document(
 
 def make_client(
     documents: Iterable[EngagementDocument] | Exception,
+    upload_result: EngagementDocument | Exception | None = None,
 ) -> tuple[TestClient, list[str]]:
     received: list[str] = []
 
@@ -27,8 +28,19 @@ def make_client(
             raise documents
         return documents
 
+    async def upload_document(
+        engagement_id: str, payload: DocumentUploadRequest
+    ) -> EngagementDocument:
+        received.append(engagement_id)
+        if isinstance(upload_result, Exception):
+            raise upload_result
+        assert upload_result is not None
+        return upload_result
+
     app = FastAPI()
-    app.include_router(build_engagement_documents_router(list_documents))
+    app.include_router(
+        build_engagement_documents_router(list_documents, upload_document)
+    )
     return TestClient(app), received
 
 
@@ -99,6 +111,61 @@ def test_unknown_engagement_id_returns_404():
     client, _ = make_client(EngagementNotFoundError("eng-missing"))
 
     response = client.get("/api/engagements/eng-missing/documents")
+
+    assert response.status_code == 404
+
+
+def test_uploading_document_returns_201_with_created_document():
+    created = document("doc-1", "Scoping deck", DocumentStatus.GROUND_TRUTH)
+    client, received = make_client([], upload_result=created)
+
+    response = client.post(
+        "/api/engagements/eng-1/documents",
+        json={"name": "Scoping deck", "status": "ground truth"},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "document_id": "doc-1",
+        "name": "Scoping deck",
+        "status": "ground truth",
+    }
+    assert received == ["eng-1"]
+
+
+def test_uploading_document_without_status_returns_422_naming_the_field():
+    client, received = make_client([], upload_result=Exception("should not be called"))
+
+    response = client.post(
+        "/api/engagements/eng-1/documents",
+        json={"name": "Scoping deck"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert any(error["loc"][-1] == "status" for error in detail)
+    assert received == []
+
+
+def test_uploading_document_with_invalid_status_returns_422():
+    client, received = make_client([], upload_result=Exception("should not be called"))
+
+    response = client.post(
+        "/api/engagements/eng-1/documents",
+        json={"name": "Scoping deck", "status": "not-a-real-status"},
+    )
+
+    assert response.status_code == 422
+    assert received == []
+
+
+def test_uploading_document_for_unknown_engagement_returns_404():
+    client, _ = make_client([], upload_result=EngagementNotFoundError("eng-missing"))
+
+    response = client.post(
+        "/api/engagements/eng-missing/documents",
+        json={"name": "Scoping deck", "status": "ground truth"},
+    )
 
     assert response.status_code == 404
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DocumentStatus(str, Enum):
@@ -42,4 +42,21 @@ class EngagementDocumentListResponse(BaseModel):
 class DocumentStatusUpdateRequest(BaseModel):
     """Body for retagging a document's status (PATCH .../documents/{id}/status)."""
 
+    status: DocumentStatus
+
+
+class DocumentUploadRequest(BaseModel):
+    """Body for uploading a reference document (POST .../documents).
+
+    `status` has no default: every reference document must carry one of the
+    three status tags at upload time (PRD FR-3.4), so omitting it is a
+    validation failure rather than something to default away. FastAPI's
+    standard request-validation handling turns a missing required field
+    into a 422 whose `detail` names the offending field (`loc`), giving the
+    field-level error message FR-3.4 calls for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
     status: DocumentStatus
