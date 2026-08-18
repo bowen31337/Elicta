@@ -66,3 +66,20 @@ class TaggedCandidate(BaseModel):
     trigger_types: list[str]
     priority: int
     requires: list[str]
+
+
+class CandidateEmbedding(BaseModel):
+    """One candidate's embedding vector, keyed by id (PRD FR-4.3, architecture §3.6).
+
+    Mirrors `techniques/authority_matching.py`'s `CandidateAuthorityMatch`: a
+    small, decoupled value keyed by `candidate_id` rather than a full
+    candidate row, since this module -- like that one -- only ever computes
+    and persists its own column (`candidate.embedding`, `BLOB NOT NULL`) and
+    has no reason to carry the rest of the row along with it. `embedding`
+    must be non-empty: an empty vector would satisfy the column's `NOT NULL`
+    constraint while still leaving the row unretrievable, which is the exact
+    silent failure FR-4.3 exists to prevent.
+    """
+
+    candidate_id: str = Field(min_length=1)
+    embedding: bytes = Field(min_length=1)
