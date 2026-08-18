@@ -20,12 +20,14 @@
 
 pub mod model;
 pub mod orchestrator;
+pub mod prompt;
 pub mod replay;
 pub mod request;
 pub mod ticker;
 
 pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
+pub use prompt::{PromptBlock, SlowLanePrompt};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
