@@ -1,0 +1,1762 @@
+<!--
+  claw-forge Project Specification — Elicta
+  =========================================
+  Derived from docs/live-elicitation-assistant-prd.md and
+  docs/live-elicitation-assistant-architecture.md (both dated 18 August 2026).
+
+  Traceability: every feature description cites the PRD requirement (FR-*/NFR-*)
+  or architecture section it implements, so a reviewer can diff this spec
+  against the source documents.
+-->
+<project_specification mode="greenfield">
+  <project_name>Elicta — Live Requirements Elicitation Assistant</project_name>
+
+  <overview>
+    A desktop assistant that listens to a live client requirements meeting, detects
+    ambiguity in the moment, and surfaces one short follow-up question the operator
+    can ask before the client moves on. The load-bearing idea is that the expensive
+    analyst reasoning happens before the meeting: an offline pass compiles a bank of
+    pre-reasoned candidate questions, so the live path is retrieval and selection in
+    tens of milliseconds rather than inference in seconds. After the meeting it
+    becomes a conversational interface that produces BMAD planning artifacts in
+    which every claim is traceable to a timestamped utterance.
+  </overview>
+
+  <target_audience>
+    Primary — the operator: the PM or business analyst running a client requirements
+    meeting from a second machine. They glance at the panel, tap it, and never type
+    during the meeting. Secondary — the reviewer: a delivery lead or architect who
+    receives the artifacts and needs to see what the client actually said as opposed
+    to what the system inferred.
+  </target_audience>
+
+  <layout>
+    <!-- Polyglot. The trigger engine ships once in Rust (ADR-013, NFR-3.2); the
+         Tauri webview renders only the panel (ADR-014); the Claude Agent SDK is
+         Python-only on the service tier (ADR-010, constraint C3). -->
+    <zone root="core" profile="single-package">
+      <root template="core/crates/{plugin}/**"/>
+      <seam tier="ordered">core/shared/app/src/registry.rs</seam>
+    </zone>
+    <zone root="apps/service" profile="uv-workspace"/>
+    <zone root="apps/desktop" profile="pnpm-single-app"/>
+    <contract path="packages/api-client/**"
+              regen="pnpm --filter api-client generate"/>
+  </layout>
+
+  <technology_stack>
+    <shared_core>
+      <language>Rust (no garbage collector, safe on the real-time audio thread)</language>
+      <matching>aho-corasick for lexicon scanning</matching>
+      <bindings>UniFFI for Swift and Kotlin; C ABI elsewhere</bindings>
+      <storage>SQLite with sqlite-vec for the on-device question bank</storage>
+    </shared_core>
+    <frontend>
+      <framework>Tauri 2 shell with a system-webview panel</framework>
+      <language>TypeScript</language>
+      <styling>Tailwind CSS</styling>
+      <state_management>Tauri IPC events into a small reactive store</state_management>
+    </frontend>
+    <backend>
+      <framework>Python 3.12 with FastAPI (service tier)</framework>
+      <agent_runtime>Claude Agent SDK (claude-agent-sdk) for the compiler and debrief agents</agent_runtime>
+      <single_shot>Claude Messages API for the slow lane, with a hand-partitioned cache prefix</single_shot>
+      <orm>SQLAlchemy 2.0 (async)</orm>
+      <validation>Pydantic v2</validation>
+    </backend>
+    <database>
+      <primary>PostgreSQL (service tier)</primary>
+      <edge>SQLite with sqlite-vec on the operator device (question bank, session state)</edge>
+    </database>
+    <communication>
+      <api_style>REST over TLS, plus server-sent events for second-screen sync</api_style>
+      <response_format>JSON envelope: { "data": ..., "error": null, "status": 200 }</response_format>
+    </communication>
+    <external_processors>
+      <capture>Managed per-participant meeting capture vendor (unselected, PRD decision D4)</capture>
+      <asr_live>Streaming ASR with per-word confidence and per-token language tags</asr_live>
+      <asr_record>Two independent batch ASR engines, reconciled</asr_record>
+      <inference>Claude API (Messages API and Agent SDK)</inference>
+    </external_processors>
+  </technology_stack>
+
+  <prerequisites>
+    - Rust 1.79+ with cargo and the Tauri 2 CLI
+    - Python 3.12+ with uv installed
+    - Node.js 20+ with pnpm for the desktop shell
+    - PostgreSQL 16 for the service tier; SQLite bundled on device
+    - API keys: ANTHROPIC_API_KEY, live ASR vendor key, record-path vendor keys, managed capture vendor key
+    - Environment variables documented in .env.example: DATABASE_URL, ANTHROPIC_API_KEY, ASR_LIVE_KEY, ASR_RECORD_A_KEY, ASR_RECORD_B_KEY, CAPTURE_VENDOR_KEY, EGRESS_LOG_PATH, DATA_REGION
+    - Legal sign-off on PRD items L1 to L5 before the capture layer ships
+  </prerequisites>
+
+  <core_features>
+    <category name="Workspace Foundation">
+      <feature index="1" shape="core"
+               touches_files="Cargo.toml,pnpm-workspace.yaml,package.json,apps/service/pyproject.toml,apps/desktop/src-tauri/tauri.conf.json,core/shared/app/src/registry.rs,packages/api-client/package.json">
+        <description>System scaffolds the workspace skeleton across all three zones, creating the Cargo workspace manifest, the uv workspace pyproject, the pnpm workspace file, the Tauri configuration, and the crate registry that mounts core/crates/* without any feature editing shell files. Done when the workspace creates a clean build in every zone</description>
+      </feature>
+      <feature index="2" shape="core" depends_on="1"
+               touches_files="apps/service/src/app/main.py,apps/service/src/app/module_loader.py">
+        <description>Service boots a FastAPI application whose module loader scans apps/service/src/app/modules/* at startup and mounts each router, so no feature edits a central route table. Done when the service emits its mounted route list at startup</description>
+      </feature>
+      <feature index="3" shape="core" depends_on="1"
+               touches_files="packages/api-client/**">
+        <description>System generates the typed API client into packages/api-client from the service OpenAPI schema, and the generated client compiles against the desktop shell. Done when the generator creates typed bindings the desktop shell compiles against</description>
+      </feature>
+      <feature index="4" shape="core" depends_on="1"
+               touches_files=".env.example,docs/RUNBOOK.md">
+        <description>System documents every required environment variable in .env.example, and the service returns a startup error message naming any variable that is missing</description>
+      </feature>
+    </category>
+
+    <category name="Database Schema &amp; Migrations">
+      <feature index="5" shape="core" depends_on="1" touches_files="migrations/versions/**">
+        <description>Database migration creates the engagements table with a primary key id, client_name, sector, purpose, scope_boundary, template_id, artifact_language, and expected_languages columns (PRD FR-3.1, FR-3.5)</description>
+      </feature>
+      <feature index="6" shape="core" depends_on="5" touches_files="migrations/versions/**">
+        <description>Database migration creates the reference_documents table with a foreign key to engagements, a status column constrained to ground_truth, hypothesis, or superseded, plus source_uri and indexed_at (PRD FR-3.2, FR-3.4)</description>
+      </feature>
+      <feature index="7" shape="core" depends_on="5" touches_files="migrations/versions/**">
+        <description>Database migration creates the vocabulary_terms table holding per-engagement client vocabulary as term, term_type, and pronunciation_hint columns (PRD FR-3.6, FR-2.9)</description>
+      </feature>
+      <feature index="8" shape="core" depends_on="5" touches_files="migrations/versions/**">
+        <description>Database migration creates the candidates table for the compiled question bank with template_section, trigger_types, phrasing, stub, lang, priority, requires, authority_match, source_doc, and an embedding blob column (architecture section 3.6)</description>
+      </feature>
+      <feature index="9" shape="core" depends_on="5" touches_files="migrations/versions/**">
+        <description>Database migration creates the meetings table with a foreign key to engagements plus purpose, target_sections, scheduled_at, capture_mode, and state columns (PRD FR-3.8)</description>
+      </feature>
+      <feature index="10" shape="core" depends_on="9" touches_files="migrations/versions/**">
+        <description>Database migration creates the attendees table with structured role, business_function, decision_authority, and domain_expertise columns, and no free-text assessment column exists in the schema (PRD FR-3.10)</description>
+      </feature>
+      <feature index="11" shape="core" depends_on="9" touches_files="migrations/versions/**">
+        <description>Database migration creates the append-only utterances table with meeting_id, stream_id, speaker_tag, text, start_ms, end_ms, and source_path columns (PRD FR-2.3, FR-2.7)</description>
+      </feature>
+      <feature index="12" shape="core" depends_on="11" touches_files="migrations/versions/**">
+        <description>Database migration creates the utterance_tokens table holding per-word text, confidence, language_tag, and language_confidence for every token, which is what span gating reads (PRD FR-2.3, FR-2.13, NFR-5.6)</description>
+      </feature>
+      <feature index="13" shape="core" depends_on="11" touches_files="migrations/versions/**">
+        <description>Database migration creates the trigger_events table with trigger_kind, utterance_id, span_start, span_end, and confidence columns (PRD FR-5.1)</description>
+      </feature>
+      <feature index="14" shape="core" depends_on="13" touches_files="migrations/versions/**">
+        <description>Database migration creates the nudges table recording candidate_id, trigger_event_id, surfaced_at, disposition, and trigger_reason for every surfaced nudge (PRD FR-5.11, FR-7.4)</description>
+      </feature>
+      <feature index="15" shape="core" depends_on="9" touches_files="migrations/versions/**">
+        <description>Database migration creates the coverage_slots table mapping each template section to a fill_state and a citation list per meeting (PRD FR-6.5, FR-8.2)</description>
+      </feature>
+      <feature index="16" shape="core" depends_on="9" touches_files="migrations/versions/**">
+        <description>Database migration creates the artifacts table with artifact_type, artifact_language, body, and generated_at columns (PRD FR-8.1 through FR-8.6)</description>
+      </feature>
+      <feature index="17" shape="core" depends_on="5" touches_files="migrations/versions/**">
+        <description>Database migration creates the requirements_state table carrying engagement-scoped confirmed requirements, contradictions, and decisions across meetings (PRD FR-8.9)</description>
+      </feature>
+      <feature index="18" shape="core" depends_on="17" touches_files="migrations/versions/**">
+        <description>Database migration creates the open_questions table with an impact_rank column so the list can be ordered by impact on the build (PRD FR-8.3)</description>
+      </feature>
+      <feature index="19" shape="core" depends_on="11" touches_files="migrations/versions/**">
+        <description>Database migration creates the citations table binding every requirement claim to a non-null utterance_id with a NOT NULL constraint enforced in DDL (PRD FR-8.7)</description>
+      </feature>
+      <feature index="20" shape="core" depends_on="19" touches_files="migrations/versions/**">
+        <description>Database migration adds original_utterance_id and translated_text columns to citations so a translated citation cannot exist without its original (PRD FR-2.19, FR-8.7a). Done when a translated citation persists both texts on one row</description>
+      </feature>
+      <feature index="21" shape="core" depends_on="1" touches_files="migrations/versions/**">
+        <description>Database migration creates the egress_log table with processor_name, request_digest, byte_count, region, and sent_at columns for the audited chokepoint (PRD NFR-2.7)</description>
+      </feature>
+      <feature index="22" shape="core" depends_on="1" touches_files="migrations/versions/**">
+        <description>Database migration creates the operator_voiceprints table storing an enrolled embedding per operator for the mixed-stream fallback path (PRD FR-1.5)</description>
+      </feature>
+      <feature index="23" shape="core" depends_on="1" touches_files="migrations/versions/**">
+        <description>Database migration creates the replay_runs table recording the input recording, the pipeline commit hash, and the random seed for reproducibility (architecture section 9)</description>
+      </feature>
+      <feature index="24" shape="core" depends_on="23" touches_files="migrations/versions/**">
+        <description>Database migration creates the replay_ratings table with useful, timely, and embarrassing verdict columns per surfaced suggestion (PRD M1, M2)</description>
+      </feature>
+    </category>
+
+    <category name="Replay Harness">
+      <feature index="25" shape="plugin" plugin="replay" depends_on="1"
+               touches_files="apps/service/src/app/modules/replay/driver/**">
+        <description>Service replays a recorded meeting transcript through the full pipeline, which emits each utterance at its original wall-clock offset</description>
+      </feature>
+      <feature index="26" shape="plugin" plugin="replay" depends_on="25"
+               touches_files="apps/service/src/app/modules/replay/driver/**">
+        <description>Service produces byte-identical output for a fixed input and a fixed seed, and the run persists its seed to the replay_runs table</description>
+      </feature>
+      <feature index="27" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/log/**">
+        <description>Service writes a suggestion log row per evaluation containing timestamp, trigger, candidate, score, and would_surface. Done when the run persists one suggestion row per evaluation</description>
+      </feature>
+      <feature index="28" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/api/**">
+        <description>API starts a replay run against an uploaded recording (POST /api/replay/runs, returns 202 with run_id)</description>
+      </feature>
+      <feature index="29" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/api/**">
+        <description>API returns the status of a replay run with progress and suggestion count (GET /api/replay/runs/{id}, returns 200)</description>
+      </feature>
+      <feature index="30" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/api/**">
+        <description>API accepts a senior analyst verdict of useful, timely, or embarrassing per suggestion (POST /api/replay/runs/{id}/ratings, returns 201)</description>
+      </feature>
+      <feature index="31" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/metrics/**">
+        <description>API returns precision@surfaced as metric M1 computed from the replay_ratings table (GET /api/replay/runs/{id}/metrics, returns 200)</description>
+      </feature>
+      <feature index="32" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/metrics/**">
+        <description>Service emits the embarrassment count as metric M2, which is a release gate rather than a target</description>
+      </feature>
+      <feature index="33" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/metrics/**">
+        <description>Service emits M1 and M2 broken out per language, never as a single global figure (PRD NFR-5.7, T13)</description>
+      </feature>
+      <feature index="34" shape="core" depends_on="31"
+               touches_files=".github/workflows/replay-gate.yml">
+        <description>System fails the continuous integration build when a ranking change drops precision@surfaced below the 70 percent threshold. Done when the build emits a failing status carrying the measured precision</description>
+      </feature>
+      <feature index="35" shape="core" depends_on="34"
+               touches_files=".github/workflows/replay-gate.yml">
+        <description>System fails the continuous integration build when the embarrassment count is non-zero on the replay corpus. Done when the build emits a failing status naming the embarrassing suggestion</description>
+      </feature>
+      <feature index="36" shape="plugin" plugin="replay"
+               touches_files="apps/service/src/app/modules/replay/harness/**">
+        <description>Service runs the harness against the shared Rust core so identical cross-platform behaviour is demonstrated rather than assumed (PRD NFR-3.8). Done when the harness emits identical suggestion logs on every platform</description>
+      </feature>
+    </category>
+    <category name="Engagement &amp; Context Pack">
+      <feature index="37" shape="plugin" plugin="engagement" depends_on="1"
+               touches_files="apps/service/src/app/modules/engagement/api/**">
+        <description>User can create an engagement with client organisation, sector, and commercial context (POST /api/engagements, returns 201 with engagement_id)</description>
+      </feature>
+      <feature index="38" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/api/**">
+        <description>API returns a paginated list of engagements for the signed-in delivery team (GET /api/engagements, returns 200)</description>
+      </feature>
+      <feature index="39" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/api/**">
+        <description>API returns a single engagement with its document count and context-completeness score (GET /api/engagements/{id}, returns 200)</description>
+      </feature>
+      <feature index="40" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/api/**">
+        <description>User can update engagement purpose, scope_boundary, and target requirements template (PATCH /api/engagements/{id}, returns 200)</description>
+      </feature>
+      <feature index="41" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/documents/**">
+        <description>User can upload a reference document by file (POST /api/engagements/{id}/documents, returns 201 with document_id)</description>
+      </feature>
+      <feature index="42" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/documents/**">
+        <description>User can attach a reference document by SharePoint or Teams link, which the service fetches into the reference_documents table (PRD FR-3.2). Done when the fetched body persists to the reference_documents table</description>
+      </feature>
+      <feature index="43" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/documents/**">
+        <description>API returns 422 with a field-level error message when a document upload omits its required status tag (PRD FR-3.4)</description>
+      </feature>
+      <feature index="44" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/documents/**">
+        <description>User can change a document status to ground_truth, hypothesis, or superseded (PATCH /api/documents/{id}/status, returns 200)</description>
+      </feature>
+      <feature index="45" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/documents/**">
+        <description>API returns the document list for an engagement with each status tag shown (GET /api/engagements/{id}/documents, returns 200)</description>
+      </feature>
+      <feature index="46" shape="plugin" plugin="engagement" depends_on="41"
+               touches_files="apps/service/src/app/modules/engagement/index/**">
+        <description>Service extracts, chunks, and indexes reference document content for retrieval, which persists an indexed_at timestamp per document (PRD FR-3.3)</description>
+      </feature>
+      <feature index="47" shape="plugin" plugin="engagement" depends_on="46"
+               touches_files="apps/service/src/app/modules/engagement/index/**">
+        <description>Service compiles the context pack down to a digest rather than accumulating raw text, so the cached prefix stays inside the latency budget (PRD FR-3.3 rationale). Done when the pack persists as a compact digest rather than raw text</description>
+      </feature>
+      <feature index="48" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/vocabulary/**">
+        <description>User can add client product names, internal systems, and acronyms to the vocabulary_terms table (POST /api/engagements/{id}/vocabulary, returns 201)</description>
+      </feature>
+      <feature index="49" shape="plugin" plugin="engagement" depends_on="48"
+               touches_files="apps/service/src/app/modules/engagement/vocabulary/**">
+        <description>Service derives the engagement expected-language set from client context, which constrains ASR language detection (PRD FR-2.14). Done when the derived language set persists on the engagement record</description>
+      </feature>
+      <feature index="50" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/meetings/**">
+        <description>User can create a meeting that inherits all engagement context automatically, requiring confirmation rather than re-entry (POST /api/meetings, returns 201)</description>
+      </feature>
+      <feature index="51" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/meetings/**">
+        <description>User can set this session purpose plus the target template sections for the meeting (PATCH /api/meetings/{id}, returns 200)</description>
+      </feature>
+      <feature index="52" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/meetings/**">
+        <description>User can add attendees to a meeting using only structured role, business_function, decision_authority, and domain_expertise fields (POST /api/meetings/{id}/attendees, returns 201)</description>
+      </feature>
+      <feature index="53" shape="plugin" plugin="engagement" depends_on="52"
+               touches_files="apps/service/src/app/modules/engagement/meetings/**">
+        <description>Service pre-populates the attendees table from the calendar invite where one is available (PRD FR-3.9). Done when each invited person persists as an attendee row</description>
+      </feature>
+      <feature index="54" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/state/**">
+        <description>API returns the inherited open-questions list plus requirements_state from prior meetings (GET /api/engagements/{id}/state, returns 200)</description>
+      </feature>
+      <feature index="55" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/state/**">
+        <description>Service falls back to a generic elicitation bank keyed to sector when an engagement has no reference documents (PRD FR-3.13). Done when the fallback creates a generic bank keyed to sector and project type</description>
+      </feature>
+      <feature index="56" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/state/**">
+        <description>UI displays a context-completeness indicator so the operator knows what quality of support to expect (PRD FR-3.14)</description>
+      </feature>
+      <feature index="57" shape="plugin" plugin="engagement"
+               touches_files="apps/service/src/app/modules/engagement/state/**">
+        <description>User can mark a reference claim as an assertion to verify with the client this session (PRD FR-3.12). Done when a verify_with_client flag persists on the reference claim</description>
+      </feature>
+    </category>
+
+    <category name="Question Bank Compilation">
+      <feature index="58" shape="plugin" plugin="compiler" depends_on="47"
+               touches_files="apps/service/src/app/modules/compiler/agent/**">
+        <description>Service runs a BMAD Analyst pass over the context pack on the Claude Agent SDK, which emits 150 to 300 candidate questions (PRD FR-4.1)</description>
+      </feature>
+      <feature index="59" shape="plugin" plugin="compiler" depends_on="58"
+               touches_files="apps/service/src/app/modules/compiler/agent/**">
+        <description>Service submits the compiler workload through the Batch API, which halves inference cost on a pass with no latency constraint (architecture section 14.4). Done when the compile emits one batch job identifier</description>
+      </feature>
+      <feature index="60" shape="plugin" plugin="compiler" depends_on="59"
+               touches_files="apps/service/src/app/modules/compiler/agent/**">
+        <description>Service keys every batch result by custom_id rather than by position, because results arrive in arbitrary order. Done when every result persists against its originating request identifier</description>
+      </feature>
+      <feature index="61" shape="plugin" plugin="compiler" depends_on="58"
+               touches_files="apps/service/src/app/modules/compiler/citations/**">
+        <description>Service runs an extraction pass with document citations enabled, capturing cited_text plus a character location for each extracted claim. Done when the cited span persists for each extracted claim</description>
+      </feature>
+      <feature index="62" shape="plugin" plugin="compiler" depends_on="61"
+               touches_files="apps/service/src/app/modules/compiler/citations/**">
+        <description>Service runs a separate structuring pass under a response schema, because citations cannot be combined with a constrained output format in one request (architecture section 14.4). Done when the pass creates schema-valid candidate records</description>
+      </feature>
+      <feature index="63" shape="plugin" plugin="compiler" depends_on="61"
+               touches_files="apps/service/src/app/modules/compiler/citations/**">
+        <description>Service persists the document span into the candidate source_doc column so hypothesis-derived questions carry verifiable provenance</description>
+      </feature>
+      <feature index="64" shape="plugin" plugin="compiler" depends_on="58"
+               touches_files="apps/service/src/app/modules/compiler/tagging/**">
+        <description>Service tags each candidate with target template_section, trigger_types, priority, and prerequisite candidate ids (PRD FR-4.2). Done when each candidate row persists its tags</description>
+      </feature>
+      <feature index="65" shape="plugin" plugin="compiler" depends_on="64"
+               touches_files="apps/service/src/app/modules/compiler/tagging/**">
+        <description>Service embeds every candidate into the embedding column, which supports retrieval under 300 milliseconds at runtime (PRD FR-4.3). Done when a vector persists on every candidate row</description>
+      </feature>
+      <feature index="66" shape="plugin" plugin="compiler" depends_on="64"
+               touches_files="apps/service/src/app/modules/compiler/tagging/**">
+        <description>Service writes slot placeholders into candidate phrasing so the runtime can instantiate a question by string interpolation (architecture section 3.6). Done when the stored phrasing persists its slot placeholders</description>
+      </feature>
+      <feature index="67" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/techniques/**">
+        <description>Service draws question strategies from a versioned elicitation technique set held as an Agent Skill, editable without a redeploy (PRD FR-4.4). Done when each candidate emits the technique identifier that produced it</description>
+      </feature>
+      <feature index="68" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/techniques/**">
+        <description>Service suppresses solution-shaped and epic-shaped candidates while the engagement remains at discovery stage (PRD FR-4.6). Done when the compile emits a suppression count for solution-shaped candidates</description>
+      </feature>
+      <feature index="69" shape="plugin" plugin="compiler" depends_on="64"
+               touches_files="apps/service/src/app/modules/compiler/techniques/**">
+        <description>Service writes an authority_match value per candidate so ranking can favour questions the people in the room can answer (PRD FR-4.7). Done when an authority match value persists per candidate</description>
+      </feature>
+      <feature index="70" shape="plugin" plugin="compiler" depends_on="44"
+               touches_files="apps/service/src/app/modules/compiler/techniques/**">
+        <description>Service generates verification questions from hypothesis-tagged documents instead of treating their claims as fact (PRD FR-4.9). Done when the pass creates one verification question per hypothesis claim</description>
+      </feature>
+      <feature index="71" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>API triggers a bank compile for an engagement (POST /api/engagements/{id}/bank/compile, returns 202 with a job_id)</description>
+      </feature>
+      <feature index="72" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>API returns the compiled question bank as a reviewable tree grouped by template section (GET /api/engagements/{id}/bank, returns 200)</description>
+      </feature>
+      <feature index="73" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>User can edit, reorder, or prune a candidate in the pre-meeting question tree (PATCH /api/bank/candidates/{id}, returns 200)</description>
+      </feature>
+      <feature index="74" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>User can delete a candidate from the bank before the meeting (DELETE /api/bank/candidates/{id}, returns 204)</description>
+      </feature>
+      <feature index="75" shape="plugin" plugin="compiler"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>API returns the per-meeting recompiled bank weighted toward inherited open questions (GET /api/meetings/{id}/bank, returns 200)</description>
+      </feature>
+      <feature index="76" shape="plugin" plugin="compiler" depends_on="75"
+               touches_files="apps/service/src/app/modules/compiler/api/**">
+        <description>Service recompiles the bank per meeting, weighting candidates toward the inherited open-questions list (PRD FR-4.8). Done when each recompile creates a fresh per-meeting bank</description>
+      </feature>
+      <feature index="77" shape="core" depends_on="58"
+               touches_files="apps/service/src/app/core/agent_permissions.py">
+        <description>Service scopes compiler filesystem tools to read the engagement document set only, and write access reaches the bank directory alone (architecture section 3.11). Done when an out-of-scope read emits a permission denial</description>
+      </feature>
+    </category>
+    <category name="Record Path Transcription">
+      <feature index="203" shape="plugin" plugin="asr-record" depends_on="2"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service re-transcribes the full session in batch at the highest available accuracy with no latency constraint (PRD FR-2.5). Done when a record-path transcript persists for the full session</description>
+      </feature>
+      <feature index="204" shape="plugin" plugin="asr-record" depends_on="203"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service runs two independent batch engines over the retained audio for every session (PRD FR-2.6). Done when one transcript persists per engine</description>
+      </feature>
+      <feature index="205" shape="plugin" plugin="asr-record" depends_on="204"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service aligns the two engine outputs and marks agreement as the confidence signal per span. Done when an agreement score persists per aligned span</description>
+      </feature>
+      <feature index="206" shape="plugin" plugin="asr-record" depends_on="205"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service flags every divergent span for operator review rather than silently picking a winner (PRD FR-2.8). Done when a divergence flag persists on every disagreeing span</description>
+      </feature>
+      <feature index="207" shape="plugin" plugin="asr-record" depends_on="206"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>API returns the divergent and low-confidence spans for debrief review (GET /api/meetings/{id}/record/divergences, returns 200)</description>
+      </feature>
+      <feature index="208" shape="plugin" plugin="asr-record" depends_on="203"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>API starts record-path transcription for a meeting (POST /api/meetings/{id}/record/transcribe, returns 202 with a job_id)</description>
+      </feature>
+      <feature index="209" shape="plugin" plugin="asr-record" depends_on="203"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service injects the engagement vocabulary as keyterm prompting on the record path as well as the live path (PRD FR-2.9). Done when each batch request sends the vocabulary as keyterms</description>
+      </feature>
+      <feature index="210" shape="plugin" plugin="asr-record" depends_on="206"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service derives every artifact, citation, and coverage decision from record-path output, never from the live transcript (PRD FR-2.7). Done when every artifact claim persists a record-path source reference</description>
+      </feature>
+      <feature index="211" shape="plugin" plugin="asr-record" depends_on="204"
+               touches_files="apps/service/src/app/modules/asr-record/**">
+        <description>Service records which two engine lineages were used per run, because reconciliation is worthless when both engines share training data. Done when the run record persists both engine identifiers</description>
+      </feature>
+    </category>
+
+    <category name="Debrief &amp; Artifacts">
+      <feature index="212" shape="plugin" plugin="debrief" depends_on="210"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service runs full diarization over the retained audio, which persists a speaker_tag per utterance (PRD FR-7.2)</description>
+      </feature>
+      <feature index="213" shape="plugin" plugin="debrief" depends_on="212"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service discards raw audio the moment transcription and diarization complete, retaining it no longer (PRD NFR-2.4). Done when the pipeline emits an audio destruction event</description>
+      </feature>
+      <feature index="214" shape="plugin" plugin="debrief" depends_on="213"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service cleans the transcript by removing disfluencies, correcting vocabulary, restoring punctuation. Done when the cleaned transcript persists alongside the verbatim original</description>
+      </feature>
+      <feature index="215" shape="plugin" plugin="debrief" depends_on="214"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service classifies every utterance to a template section, which persists a fill_state per coverage slot</description>
+      </feature>
+      <feature index="216" shape="plugin" plugin="debrief" depends_on="215"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service runs a BMAD Analyst chain over the full transcript on the Claude Agent SDK. Done when the chain creates the full artifact set</description>
+      </feature>
+      <feature index="217" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>Service binds every claim to its utterance_id with timestamp plus speaker in the citations table (PRD FR-8.7). Done when a citation row persists for every claim</description>
+      </feature>
+      <feature index="218" shape="plugin" plugin="debrief" depends_on="217"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>System rejects any requirement write whose utterance_id is null, so citation integrity is structural rather than prompt-dependent. Done when a write with a null utterance_id returns 422 with an error message</description>
+      </feature>
+      <feature index="219" shape="plugin" plugin="debrief" depends_on="217"
+               touches_files="apps/service/src/app/modules/debrief/pipeline/**">
+        <description>UI displays both the original-language utterance and its translation on a cross-language citation, with the original shown on expand (PRD FR-8.7a)</description>
+      </feature>
+      <feature index="220" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates a transcript artifact with speaker attribution plus timestamps (PRD FR-8.1)</description>
+      </feature>
+      <feature index="221" shape="plugin" plugin="debrief" depends_on="215"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates a requirements coverage matrix against the BMAD template taxonomy (PRD FR-8.2)</description>
+      </feature>
+      <feature index="222" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates an open questions list ranked by impact_rank on the build (PRD FR-8.3)</description>
+      </feature>
+      <feature index="223" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates a decision and commitment log recording what was agreed, by whom (PRD FR-8.4)</description>
+      </feature>
+      <feature index="224" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates a draft project brief from the meeting content (PRD FR-8.5)</description>
+      </feature>
+      <feature index="225" shape="plugin" plugin="debrief" depends_on="222"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service creates a draft follow-up email covering what we heard plus what we still need (PRD FR-8.6)</description>
+      </feature>
+      <feature index="226" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>UI shows a distinct inference marker on anything the system generated rather than heard (PRD FR-8.8)</description>
+      </feature>
+      <feature index="227" shape="plugin" plugin="debrief" depends_on="217"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service merges updated requirements_state forward into the next meeting of the engagement (PRD FR-8.9). Done when the merged state persists against the engagement</description>
+      </feature>
+      <feature index="228" shape="plugin" plugin="debrief" depends_on="221"
+               touches_files="apps/service/src/app/modules/debrief/artifacts/**">
+        <description>Service refuses full PRD generation until coverage across meetings passes threshold, returning 409 with an explanatory error message (PRD FR-8.10)</description>
+      </feature>
+      <feature index="229" shape="plugin" plugin="debrief" depends_on="216"
+               touches_files="apps/service/src/app/modules/debrief/session/**">
+        <description>API opens a debrief conversation with streaming enabled, no length cap, no latency budget (POST /api/meetings/{id}/debrief/start, returns 201)</description>
+      </feature>
+      <feature index="230" shape="plugin" plugin="debrief" depends_on="229"
+               touches_files="apps/service/src/app/modules/debrief/session/**">
+        <description>API accepts a free-form debrief message over the meeting content (POST /api/meetings/{id}/debrief/message, returns 200)</description>
+      </feature>
+      <feature index="231" shape="plugin" plugin="debrief" depends_on="229"
+               touches_files="apps/service/src/app/modules/debrief/session/**">
+        <description>Service appends the full response content back into the debrief history, so server-side compaction state is never dropped. Done when the full response content persists in the debrief history</description>
+      </feature>
+      <feature index="232" shape="plugin" plugin="debrief" depends_on="229"
+               touches_files="apps/service/src/app/modules/debrief/session/**">
+        <description>Service inherits live-mode signal into the debrief thread, covering which nudges fired, which were taken, which were parked (PRD FR-7.4). Done when the debrief context persists every nudge disposition</description>
+      </feature>
+      <feature index="233" shape="plugin" plugin="debrief" depends_on="220"
+               touches_files="apps/service/src/app/modules/debrief/api/**">
+        <description>API returns the artifact list for a meeting with type plus generated_at (GET /api/meetings/{id}/artifacts, returns 200)</description>
+      </feature>
+      <feature index="234" shape="plugin" plugin="debrief" depends_on="233"
+               touches_files="apps/service/src/app/modules/debrief/api/**">
+        <description>API returns a single artifact body with its citations expanded (GET /api/artifacts/{id}, returns 200)</description>
+      </feature>
+      <feature index="235" shape="plugin" plugin="debrief" depends_on="50"
+               touches_files="apps/service/src/app/modules/debrief/api/**">
+        <description>API returns a single meeting with its attendees, coverage summary, nudge count (GET /api/meetings/{id}, returns 200)</description>
+      </feature>
+    </category>
+    <category name="Audio Capture">
+      <feature index="78" shape="plugin" plugin="capture" depends_on="1"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System exposes one AudioSource trait behind which every platform capture backend is selected at runtime (PRD FR-1.1). Done when every backend emits the same frame stream shape</description>
+      </feature>
+      <feature index="79" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System captures line-in audio from a USB interface on macOS via CoreAudio, which emits 16kHz mono frames</description>
+      </feature>
+      <feature index="80" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System captures line-in audio on Windows via WASAPI, which emits 16kHz mono frames</description>
+      </feature>
+      <feature index="81" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System captures loopback audio from a silent local join using ScreenCaptureKit or the CoreAudio process tap on macOS. Done when the loopback source emits 16kHz mono frames</description>
+      </feature>
+      <feature index="82" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System captures loopback audio on Windows via the WASAPI loopback API, which is a first-class path rather than a retrofit. Done when the loopback source emits 16kHz mono frames</description>
+      </feature>
+      <feature index="83" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>System disables platform voice processing on every capture path, so automatic gain control, noise suppression, and beamforming never touch the signal (architecture section 14.1). Done when the capture profile displays every processing option disabled</description>
+      </feature>
+      <feature index="84" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/device/**">
+        <description>UI displays a warning banner when the operator selects acoustic capture, which is the degraded fallback mode (PRD FR-1.2)</description>
+      </feature>
+      <feature index="85" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/ring/**">
+        <description>System writes captured audio into a lock-free ring buffer from the real-time callback, performing no allocation on that thread (architecture section 3.1). Done when the callback emits frames without blocking</description>
+      </feature>
+      <feature index="86" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/ring/**">
+        <description>System normalises every input path to 16kHz mono linear PCM before the ASR client sees it. Done when the pipeline sends a uniform 16kHz mono stream to the ASR client</description>
+      </feature>
+      <feature index="87" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/ring/**">
+        <description>System counts and surfaces ring buffer overruns as a dropped_frames metric, so audio loss is never silent. Done when an overrun emits a dropped_frames count</description>
+      </feature>
+      <feature index="88" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/vad/**">
+        <description>System runs Silero voice activity detection continuously to gate downstream work, which emits speech and silence interval events</description>
+      </feature>
+      <feature index="89" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/state/**">
+        <description>System models capture as an explicit idle, capturing, paused state machine with transitions logged. Done when every change emits a state transition event</description>
+      </feature>
+      <feature index="90" shape="plugin" plugin="capture" depends_on="89"
+               touches_files="core/crates/capture/src/state/**">
+        <description>User can halt audio ingestion with a single unmissable pause control that takes effect within one buffer period (PRD FR-1.3). Done when the pause emits a paused state within one buffer period</description>
+      </feature>
+      <feature index="91" shape="plugin" plugin="capture" depends_on="89"
+               touches_files="core/crates/capture/src/state/**">
+        <description>UI displays an unambiguous capture-state indicator readable at a glance (PRD FR-1.4)</description>
+      </feature>
+      <feature index="92" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/state/**">
+        <description>System never writes raw audio to persistent storage on the device, keeping segments in memory only (PRD FR-1.7). Done when the device persists no audio bytes to disk at any point</description>
+      </feature>
+      <feature index="93" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/enrol/**">
+        <description>User can enrol an operator voice sample of at most 60 seconds, which persists to the operator_voiceprints table (PRD FR-1.5)</description>
+      </feature>
+      <feature index="94" shape="plugin" plugin="capture" depends_on="93"
+               touches_files="core/crates/capture/src/enrol/**">
+        <description>System tags each utterance as operator or other by cosine similarity against the enrolled voiceprint on mixed-stream capture, completing in about 15 milliseconds (PRD FR-1.6). Done when every utterance emits an operator or other tag</description>
+      </feature>
+      <feature index="95" shape="plugin" plugin="capture"
+               touches_files="core/crates/capture/src/enrol/**">
+        <description>System reads speaker identity directly from the stream identifier on managed per-participant capture, which makes voiceprint verification unnecessary (PRD FR-2.10). Done when the stream emits the participant identity directly</description>
+      </feature>
+    </category>
+
+    <category name="Streaming Transcription">
+      <feature index="96" shape="plugin" plugin="asr-live" depends_on="86"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System defines a TranscriptionBackend trait so a streaming ASR vendor can be swapped without touching the trigger gate. Done when every vendor emits the same event stream shape</description>
+      </feature>
+      <feature index="97" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System opens the streaming websocket at capture start rather than at first speech, so connection setup never lands on the first nudge (architecture section 14.2). Done when the connection emits a ready event before the first utterance</description>
+      </feature>
+      <feature index="98" shape="plugin" plugin="asr-live" depends_on="97"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System holds the websocket open with keepalive frames for the duration of the meeting. Done when the connection sends a keepalive frame on a fixed interval</description>
+      </feature>
+      <feature index="99" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System sends linear16 PCM at 16kHz rather than re-encoding to a lossy codec, which avoids double compression of already-compressed conference audio</description>
+      </feature>
+      <feature index="100" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System sends audio in frames between 20 and 50 milliseconds to balance quantisation delay against per-message overhead</description>
+      </feature>
+      <feature index="101" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System pins the ASR vendor region per engagement, which serves both round-trip latency and the data residency requirement (PRD NFR-2.2). Done when every request sends to the pinned regional endpoint</description>
+      </feature>
+      <feature index="102" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/backend/**">
+        <description>System injects the engagement vocabulary as keyterm prompting on the live path before the first frame is sent (PRD FR-2.9). Done when the handshake sends the vocabulary as keyterms</description>
+      </feature>
+      <feature index="103" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System emits an InterimHypothesis event carrying stream_id, text, and started_at within 400 milliseconds of speech onset (PRD FR-2.1)</description>
+      </feature>
+      <feature index="104" shape="plugin" plugin="asr-live" depends_on="103"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System emits a FinalUtterance event on endpoint carrying id, stream_id, speaker tag, start_ms, end_ms, and a token vector (PRD FR-2.3)</description>
+      </feature>
+      <feature index="105" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System exposes the endpointing silence threshold as configuration with a 600 millisecond default, tunable per capture mode (PRD FR-2.2). Done when the configured threshold persists per capture mode</description>
+      </feature>
+      <feature index="106" shape="plugin" plugin="asr-live" depends_on="105"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System tunes the minimum-silence parameter against the p50 latency target while the maximum-silence ceiling governs p95 (architecture section 14.2). Done when the tuning run emits separate p50 and p95 measurements</description>
+      </feature>
+      <feature index="107" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System sets the first-partial delay low so the speculative drafting window stays as wide as the engine allows (PRD FR-5.9). Done when the engine emits its first partial as early as it allows</description>
+      </feature>
+      <feature index="108" shape="plugin" plugin="asr-live" depends_on="104"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System distinguishes frozen tokens from endpointed utterances, so a match on immutable text can commit before the endpoint fires (PRD FR-2.4). Done when a frozen match emits a committed candidate before the endpoint</description>
+      </feature>
+      <feature index="109" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/stream/**">
+        <description>System re-evaluates an utterance when a continuation arrives after a premature endpoint, which is the cost of aggressive turn tuning. Done when a continuation emits a corrected utterance</description>
+      </feature>
+      <feature index="110" shape="plugin" plugin="asr-live"
+               touches_files="core/crates/asr-live/src/tokens/**">
+        <description>System populates per-word confidence on every token, which is the input span gating reads (PRD FR-2.3, NFR-5.6). Done when every token emits a confidence value</description>
+      </feature>
+      <feature index="111" shape="plugin" plugin="asr-live" depends_on="110"
+               touches_files="core/crates/asr-live/src/tokens/**">
+        <description>System rejects any ASR backend that returns only an utterance-level confidence score, failing startup with a clear error message</description>
+      </feature>
+      <feature index="112" shape="plugin" plugin="asr-live" depends_on="95"
+               touches_files="core/crates/asr-live/src/tokens/**">
+        <description>System consumes one websocket per participant stream where managed capture provides separated audio (PRD FR-2.10). Done when each participant emits its own event stream</description>
+      </feature>
+      <feature index="113" shape="plugin" plugin="asr-live" depends_on="104"
+               touches_files="core/crates/asr-live/src/tokens/**">
+        <description>System persists every finalised utterance to the append-only utterances table before any consumer reads it</description>
+      </feature>
+    </category>
+
+    <category name="Multilingual Language Handling">
+      <feature index="114" shape="plugin" plugin="language" depends_on="104"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System consumes per-token language tags with confidence rather than one utterance-level language (PRD FR-2.13). Done when every token emits a language tag with confidence</description>
+      </feature>
+      <feature index="115" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System never presents a pre-meeting language selection, because language detection is automatic (PRD FR-2.11). Done when the pre-meeting flow shows no language picker</description>
+      </feature>
+      <feature index="116" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System uses an end-to-end multilingual engine so no language decision gates the audio path (PRD FR-2.12). Done when transcription emits text with no preceding language decision</description>
+      </feature>
+      <feature index="117" shape="plugin" plugin="language" depends_on="49"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System constrains detection to the engagement expected-language set, ranking outside languages lower without excluding them (PRD FR-2.14). Done when an outside-set language emits a lower rank</description>
+      </feature>
+      <feature index="118" shape="plugin" plugin="language" depends_on="112"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System tags language per participant stream where the capture mode provides separated streams (PRD FR-2.15). Done when each participant stream emits its own language tag</description>
+      </feature>
+      <feature index="119" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System learns per-attendee language preference across an engagement, biasing that stream on later meetings (PRD FR-2.16). Done when a preferred_language value persists per attendee</description>
+      </feature>
+      <feature index="120" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/segment/**">
+        <description>System segments languages without orthographic word boundaries before any lexicon match is attempted (PRD FR-2.18). Done when segmentation emits tokens before any lexicon runs</description>
+      </feature>
+      <feature index="121" shape="plugin" plugin="language" depends_on="120"
+               touches_files="core/crates/language/src/segment/**">
+        <description>System groups tokens by language tag, routing each group to its own segmenter (architecture section 3.5). Done when grouping emits one token set per detected language</description>
+      </feature>
+      <feature index="122" shape="plugin" plugin="language" depends_on="121"
+               touches_files="core/crates/language/src/segment/**">
+        <description>System merges spans from each language back into one ordered span list per utterance. Done when the merge emits one ordered span list per utterance</description>
+      </feature>
+      <feature index="123" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/numerals/**">
+        <description>System normalises spoken numbers to numeral form on both transcription paths (PRD FR-2.17). Done when normalisation emits numerals rather than spelled-out numbers</description>
+      </feature>
+      <feature index="124" shape="plugin" plugin="language" depends_on="123"
+               touches_files="core/crates/language/src/numerals/**">
+        <description>System converts Chinese 万 and 亿 grouping to the correct magnitude in the shared core, because no vendor handles this reliably (architecture section 14.1). Done when a grouped Chinese numeral emits the correct magnitude</description>
+      </feature>
+      <feature index="125" shape="plugin" plugin="language" depends_on="124"
+               touches_files="core/crates/language/src/numerals/**">
+        <description>System passes a unit test proving 三百五十万 normalises to 3500000 before any quantify trigger reads the value. Done when the test emits 3500000 as the normalised value</description>
+      </feature>
+      <feature index="126" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System retains the original-language utterance alongside any translation, permanently and inseparably (PRD FR-2.19). Done when the original utterance persists alongside every translation</description>
+      </feature>
+      <feature index="127" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>UI displays every detected language live in the panel during the meeting (PRD FR-2.20)</description>
+      </feature>
+      <feature index="128" shape="plugin" plugin="language" depends_on="127"
+               touches_files="core/crates/language/src/tags/**">
+        <description>User can override the detected language with a single tap (PRD FR-2.21). Done when the override persists for the rest of the meeting</description>
+      </feature>
+      <feature index="129" shape="plugin" plugin="language" depends_on="114"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System suppresses deterministic triggers on tokens whose language tag confidence falls below threshold (PRD FR-2.22). Done when a low-confidence tag emits a suppression reason</description>
+      </feature>
+      <feature index="130" shape="plugin" plugin="language"
+               touches_files="core/crates/language/src/tags/**">
+        <description>UI shows an explicit announcement when the meeting drifts into a lower-tier language (PRD FR-2.23)</description>
+      </feature>
+      <feature index="131" shape="plugin" plugin="language" depends_on="130"
+               touches_files="core/crates/language/src/tags/**">
+        <description>System falls a language back to a lower tier automatically when measured accuracy misses its bar, notifying the operator (PRD NFR-5.8). Done when a tier drop shows a notification to the operator</description>
+      </feature>
+    </category>
+    <category name="Session State &amp; Coverage Tracking">
+      <feature index="132" shape="core" depends_on="113"
+               touches_files="core/shared/session/**">
+        <description>System owns session state in a single task behind a command channel, giving serialised mutation with no shared mutex. Done when the state task emits mutations in a single serialised order</description>
+      </feature>
+      <feature index="133" shape="core" depends_on="132"
+               touches_files="core/shared/session/**">
+        <description>System keeps the utterance log append-only, so every downstream consumer reads state rather than the ASR stream directly. Done when every utterance persists in arrival order</description>
+      </feature>
+      <feature index="134" shape="core" depends_on="132"
+               touches_files="core/shared/session/**">
+        <description>System materialises a rolling verbatim window of the last 60 to 90 seconds on demand for the slow lane. Done when the window emits verbatim text on request</description>
+      </feature>
+      <feature index="135" shape="core" depends_on="132"
+               touches_files="core/shared/session/**">
+        <description>System materialises a structured state summary of covered sections, open threads, decisions, and contradictions. Done when the summary emits structured state on request</description>
+      </feature>
+      <feature index="136" shape="core" depends_on="132"
+               touches_files="core/shared/session/**">
+        <description>System persists session state per utterance so an application crash loses no more than the current utterance (PRD NFR-4.3)</description>
+      </feature>
+      <feature index="137" shape="plugin" plugin="coverage" depends_on="135"
+               touches_files="core/crates/coverage/**">
+        <description>System maps each template section to a fill_state in the coverage_slots table as the meeting progresses (PRD FR-8.2). Done when a fill_state persists per template section</description>
+      </feature>
+      <feature index="138" shape="plugin" plugin="coverage" depends_on="137"
+               touches_files="core/crates/coverage/**">
+        <description>API returns the live coverage matrix for a meeting with sections filled over sections total (GET /api/meetings/{id}/coverage, returns 200)</description>
+      </feature>
+      <feature index="139" shape="plugin" plugin="coverage" depends_on="137"
+               touches_files="core/crates/coverage/**">
+        <description>System marks a coverage slot satisfied when the operator taps the Asked it chip, which suppresses re-suggestion (PRD FR-6.7). Done when a satisfied_at timestamp persists on the coverage slot</description>
+      </feature>
+      <feature index="140" shape="plugin" plugin="coverage" depends_on="137"
+               touches_files="core/crates/coverage/**">
+        <description>System computes coverage urgency from unfilled sections weighted by remaining meeting time. Done when each unfilled section emits an urgency score</description>
+      </feature>
+    </category>
+
+    <category name="Trigger Gate">
+      <feature index="141" shape="plugin" plugin="trigger-gate" depends_on="133"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System evaluates every finalised utterance whose speaker tag is not operator against the trigger gate (PRD FR-5.1). Done when every non-operator utterance emits a gate decision</description>
+      </feature>
+      <feature index="142" shape="plugin" plugin="trigger-gate" depends_on="141"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System detects unquantified adjectives and vague quantifiers by Aho-Corasick match over a curated lexicon, returning the matched span (PRD FR-5.2). Done when a match emits the offending span on the trigger event</description>
+      </feature>
+      <feature index="143" shape="plugin" plugin="trigger-gate" depends_on="142"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System completes the deterministic lexicon scan in under 20 milliseconds with no model call on the path. Done when each utterance emits a gate latency measurement</description>
+      </feature>
+      <feature index="144" shape="plugin" plugin="trigger-gate" depends_on="142"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System loads a separate ambiguity lexicon per language, rebuilt for that language rather than translated from English (PRD section 8.2a). Done when each match emits the lexicon identifier that produced it</description>
+      </feature>
+      <feature index="145" shape="plugin" plugin="trigger-gate" depends_on="122"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System runs each language lexicon only over the tokens tagged as that language, which handles a code-switched sentence without discarding half of it. Done when a token emits matches only from its own language lexicon</description>
+      </feature>
+      <feature index="146" shape="plugin" plugin="trigger-gate" depends_on="141"
+               touches_files="core/crates/trigger-gate/src/parse/**">
+        <description>System detects unnamed actors in English through a dependency parse over passive constructions and agentless clauses (PRD FR-5.3). Done when an agentless clause emits a trigger event with its span</description>
+      </feature>
+      <feature index="147" shape="plugin" plugin="trigger-gate" depends_on="146"
+               touches_files="core/crates/trigger-gate/src/parse/**">
+        <description>System disables the unnamed-actor trigger in pro-drop languages, because an English-derived rule fires on ordinary well-formed sentences there (PRD section 8.2a). Done when a pro-drop sentence emits no unnamed-actor trigger</description>
+      </feature>
+      <feature index="148" shape="plugin" plugin="trigger-gate" depends_on="110"
+               touches_files="core/crates/trigger-gate/src/parse/**">
+        <description>System suppresses a nudge when the trigger span itself falls below the per-word confidence threshold (PRD NFR-5.6). Done when a low-confidence span emits a suppressed trigger event carrying its reason</description>
+      </feature>
+      <feature index="149" shape="plugin" plugin="trigger-gate" depends_on="148"
+               touches_files="core/crates/trigger-gate/src/parse/**">
+        <description>System emits a TriggerEvent carrying kind, utterance_id, span, and the minimum token confidence across that span</description>
+      </feature>
+      <feature index="150" shape="plugin" plugin="trigger-gate" depends_on="149"
+               touches_files="core/crates/trigger-gate/src/ratelimit/**">
+        <description>System maintains a rolling gate pass-rate counter across the meeting window. Done when every evaluation emits the current pass rate</description>
+      </feature>
+      <feature index="151" shape="plugin" plugin="trigger-gate" depends_on="150"
+               touches_files="core/crates/trigger-gate/src/ratelimit/**">
+        <description>System raises its own trigger thresholds when the gate pass rate exceeds 10 percent of utterances (PRD FR-5.7). Done when an excessive rate emits a threshold-raised event</description>
+      </feature>
+      <feature index="152" shape="plugin" plugin="trigger-gate" depends_on="150"
+               touches_files="core/crates/trigger-gate/src/ratelimit/**">
+        <description>System absorbs an endpointing storm during cross-talk by raising thresholds rather than flooding the panel. Done when a cross-talk burst emits a storm-absorbed event rather than a nudge flood</description>
+      </feature>
+      <feature index="153" shape="plugin" plugin="trigger-gate" depends_on="108"
+               touches_files="core/crates/trigger-gate/src/lexicon/**">
+        <description>System runs the lexicon scan against interim hypotheses, holding the matched candidate until the endpoint commits or discards it (PRD FR-5.9). Done when an interim match emits a held candidate the endpoint commits or discards</description>
+      </feature>
+    </category>
+
+    <category name="Ranking &amp; Phrasing">
+      <feature index="154" shape="plugin" plugin="bank" depends_on="65"
+               touches_files="core/crates/bank/src/store/**">
+        <description>System stores the compiled candidate bank in on-device SQLite with a vector index. Done when the bank persists to on-device storage</description>
+      </feature>
+      <feature index="155" shape="plugin" plugin="bank" depends_on="154"
+               touches_files="core/crates/bank/src/store/**">
+        <description>System syncs the per-meeting bank to the device before the meeting starts, so retrieval never needs the network. Done when the synced bank persists before capture can start</description>
+      </feature>
+      <feature index="156" shape="plugin" plugin="bank" depends_on="154"
+               touches_files="core/crates/bank/src/retrieval/**">
+        <description>System retrieves matching candidates by brute-force cosine over the bank in under 20 milliseconds. Done when each query emits a ranked candidate list</description>
+      </feature>
+      <feature index="157" shape="plugin" plugin="bank" depends_on="156"
+               touches_files="core/crates/bank/src/retrieval/**">
+        <description>System filters out candidates whose prerequisite ids in the requires column are unsatisfied before scoring runs. Done when an unsatisfied prerequisite emits no candidate</description>
+      </feature>
+      <feature index="158" shape="plugin" plugin="ranking" depends_on="157"
+               touches_files="core/crates/ranking/src/score/**">
+        <description>System scores each candidate as a pure function of trigger match, coverage urgency, authority match, and priority. Done when every candidate emits a score</description>
+      </feature>
+      <feature index="159" shape="plugin" plugin="ranking" depends_on="158"
+               touches_files="core/crates/ranking/src/score/**">
+        <description>System subtracts a recency penalty when a similar nudge was surfaced recently in the same meeting. Done when a recently surfaced thread emits a reduced score</description>
+      </feature>
+      <feature index="160" shape="plugin" plugin="ranking" depends_on="158"
+               touches_files="core/crates/ranking/src/score/**">
+        <description>System subtracts an asked penalty for any thread the operator has already marked with the Asked it chip. Done when an already-asked thread emits a reduced score</description>
+      </feature>
+      <feature index="161" shape="plugin" plugin="ranking" depends_on="158"
+               touches_files="core/crates/ranking/src/score/**">
+        <description>System reads ranking weights from configuration rather than from hardcoded constants, so the replay harness can tune them. Done when the run log emits the active weight set</description>
+      </feature>
+      <feature index="162" shape="plugin" plugin="ranking" depends_on="69"
+               touches_files="core/crates/ranking/src/score/**">
+        <description>System favours candidates whose authority_match names a role present in the meeting attendees (PRD FR-4.7). Done when a candidate matching a present role emits a higher score</description>
+      </feature>
+      <feature index="163" shape="plugin" plugin="ranking" depends_on="66"
+               touches_files="core/crates/ranking/src/phrasing/**">
+        <description>System instantiates the winning candidate by interpolating the client actual wording from the trigger span into the stored phrasing, completing in under 5 milliseconds. Done when instantiation emits a fully formed question string</description>
+      </feature>
+      <feature index="164" shape="plugin" plugin="ranking" depends_on="163"
+               touches_files="core/crates/ranking/src/phrasing/**">
+        <description>System falls back to a small-model rewrite only when a slow-lane candidate arrives with no pre-written phrasing. Done when the fallback path emits a rewritten question</description>
+      </feature>
+      <feature index="165" shape="plugin" plugin="ranking" depends_on="164"
+               touches_files="core/crates/ranking/src/phrasing/**">
+        <description>System enforces the 25-word nudge cap as max_tokens at the API boundary rather than as a prompt instruction (PRD FR-6.1). Done when every phrasing request sends max_tokens</description>
+      </feature>
+      <feature index="166" shape="plugin" plugin="ranking" depends_on="164"
+               touches_files="core/crates/ranking/src/phrasing/**">
+        <description>System renders suggested question phrasing in the meeting language (PRD FR-2.24). Done when the panel displays the question in the meeting language</description>
+      </feature>
+    </category>
+
+    <category name="Live Interface">
+      <feature index="167" shape="plugin" plugin="panel" depends_on="3"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>UI displays one nudge prominently at a time while prior nudges recede into dimmed history (PRD FR-6.3)</description>
+      </feature>
+      <feature index="168" shape="plugin" plugin="panel" depends_on="167"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>UI displays a 3 to 5 word glanceable stub above the full question set at smaller weight (PRD FR-6.2)</description>
+      </feature>
+      <feature index="169" shape="plugin" plugin="panel" depends_on="167"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>UI renders every nudge complete in a single state mutation, with streaming disabled in live mode (PRD FR-6.4). Done when the panel displays the nudge complete in one paint</description>
+      </feature>
+      <feature index="170" shape="plugin" plugin="panel" depends_on="167"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>UI displays the trigger reason alongside every surfaced nudge so the operator can calibrate trust (PRD FR-5.11)</description>
+      </feature>
+      <feature index="171" shape="plugin" plugin="panel" depends_on="167"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>System surfaces at most one nudge per 60 seconds regardless of how many pass the gate (PRD FR-5.8). Done when the panel displays at most one nudge per 60 second window</description>
+      </feature>
+      <feature index="172" shape="plugin" plugin="panel" depends_on="171"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>System enforces the nudge rate limit at render time rather than at generation, because generation is bursty. Done when the queue displays a nudge only when the rate limit allows</description>
+      </feature>
+      <feature index="173" shape="plugin" plugin="panel" depends_on="168"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>UI renders the stub, trigger reason, and interface chrome in the operator language (PRD FR-2.25). Done when the panel displays the stub in the operator language</description>
+      </feature>
+      <feature index="174" shape="plugin" plugin="panel" depends_on="173"
+               touches_files="apps/desktop/src/features/panel/nudge/**">
+        <description>User can configure the operator language independently of the meeting language (PRD FR-2.26). Done when the operator language setting persists per user</description>
+      </feature>
+      <feature index="175" shape="plugin" plugin="panel" depends_on="138"
+               touches_files="apps/desktop/src/features/panel/coverage/**">
+        <description>UI displays a persistent coverage indicator showing sections filled over total plus time remaining (PRD FR-6.5)</description>
+      </feature>
+      <feature index="176" shape="plugin" plugin="panel" depends_on="139"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>User can tap an Asked it chip, which mutates coverage state locally with no network round trip (PRD FR-6.6). Done when the chip displays an immediate confirmation</description>
+      </feature>
+      <feature index="177" shape="plugin" plugin="panel" depends_on="176"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>User can tap a Park it chip, which defers the thread to the open_questions table without dismissing it (PRD FR-6.8). Done when the parked thread persists to the open_questions table</description>
+      </feature>
+      <feature index="178" shape="plugin" plugin="panel" depends_on="176"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>User can tap a Go deeper chip, which requests a follow-on candidate on the same thread. Done when the panel displays a follow-on question on the same thread</description>
+      </feature>
+      <feature index="179" shape="plugin" plugin="panel" depends_on="176"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>User can tap a What am I missing chip, which surfaces the highest-urgency unfilled coverage section. Done when the panel displays the highest-urgency unfilled section</description>
+      </feature>
+      <feature index="180" shape="plugin" plugin="panel" depends_on="176"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>API records the operator disposition for a surfaced nudge (POST /api/meetings/{id}/nudges/{nudge_id}/disposition, returns 200)</description>
+      </feature>
+      <feature index="181" shape="plugin" plugin="panel"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>UI shows a text input that is present but visually de-emphasised as an escape hatch (PRD FR-6.9)</description>
+      </feature>
+      <feature index="182" shape="plugin" plugin="panel" depends_on="141"
+               touches_files="apps/desktop/src/features/panel/chips/**">
+        <description>System treats operator speech as implicit input, marking a thread live when the operator asks the client that question (PRD FR-6.10). Done when an operator_asked marker persists on the thread</description>
+      </feature>
+      <feature index="183" shape="plugin" plugin="panel" depends_on="127"
+               touches_files="apps/desktop/src/features/panel/language/**">
+        <description>UI displays the detected meeting languages and the active support tier in the panel chrome</description>
+      </feature>
+      <feature index="184" shape="plugin" plugin="panel" depends_on="91"
+               touches_files="apps/desktop/src/features/panel/coverage/**">
+        <description>API starts a live capture session for a meeting (POST /api/meetings/{id}/session/start, returns 200 with a session_id)</description>
+      </feature>
+      <feature index="185" shape="plugin" plugin="panel" depends_on="184"
+               touches_files="apps/desktop/src/features/panel/coverage/**">
+        <description>API stops a live session and flushes session state to the service tier (POST /api/meetings/{id}/session/stop, returns 200)</description>
+      </feature>
+      <feature index="186" shape="plugin" plugin="panel" depends_on="184"
+               touches_files="apps/desktop/src/features/panel/coverage/**">
+        <description>API streams nudges and coverage updates to a second-screen client over server-sent events (GET /api/meetings/{id}/session/stream, returns 200)</description>
+      </feature>
+    </category>
+    <category name="Slow Lane &amp; Model Triggers">
+      <feature index="187" shape="plugin" plugin="slow-lane" depends_on="134"
+               touches_files="core/crates/slow-lane/**">
+        <description>System fires a slow-lane pass on a 60 second tick that never blocks the deterministic path (PRD FR-5.10). Done when the orchestrator emits a tick event every 60 seconds</description>
+      </feature>
+      <feature index="188" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>System partitions the slow-lane prompt so the system instruction, engagement digest, template, and attendee roster all precede the cache boundary. Done when the request sends stable segments ahead of the cache boundary</description>
+      </feature>
+      <feature index="189" shape="plugin" plugin="slow-lane" depends_on="188"
+               touches_files="core/crates/slow-lane/**">
+        <description>System appends only the rolling window, structured state summary, and recent nudges after the cache boundary, never the full transcript. Done when the request sends volatile segments only after the cache boundary</description>
+      </feature>
+      <feature index="190" shape="plugin" plugin="slow-lane" depends_on="188"
+               touches_files="core/crates/slow-lane/**">
+        <description>System keeps the cached prefix byte-identical across ticks, so no timestamp or request identifier enters the prefix. Done when the second tick emits a non-zero cache read count</description>
+      </feature>
+      <feature index="191" shape="plugin" plugin="slow-lane" depends_on="190"
+               touches_files="core/crates/slow-lane/**">
+        <description>System issues one cache pre-warm request at meeting start so the first scheduled tick reads the cache rather than writing it. Done when the pre-warm sends one request before the first tick</description>
+      </feature>
+      <feature index="192" shape="plugin" plugin="slow-lane" depends_on="190"
+               touches_files="core/crates/slow-lane/**">
+        <description>System uses the default five-minute cache lifetime, which the 60 second tick refreshes continuously for the length of a meeting. Done when the configured cache lifetime persists in settings</description>
+      </feature>
+      <feature index="193" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>System cancels an in-flight tick before starting the next one, because two concurrent requests with the same prefix both pay full price. Done when a superseded tick emits a cancellation event</description>
+      </feature>
+      <feature index="194" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>System holds one model for the whole meeting, because a mid-meeting model switch discards the cached prefix entirely. Done when the meeting emits one model identifier throughout</description>
+      </feature>
+      <feature index="195" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>System requests the slow lane at low effort with a response schema, rather than disabling thinking, which has documented silent failure modes. Done when every slow-lane request sends its effort setting</description>
+      </feature>
+      <feature index="196" shape="plugin" plugin="slow-lane" depends_on="189"
+               touches_files="core/crates/slow-lane/**">
+        <description>System detects contradiction between a client statement and an earlier utterance or a ground_truth document, which emits a trigger event (PRD FR-5.4)</description>
+      </feature>
+      <feature index="197" shape="plugin" plugin="slow-lane" depends_on="196"
+               touches_files="core/crates/slow-lane/**">
+        <description>System restricts contradiction triggers to ground_truth documents, so a superseded deck never fires one (PRD risk R9). Done when a superseded document emits no contradiction trigger</description>
+      </feature>
+      <feature index="198" shape="plugin" plugin="slow-lane" depends_on="189"
+               touches_files="core/crates/slow-lane/**">
+        <description>System detects a novel entity absent from the context pack, which emits a trigger event (PRD FR-5.5)</description>
+      </feature>
+      <feature index="199" shape="plugin" plugin="slow-lane" depends_on="189"
+               touches_files="core/crates/slow-lane/**">
+        <description>System detects a coverage gap combined with topic drift away from an unfilled section (PRD FR-5.6). Done when topic drift emits a coverage-gap trigger event</description>
+      </feature>
+      <feature index="200" shape="plugin" plugin="slow-lane" depends_on="199"
+               touches_files="core/crates/slow-lane/**">
+        <description>System writes novel candidates back into the on-device bank mid-meeting for later ranking. Done when the on-device bank persists each novel candidate</description>
+      </feature>
+      <feature index="201" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>API accepts a slow-lane tick for a meeting, returns 200 with coverage updates plus any new candidates (POST /api/meetings/{id}/slow-lane/tick)</description>
+      </feature>
+      <feature index="202" shape="plugin" plugin="slow-lane" depends_on="187"
+               touches_files="core/crates/slow-lane/**">
+        <description>System asserts a non-zero cache read on the second tick of a replay run, failing the test when the prefix silently stops caching. Done when a zero cache read emits a failing test result</description>
+      </feature>
+    </category>
+
+    <category name="Security &amp; Egress Control">
+      <feature index="236" shape="core" depends_on="1"
+               touches_files="core/shared/egress/**">
+        <description>System routes every device-originated outbound request through one chokepoint class, which writes a row to the egress_log table (PRD NFR-2.7). Done when every outbound request persists an egress_log row</description>
+      </feature>
+      <feature index="237" shape="core" depends_on="236"
+               touches_files="apps/service/src/app/core/egress/**">
+        <description>Service routes every outbound request to an external processor through a second audited chokepoint, logging processor_name plus byte_count. Done when every processor call persists an egress_log row naming it</description>
+      </feature>
+      <feature index="238" shape="core" depends_on="237"
+               touches_files="apps/service/src/app/core/egress/**">
+        <description>API returns the egress audit log filtered by engagement and date range (GET /api/audit/egress, returns 200)</description>
+      </feature>
+      <feature index="239" shape="core" depends_on="236"
+               touches_files="core/shared/egress/**">
+        <description>System applies optional PII redaction at the chokepoint boundary rather than scattered through call sites (PRD NFR-2.6). Done when the egress record emits a redaction_applied flag</description>
+      </feature>
+      <feature index="240" shape="core" depends_on="237"
+               touches_files="apps/service/src/app/core/egress/**">
+        <description>Service sets vendor-side retention to zero on every ASR request where the vendor exposes that as a parameter (PRD NFR-2.3). Done when every ASR request sends a zero-retention parameter</description>
+      </feature>
+      <feature index="241" shape="core" depends_on="237"
+               touches_files="apps/service/src/app/core/egress/**">
+        <description>Service pins the processing region per engagement on every external call, recording the region in the egress_log table (PRD NFR-2.2). Done when the region persists on the egress record</description>
+      </feature>
+      <feature index="242" shape="core" depends_on="1"
+               touches_files="core/shared/crypto/**">
+        <description>System encrypts transcripts plus artifacts at rest, holding the key in the macOS Keychain scoped to this device when unlocked (PRD NFR-2.5). Done when the database persists encrypted with its key held outside</description>
+      </feature>
+      <feature index="243" shape="core" depends_on="242"
+               touches_files="core/shared/crypto/**">
+        <description>System holds the encryption key in the Windows credential store on Windows, matching the macOS Keychain guarantee. Done when the key persists in the platform credential store</description>
+      </feature>
+      <feature index="244" shape="core" depends_on="237"
+               touches_files="apps/service/src/app/core/egress/**">
+        <description>Service uses TLS to every processor, with certificate pinning where the enterprise gateway supports it. Done when every request sends over TLS only</description>
+      </feature>
+      <feature index="245" shape="core" depends_on="1"
+               touches_files="apps/service/src/app/core/consent/**">
+        <description>UI displays a consent prompt before capture begins when the engagement consent model requires per-meeting logging (PRD L2)</description>
+      </feature>
+      <feature index="246" shape="core" depends_on="245"
+               touches_files="apps/service/src/app/core/consent/**">
+        <description>System persists a consent record per meeting with timestamp plus the operator who confirmed it</description>
+      </feature>
+    </category>
+
+    <category name="Reliability &amp; Failure Modes">
+      <feature index="247" shape="core" depends_on="187"
+               touches_files="core/shared/health/**">
+        <description>UI displays a degraded badge when the inference endpoint times out, while deterministic triggers keep working (PRD NFR-4.1)</description>
+      </feature>
+      <feature index="248" shape="core" depends_on="247"
+               touches_files="core/shared/health/**">
+        <description>UI displays a degraded badge when the service tier is unreachable, while the local gate, bank, ranking keep working</description>
+      </feature>
+      <feature index="249" shape="core" depends_on="248"
+               touches_files="core/shared/health/**">
+        <description>Service queues slow-lane, sync, debrief work for retry when the service tier recovers, showing no error dialog mid-meeting. Done when queued work persists until the service tier returns</description>
+      </feature>
+      <feature index="250" shape="core" depends_on="112"
+               touches_files="core/shared/health/**">
+        <description>UI shows a prominent alert naming the participant whose managed capture stream dropped, offering local capture as fallback</description>
+      </feature>
+      <feature index="251" shape="core" depends_on="98"
+               touches_files="core/shared/health/**">
+        <description>System detects an ASR backend crash by event-stream heartbeat, marking the gap in the transcript (PRD NFR-4.2). Done when a crash emits a transcript gap marker at the failure point</description>
+      </feature>
+      <feature index="252" shape="core" depends_on="251"
+               touches_files="core/shared/health/**">
+        <description>System restarts a crashed ASR connection automatically, showing a visible error rather than an empty transcript. Done when the restart displays a visible error</description>
+      </feature>
+      <feature index="253" shape="core" depends_on="89"
+               touches_files="core/shared/health/**">
+        <description>System pauses capture on an audio device route change, displaying a prominent alert rather than continuing on the wrong device. Done when a route change displays a prominent alert</description>
+      </feature>
+      <feature index="254" shape="core" depends_on="154"
+               touches_files="core/shared/health/**">
+        <description>System blocks meeting start when the question bank is empty or uncompiled, displaying a clear error message (PRD FR-3.13)</description>
+      </feature>
+      <feature index="255" shape="core" depends_on="1"
+               touches_files="core/shared/health/**">
+        <description>System runs a disk-space pre-flight check at engagement start, warning early rather than at minute forty. Done when a low-space check displays a warning at engagement start</description>
+      </feature>
+      <feature index="256" shape="core" depends_on="136"
+               touches_files="core/shared/health/**">
+        <description>System resumes an interrupted meeting from persisted session state after an application restart (PRD NFR-4.3). Done when a restart persists enough state to resume the meeting</description>
+      </feature>
+      <feature index="257" shape="core" depends_on="129"
+               touches_files="core/shared/health/**">
+        <description>System never fails silently on language misdetection, because detected languages stay visible, overridable, announced on tier change. Done when the panel displays the detected languages at all times</description>
+      </feature>
+    </category>
+
+    <category name="Performance Instrumentation">
+      <feature index="258" shape="core" depends_on="1"
+               touches_files="core/shared/telemetry/**">
+        <description>System records a latency histogram at every pipeline stage rather than an average, publishing p50 alongside p95. Done when each stage emits a p50 and p95 value</description>
+      </feature>
+      <feature index="259" shape="core" depends_on="258"
+               touches_files="core/shared/telemetry/**">
+        <description>System instruments capture-to-send, send-to-first-partial, first-partial-to-final, final-to-render as four separate intervals. Done when the run emits four separate interval measurements</description>
+      </feature>
+      <feature index="260" shape="core" depends_on="258"
+               touches_files="core/shared/telemetry/**">
+        <description>System emits total speech-end to nudge-visible latency against the 2.0 second p50 target (PRD NFR-1)</description>
+      </feature>
+      <feature index="261" shape="core" depends_on="260"
+               touches_files="core/shared/telemetry/**">
+        <description>System emits the 3.5 second p95 latency bar separately, because the forced turn-end ceiling governs the tail (PRD NFR-1)</description>
+      </feature>
+      <feature index="262" shape="plugin" plugin="wer" depends_on="1"
+               touches_files="core/crates/wer/**">
+        <description>System computes entity-weighted word error rate weighted toward numerals, proper nouns, negations, engagement vocabulary (PRD NFR-5.1). Done when each run emits an entity-weighted error figure</description>
+      </feature>
+      <feature index="263" shape="plugin" plugin="wer" depends_on="262"
+               touches_files="core/crates/wer/**">
+        <description>System publishes word error rate per language and per capture mode, quoting no single global figure (PRD NFR-5.7). Done when each language and capture mode emits its own figure</description>
+      </feature>
+      <feature index="264" shape="plugin" plugin="wer" depends_on="262"
+               touches_files="core/crates/wer/**">
+        <description>System gates the live path against an 8 percent entity-weighted error bar for Tier 1 monolingual audio (PRD NFR-5.2). Done when the gate emits a verdict against the 8 percent bar</description>
+      </feature>
+      <feature index="265" shape="plugin" plugin="wer" depends_on="262"
+               touches_files="core/crates/wer/**">
+        <description>System gates code-switched live audio against a separate 15 percent entity-weighted error bar (PRD NFR-5.3). Done when the gate emits a verdict against the 15 percent bar</description>
+      </feature>
+      <feature index="266" shape="plugin" plugin="wer" depends_on="262"
+               touches_files="core/crates/wer/**">
+        <description>System gates the record path against a 3 percent entity-weighted error bar for Tier 1 languages (PRD NFR-5.4). Done when the gate emits a verdict against the 3 percent bar</description>
+      </feature>
+      <feature index="267" shape="core" depends_on="258"
+               touches_files="core/shared/telemetry/**">
+        <description>System emits cache read tokens per slow-lane tick, so a silently broken prefix surfaces as a metric</description>
+      </feature>
+    </category>
+
+    <category name="Platform Packaging &amp; Distribution">
+      <feature index="268" shape="core" depends_on="1"
+               touches_files=".github/workflows/build.yml">
+        <description>System builds a macOS universal binary covering arm64 plus x86_64 from the shared core (PRD NFR-3.1). Done when the pipeline creates a signed universal macOS artifact</description>
+      </feature>
+      <feature index="269" shape="core" depends_on="268"
+               touches_files=".github/workflows/build.yml">
+        <description>System builds Windows x64 plus arm64 artifacts from the same shared core with no per-platform trigger logic. Done when the pipeline creates signed artifacts for both Windows architectures</description>
+      </feature>
+      <feature index="270" shape="core" depends_on="268"
+               touches_files=".github/workflows/sign-macos.yml">
+        <description>System signs the macOS build with a Developer ID certificate, submitting it for notarisation (PRD NFR-3.3). Done when the pipeline creates a notarised macOS artifact</description>
+      </feature>
+      <feature index="271" shape="core" depends_on="269"
+               touches_files=".github/workflows/sign-windows.yml">
+        <description>System signs the Windows installer with an Authenticode extended validation certificate (PRD NFR-3.4). Done when the pipeline creates an Authenticode-signed installer</description>
+      </feature>
+      <feature index="272" shape="core" depends_on="270"
+               touches_files="packaging/mdm/**">
+        <description>System ships a PPPC profile pre-granting microphone plus screen-recording entitlements for managed deployment (PRD NFR-3.5). Done when the pipeline creates an installable MDM profile</description>
+      </feature>
+      <feature index="273" shape="core" depends_on="270"
+               touches_files="packaging/mdm/**">
+        <description>System creates a dmg for macOS plus an MSI for Windows as fallback distribution (PRD NFR-3.6)</description>
+      </feature>
+      <feature index="274" shape="core" depends_on="273"
+               touches_files="packaging/mdm/**">
+        <description>System documents the binary hashes needed for endpoint detection whitelisting before pilot (PRD NFR-3.7). Done when the release record persists the binary hashes</description>
+      </feature>
+      <feature index="275" shape="core" depends_on="36"
+               touches_files=".github/workflows/parity.yml">
+        <description>System verifies identical trigger-gate output across macOS plus Windows by running the replay harness on both (PRD NFR-3.8). Done when each platform emits an identical suggestion log</description>
+      </feature>
+    </category>
+
+    <category name="End-to-End Verification">
+      <feature index="276" shape="core" touches_files="tests/e2e/**">
+        <description>System passes an end-to-end test of the prep journey in which a user creates an engagement, uploads a ground_truth document, compiles the bank, sees the reviewable question tree render</description>
+      </feature>
+      <feature index="277" shape="core" touches_files="tests/e2e/**">
+        <description>System passes an end-to-end test of the live journey in which capture starts, a vague adjective is spoken, the panel displays one nudge with its trigger reason inside the latency budget</description>
+      </feature>
+      <feature index="278" shape="core" touches_files="tests/e2e/**">
+        <description>System passes an end-to-end test of the debrief journey in which record-path transcription completes, artifacts generate, every requirement claim shows a citation</description>
+      </feature>
+      <feature index="279" shape="core" touches_files="tests/e2e/**">
+        <description>System passes an end-to-end test of the multi-meeting arc in which requirements_state carries forward, the second meeting bank weights toward inherited open questions. Done when the second meeting bank shows the inherited open questions</description>
+      </feature>
+      <feature index="280" shape="core" touches_files="tests/e2e/**">
+        <description>System passes API integration tests where each documented endpoint returns 200 on the happy path, returns the documented 4xx error on key failure cases</description>
+      </feature>
+      <feature index="281" shape="core" touches_files="tests/e2e/**">
+        <description>System passes a degraded-mode test in which the inference endpoint is unreachable, deterministic triggers keep firing, the panel displays a degraded badge</description>
+      </feature>
+      <feature index="282" shape="core" touches_files="tests/e2e/**">
+        <description>System passes a code-switched end-to-end test on Mandarin-English audio in which token-level tags route correctly, low-confidence spans produce no nudge. Done when a low-confidence span shows no nudge in the test</description>
+      </feature>
+    </category>
+
+  </core_features>
+  <database_schema>
+    <tables>
+
+      <table name="engagements">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>client_name VARCHAR(255) NOT NULL</column>
+        <column>sector VARCHAR(100)</column>
+        <column>commercial_context TEXT</column>
+        <column>purpose TEXT</column>
+        <column>scope_boundary TEXT</column>
+        <column>template_id VARCHAR(100) NOT NULL</column>
+        <column>artifact_language VARCHAR(16) NOT NULL DEFAULT 'en'</column>
+        <column>expected_languages JSONB NOT NULL DEFAULT '[]'</column>
+        <column>data_region VARCHAR(32) NOT NULL</column>
+        <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="reference_documents">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>title VARCHAR(500) NOT NULL</column>
+        <column>status VARCHAR(20) NOT NULL CHECK (status IN ('ground_truth','hypothesis','superseded'))</column>
+        <column>source_uri TEXT</column>
+        <column>content_hash VARCHAR(64) NOT NULL</column>
+        <column>indexed_at TIMESTAMP WITH TIME ZONE</column>
+      </table>
+
+      <table name="vocabulary_terms">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>term VARCHAR(255) NOT NULL</column>
+        <column>term_type VARCHAR(50) NOT NULL</column>
+        <column>pronunciation_hint VARCHAR(255)</column>
+      </table>
+
+      <table name="candidates">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>template_section VARCHAR(200) NOT NULL</column>
+        <column>trigger_types JSONB NOT NULL</column>
+        <column>phrasing TEXT NOT NULL</column>
+        <column>stub VARCHAR(80) NOT NULL</column>
+        <column>lang VARCHAR(16) NOT NULL</column>
+        <column>priority INTEGER NOT NULL DEFAULT 0</column>
+        <column>requires JSONB</column>
+        <column>authority_match JSONB</column>
+        <column>source_doc JSONB</column>
+        <column>embedding BYTEA NOT NULL</column>
+      </table>
+
+      <table name="meetings">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>purpose TEXT</column>
+        <column>target_sections JSONB NOT NULL DEFAULT '[]'</column>
+        <column>scheduled_at TIMESTAMP WITH TIME ZONE</column>
+        <column>capture_mode VARCHAR(32) NOT NULL</column>
+        <column>state VARCHAR(20) NOT NULL DEFAULT 'planned'</column>
+        <column>consent_recorded_at TIMESTAMP WITH TIME ZONE</column>
+      </table>
+
+      <table name="attendees">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>display_name VARCHAR(200) NOT NULL</column>
+        <column>role VARCHAR(120)</column>
+        <column>business_function VARCHAR(120)</column>
+        <column>decision_authority VARCHAR(60)</column>
+        <column>domain_expertise JSONB</column>
+        <column>preferred_language VARCHAR(16)</column>
+      </table>
+
+      <table name="utterances">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>stream_id VARCHAR(64)</column>
+        <column>speaker_tag VARCHAR(32) NOT NULL</column>
+        <column>attendee_id UUID REFERENCES attendees(id)</column>
+        <column>text TEXT NOT NULL</column>
+        <column>start_ms INTEGER NOT NULL</column>
+        <column>end_ms INTEGER NOT NULL</column>
+        <column>source_path VARCHAR(16) NOT NULL CHECK (source_path IN ('live','record'))</column>
+        <column>created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="utterance_tokens">
+        <column>id BIGSERIAL PRIMARY KEY</column>
+        <column>utterance_id UUID NOT NULL REFERENCES utterances(id) ON DELETE CASCADE</column>
+        <column>position INTEGER NOT NULL</column>
+        <column>text VARCHAR(200) NOT NULL</column>
+        <column>confidence REAL NOT NULL</column>
+        <column>language_tag VARCHAR(16) NOT NULL</column>
+        <column>language_confidence REAL NOT NULL</column>
+      </table>
+
+      <table name="trigger_events">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>utterance_id UUID NOT NULL REFERENCES utterances(id) ON DELETE CASCADE</column>
+        <column>trigger_kind VARCHAR(40) NOT NULL</column>
+        <column>span_start INTEGER</column>
+        <column>span_end INTEGER</column>
+        <column>confidence REAL NOT NULL</column>
+        <column>suppressed_reason VARCHAR(60)</column>
+      </table>
+
+      <table name="nudges">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>candidate_id UUID REFERENCES candidates(id)</column>
+        <column>trigger_event_id UUID REFERENCES trigger_events(id)</column>
+        <column>rendered_text TEXT NOT NULL</column>
+        <column>trigger_reason VARCHAR(200) NOT NULL</column>
+        <column>surfaced_at TIMESTAMP WITH TIME ZONE NOT NULL</column>
+        <column>disposition VARCHAR(20)</column>
+      </table>
+
+      <table name="coverage_slots">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>template_section VARCHAR(200) NOT NULL</column>
+        <column>fill_state VARCHAR(20) NOT NULL DEFAULT 'empty'</column>
+        <column>satisfied_at TIMESTAMP WITH TIME ZONE</column>
+      </table>
+
+      <table name="artifacts">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE</column>
+        <column>artifact_type VARCHAR(60) NOT NULL</column>
+        <column>artifact_language VARCHAR(16) NOT NULL</column>
+        <column>body TEXT NOT NULL</column>
+        <column>generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="requirements_state">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>confirmed_requirements JSONB NOT NULL DEFAULT '[]'</column>
+        <column>contradictions JSONB NOT NULL DEFAULT '[]'</column>
+        <column>decisions JSONB NOT NULL DEFAULT '[]'</column>
+        <column>updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="open_questions">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE</column>
+        <column>question_text TEXT NOT NULL</column>
+        <column>impact_rank INTEGER NOT NULL DEFAULT 0</column>
+        <column>origin_nudge_id UUID REFERENCES nudges(id)</column>
+        <column>resolved_at TIMESTAMP WITH TIME ZONE</column>
+      </table>
+
+      <table name="citations">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>claim_id UUID NOT NULL</column>
+        <column>utterance_id UUID NOT NULL REFERENCES utterances(id)</column>
+        <column>original_utterance_id UUID REFERENCES utterances(id)</column>
+        <column>translated_text TEXT</column>
+        <column>is_inference BOOLEAN NOT NULL DEFAULT FALSE</column>
+        <column>timestamp_ms INTEGER NOT NULL</column>
+      </table>
+
+      <table name="egress_log">
+        <column>id BIGSERIAL PRIMARY KEY</column>
+        <column>engagement_id UUID REFERENCES engagements(id)</column>
+        <column>processor_name VARCHAR(120) NOT NULL</column>
+        <column>request_digest VARCHAR(64) NOT NULL</column>
+        <column>byte_count INTEGER NOT NULL</column>
+        <column>region VARCHAR(32) NOT NULL</column>
+        <column>redaction_applied BOOLEAN NOT NULL DEFAULT FALSE</column>
+        <column>sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="operator_voiceprints">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>operator_id UUID NOT NULL</column>
+        <column>embedding BYTEA NOT NULL</column>
+        <column>enrolled_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="replay_runs">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>recording_uri TEXT NOT NULL</column>
+        <column>pipeline_commit VARCHAR(64) NOT NULL</column>
+        <column>random_seed BIGINT NOT NULL</column>
+        <column>language VARCHAR(16) NOT NULL</column>
+        <column>started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()</column>
+      </table>
+
+      <table name="replay_ratings">
+        <column>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</column>
+        <column>run_id UUID NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE</column>
+        <column>suggestion_index INTEGER NOT NULL</column>
+        <column>rater_id VARCHAR(120) NOT NULL</column>
+        <column>useful BOOLEAN NOT NULL</column>
+        <column>timely BOOLEAN NOT NULL</column>
+        <column>embarrassing BOOLEAN NOT NULL</column>
+      </table>
+
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+
+    <domain name="Engagements">
+      POST   /api/engagements                    - Create an engagement
+      GET    /api/engagements                    - List engagements with pagination
+      GET    /api/engagements/{id}               - Get one engagement with completeness score
+      PATCH  /api/engagements/{id}               - Update purpose, scope, template
+      GET    /api/engagements/{id}/state         - Get inherited open questions and requirements state
+    </domain>
+
+    <domain name="Reference Documents">
+      POST   /api/engagements/{id}/documents     - Upload or link a reference document
+      GET    /api/engagements/{id}/documents     - List documents with status tags
+      PATCH  /api/documents/{id}/status          - Set ground_truth, hypothesis, or superseded
+      POST   /api/engagements/{id}/vocabulary    - Add client vocabulary terms
+    </domain>
+
+    <domain name="Question Bank">
+      POST   /api/engagements/{id}/bank/compile  - Compile the candidate bank
+      GET    /api/engagements/{id}/bank          - Get the reviewable question tree
+      PATCH  /api/bank/candidates/{id}           - Edit or reorder a candidate
+      DELETE /api/bank/candidates/{id}           - Prune a candidate
+      GET    /api/meetings/{id}/bank             - Get the per-meeting recompiled bank
+    </domain>
+
+    <domain name="Meetings">
+      POST   /api/meetings                       - Create a meeting inheriting engagement context
+      GET    /api/meetings/{id}                  - Get one meeting with attendees and coverage
+      PATCH  /api/meetings/{id}                  - Set session purpose and target sections
+      POST   /api/meetings/{id}/attendees        - Add an attendee with structured fields
+      GET    /api/meetings/{id}/coverage         - Get the live coverage matrix
+    </domain>
+
+    <domain name="Live Session">
+      POST   /api/meetings/{id}/session/start    - Start a live capture session
+      POST   /api/meetings/{id}/session/stop     - Stop the session and flush state
+      GET    /api/meetings/{id}/session/stream   - Server-sent event stream for second screen
+      POST   /api/meetings/{id}/nudges/{nudge_id}/disposition - Record operator disposition
+      POST   /api/meetings/{id}/slow-lane/tick   - Run one slow-lane pass
+    </domain>
+
+    <domain name="Record Path and Debrief">
+      POST   /api/meetings/{id}/record/transcribe   - Start dual-engine batch transcription
+      GET    /api/meetings/{id}/record/divergences  - List divergent spans for review
+      POST   /api/meetings/{id}/debrief/start       - Open the debrief conversation
+      POST   /api/meetings/{id}/debrief/message     - Send a debrief message
+      GET    /api/meetings/{id}/artifacts           - List generated artifacts
+      GET    /api/artifacts/{id}                    - Get one artifact with citations
+    </domain>
+
+    <domain name="Replay Harness">
+      POST   /api/replay/runs                    - Start a replay run
+      GET    /api/replay/runs/{id}               - Get replay run status
+      POST   /api/replay/runs/{id}/ratings       - Submit analyst ratings
+      GET    /api/replay/runs/{id}/metrics       - Get M1 and M2 metrics
+    </domain>
+
+    <domain name="Audit">
+      GET    /api/audit/egress                   - Get the audited egress log
+    </domain>
+
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <structure>
+      Two distinct surfaces, one continuous thread.
+
+      PREP AND DEBRIEF (full desktop window):
+        - Header bar (engagement selector, meeting selector, capture state pill)
+        - Left sidebar: Engagements, Documents, Question Bank, Meetings, Artifacts
+        - Main content area
+        Pages:
+          /engagements              - Engagement list and creation
+          /engagements/{id}         - Context pack: documents, status tags, vocabulary
+          /engagements/{id}/bank    - Reviewable question tree, editable and prunable
+          /meetings/{id}/prep       - Confirm attendees, session purpose, inherited questions
+          /meetings/{id}/debrief    - Conversational thread plus artifact panel
+          /meetings/{id}/artifacts  - Coverage matrix, open questions, brief, follow-up email
+
+      LIVE PANEL (narrow always-on-top window, glanceable at arm's length):
+        - Top: capture state indicator and detected-language chips
+        - Centre: one nudge — 3 to 5 word stub in large type, full question beneath at
+          smaller weight, trigger reason in the operator language at smallest weight
+        - Below: dimmed history of prior nudges
+        - Bottom: coverage indicator (sections filled over total, time remaining) and the
+          four chips — Asked it, Park it, Go deeper, What am I missing
+        - De-emphasised text input as the escape hatch
+    </structure>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      Primary:    #2563eb (blue) - active nudge, primary chips
+      Secondary:  #64748b (slate) - dimmed nudge history, secondary chrome
+      Success:    #16a34a (green) - coverage filled, Asked it confirmation
+      Danger:     #dc2626 (red) - capture error, degraded badge, contradiction trigger
+      Warning:    #d97706 (amber) - acoustic capture warning, tier drop announcement
+      Background: #ffffff (light) / #0b1220 (dark)
+      Surface:    #f8fafc (light) / #16202f (dark)
+      Text:       #0f172a (light) / #e2e8f0 (dark)
+    </color_palette>
+    <typography>
+      Font family: Inter, system-ui, sans-serif
+      Nudge stub:  24px, font-semibold, high contrast — readable in a glance at arm's length
+      Nudge body:  16px, font-normal
+      Trigger reason: 12px, font-medium, secondary colour
+      Code and identifiers: JetBrains Mono, monospace
+      CJK stack:   Inter, Noto Sans SC, Noto Sans TC, sans-serif
+    </typography>
+    <animations>
+      Nudge entry: instant — no typing animation, no streaming, no fade longer than 120ms
+      Chip tap:    80ms scale feedback, state change is immediate and local
+      Coverage:    200ms ease on fill-state change
+      Rationale:   every animation competes with the client for the operator's attention,
+                   so the live panel is deliberately the least animated surface in the product
+    </animations>
+  </design_system>
+
+  <key_interactions>
+    <interaction number="1" name="Prepare an engagement and compile the bank">
+      1. User creates an engagement with client, sector, purpose, target template
+      2. User uploads reference documents, tagging each ground_truth, hypothesis, or superseded
+      3. User adds client vocabulary terms for keyterm prompting
+      4. System runs the Analyst pass and emits 150 to 300 candidates
+      5. User reviews the question tree, prunes weak candidates, reorders priorities
+    </interaction>
+    <interaction number="2" name="Set up a meeting in under two minutes">
+      1. User creates a meeting under the engagement
+      2. System pre-populates attendees from the calendar invite
+      3. User confirms attendee roles and decision authority
+      4. User states the session purpose and picks target template sections
+      5. System displays the inherited open-questions list for review
+    </interaction>
+    <interaction number="3" name="Surface a nudge inside the conversational window">
+      1. Client says a requirement containing an unquantified adjective
+      2. System detects the span by lexicon match on the frozen partial
+      3. System suppresses the nudge if the span confidence or language tag confidence is low
+      4. System retrieves and ranks candidates, instantiating the winner by slot interpolation
+      5. Panel displays one nudge with its trigger reason, complete, in a single render
+      6. User taps Asked it, which marks the coverage slot satisfied locally
+    </interaction>
+    <interaction number="4" name="Debrief and produce artifacts">
+      1. System runs dual-engine batch transcription over the retained audio
+      2. System reconciles the two outputs and flags divergent spans
+      3. System discards the raw audio once diarization completes
+      4. System generates the coverage matrix, open questions, brief, follow-up email
+      5. User reviews flagged divergences and confirms or corrects each
+      6. System merges requirements_state forward into the next meeting
+    </interaction>
+  </key_interactions>
+  <implementation_steps>
+    <!-- Phase titles are named after their category so the validator can infer
+         dependencies by keyword overlap. The ordering follows the PRD release
+         plan: the replay harness first (it is the instrument, not the
+         experiment), then prep and synthesis, then the live path, then
+         generative triggers. -->
+    <phase name="Phase 1: Workspace Foundation">
+      Scaffold the Cargo workspace, uv workspace, pnpm workspace, and Tauri shell
+      Stand up the FastAPI module loader so no feature edits a central route table
+      Generate the typed API client contract into packages/api-client
+      Document every environment variable in .env.example
+    </phase>
+    <phase name="Phase 2: Database Schema &amp; Migrations">
+      Create the engagement, meeting, and attendee tables
+      Create the append-only utterances and utterance_tokens tables
+      Create the candidates, coverage_slots, nudges, and trigger_events tables
+      Create the citations table with the non-null utterance_id constraint
+      Create the egress_log, replay_runs, and replay_ratings tables
+    </phase>
+    <phase name="Phase 3: Replay Harness">
+      Build the deterministic replay driver emitting utterances at wall-clock offsets
+      Build the suggestion log and the analyst rating interface
+      Compute M1 precision@surfaced and M2 embarrassment count per language
+      Wire the harness into continuous integration as a build gate
+    </phase>
+    <phase name="Phase 4: Engagement &amp; Context Pack">
+      Build engagement creation and the reference document upload path
+      Enforce mandatory document status tagging
+      Index and compile document content into a context digest
+      Build the meeting setup flow with structured attendee fields
+    </phase>
+    <phase name="Phase 5: Question Bank Compilation">
+      Run the BMAD Analyst pass on the Agent SDK over the Batch API
+      Split the compiler into a citations extraction pass and a schema structuring pass
+      Tag, embed, and persist candidates with slot placeholders
+      Build the reviewable question tree with edit, reorder, and prune
+    </phase>
+    <phase name="Phase 6: Record Path Transcription">
+      Run two independent batch engines over the retained audio
+      Align the outputs and flag divergent spans for operator review
+      Derive all artifacts from record-path output only
+    </phase>
+    <phase name="Phase 7: Debrief &amp; Artifacts">
+      Run diarization, then discard the raw audio
+      Classify utterances to template sections and backfill the coverage matrix
+      Generate the transcript, coverage matrix, open questions, decision log, brief, follow-up email
+      Bind every claim to a non-null utterance_id and flag inference visually
+      Build the conversational debrief thread with compaction
+    </phase>
+    <phase name="Phase 8: Audio Capture">
+      Implement the AudioSource trait with CoreAudio and WASAPI backends
+      Disable platform voice processing on every capture path
+      Implement the lock-free ring buffer and the real-time callback discipline
+      Implement the capture state machine and the single-tap pause control
+    </phase>
+    <phase name="Phase 9: Streaming Transcription">
+      Implement the TranscriptionBackend trait and the pre-opened websocket
+      Emit interim hypotheses and finalised utterances with per-word confidence
+      Expose endpointing and turn-detection parameters as tunable configuration
+      Consume one stream per participant where managed capture provides them
+    </phase>
+    <phase name="Phase 10: Multilingual Language Handling">
+      Consume per-token language tags with confidence
+      Implement per-language segmentation and number normalisation including 万 and 亿
+      Display detected languages, allow single-tap override, announce tier changes
+    </phase>
+    <phase name="Phase 11: Session State &amp; Coverage Tracking">
+      Implement the single-owner session state task with the append-only log
+      Materialise the rolling window and the structured state summary
+      Implement the coverage tracker and the coverage urgency computation
+    </phase>
+    <phase name="Phase 12: Trigger Gate">
+      Implement the Aho-Corasick lexicon scan with per-language lexicons
+      Implement the unnamed-actor parse rule for English, disabled in pro-drop languages
+      Implement span-confidence and language-tag suppression
+      Implement the self-regulating pass-rate limiter
+      Implement speculative drafting against frozen partials
+    </phase>
+    <phase name="Phase 13: Ranking &amp; Phrasing">
+      Sync the compiled bank to the device and implement brute-force retrieval
+      Implement the scoring function with configurable weights
+      Implement slot instantiation and the small-model phrasing fallback
+      Tune ranking weights against the replay harness
+    </phase>
+    <phase name="Phase 14: Live Interface">
+      Build the single-nudge panel with two-tier rendering and no streaming
+      Build the coverage indicator and the four chips
+      Implement the render-time rate limiter
+      Implement the second-screen server-sent event stream
+    </phase>
+    <phase name="Phase 15: Slow Lane &amp; Model Triggers">
+      Implement the 60 second tick with the partitioned cache prefix
+      Implement pre-warm, single-flight, and fixed-model rules
+      Implement contradiction, novel entity, and coverage-gap triggers
+      Write novel candidates back into the on-device bank mid-meeting
+    </phase>
+    <phase name="Phase 16: Security &amp; Egress Control">
+      Implement both audited egress chokepoints with request logging
+      Implement PII redaction, zero vendor retention, and region pinning
+      Implement encryption at rest with platform keystores
+      Implement the consent flow required by the legal position
+    </phase>
+    <phase name="Phase 17: Reliability &amp; Failure Modes">
+      Implement degraded badges for inference and service tier loss
+      Implement ASR heartbeat, auto-restart, and transcript gap marking
+      Implement device route-change handling and startup validation
+      Implement crash recovery from persisted session state
+    </phase>
+    <phase name="Phase 18: Performance Instrumentation">
+      Instrument the four latency intervals with p50 and p95 histograms
+      Implement entity-weighted word error rate scoring per language and capture mode
+      Report cache read tokens per slow-lane tick
+    </phase>
+    <phase name="Phase 19: Platform Packaging &amp; Distribution">
+      Build signed and notarised macOS artifacts and EV-signed Windows artifacts
+      Produce MDM profiles and fallback installers
+      Verify cross-platform trigger parity via the replay harness
+    </phase>
+    <phase name="Phase 20: End-to-End Verification">
+      Write and run the e2e tests for the prep, live, debrief, and multi-meeting journeys
+      Confirm the app boots and every documented endpoint passes its happy path
+      Confirm degraded mode and code-switched behaviour pass end-to-end
+    </phase>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      All features in core_features are implemented and passing
+      Precision@surfaced (M1) reaches at least 70 percent on the replay harness
+      Embarrassment count (M2) is zero — this is a release gate, not a target
+      At least 80 percent of applicable template sections carry a sourced client statement after meeting one (M3)
+      Every requirement claim in every artifact resolves to a non-null utterance_id
+      Requirements state carries across meetings within an engagement
+      Deterministic triggers keep firing when the inference endpoint is unavailable
+    </functionality>
+    <ux>
+      Nudge is visible within 2.0 seconds p50 and 3.5 seconds p95 of speech end
+      Panel renders one nudge at a time, complete, with no streaming in live mode
+      Nudge text never exceeds 25 words, enforced as max_tokens rather than by instruction
+      Capture state is unambiguous at a glance and pause takes effect within one buffer period
+      Detected languages are always visible, always overridable, and tier changes are announced
+      Every surfaced nudge carries its trigger reason
+      Chip taps mutate coverage state locally with no network round trip
+    </ux>
+    <technical_quality>
+      Trigger engine, bank retrieval, ranking, and session state exist in exactly one implementation
+      Replay harness proves identical behaviour on macOS and Windows
+      Entity-weighted WER meets its bar per language and per capture mode, with no global figure quoted
+      Live path holds 8 percent entity-weighted WER monolingual and 15 percent code-switched
+      Record path holds 3 percent entity-weighted WER for Tier 1 languages
+      Slow-lane cache read tokens are non-zero from the second tick onward
+      No audio is written to persistent storage on the device
+      Raw audio is destroyed once the record path completes
+      Every outbound request appears in the egress_log table
+      Test coverage is at least 85 percent across the shared core
+      No secrets are committed to source control
+    </technical_quality>
+  </success_criteria>
+
+</project_specification>
