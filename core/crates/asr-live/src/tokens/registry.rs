@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::event::TokenEvent;
-use super::socket::{TokenSocket, TokenSocketFactory};
+use super::socket::{validate_backend, BackendRejected, TokenSocket, TokenSocketFactory};
 use super::ParticipantId;
 
 /// Owns exactly one [`TokenSocket`] per participant seen so far, and routes
@@ -18,11 +18,18 @@ pub struct ParticipantTokenStreams<F: TokenSocketFactory> {
 }
 
 impl<F: TokenSocketFactory> ParticipantTokenStreams<F> {
-    pub fn new(factory: F) -> Self {
-        Self {
+    /// Validates `factory` against this crate's per-token-confidence
+    /// requirement (PRD FR-2.3, NFR-5.6) before constructing anything, and
+    /// fails startup with a [`BackendRejected`] error rather than accepting
+    /// a vendor that can only ever report one confidence score for a whole
+    /// utterance — such a vendor would leave every dispatched `TokenEvent`
+    /// backed by a score the input-span gate can't trust per span.
+    pub fn new(factory: F) -> Result<Self, BackendRejected> {
+        validate_backend(&factory)?;
+        Ok(Self {
             factory,
             sockets: HashMap::new(),
-        }
+        })
     }
 
     /// Number of participants currently emitting their own event stream.
@@ -60,6 +67,7 @@ impl<F: TokenSocketFactory> ParticipantTokenStreams<F> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::socket::ConfidenceGranularity;
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -119,12 +127,61 @@ mod tests {
                 closed: self.closed.clone(),
             }
         }
+
+        fn confidence_granularity(&self) -> ConfidenceGranularity {
+            ConfidenceGranularity::PerToken
+        }
+    }
+
+    /// A vendor stand-in that only ever reports one confidence score per
+    /// whole utterance — the shape [`validate_backend`] must reject before
+    /// this crate ever opens a socket against it.
+    struct UtteranceLevelOnlyFactory;
+
+    impl TokenSocketFactory for UtteranceLevelOnlyFactory {
+        type Socket = MockSocket;
+
+        fn open(&mut self, participant_id: &ParticipantId) -> Self::Socket {
+            MockSocket {
+                participant_id: participant_id.clone(),
+                closed: Rc::new(RefCell::new(Vec::new())),
+            }
+        }
+
+        fn confidence_granularity(&self) -> ConfidenceGranularity {
+            ConfidenceGranularity::UtteranceLevel
+        }
+    }
+
+    #[test]
+    fn a_backend_reporting_only_utterance_level_confidence_is_rejected_at_startup() {
+        let result = ParticipantTokenStreams::new(UtteranceLevelOnlyFactory);
+
+        let err = match result {
+            Err(err) => err,
+            Ok(_) => panic!(
+                "a backend that can't supply per-token confidence must fail startup, not succeed"
+            ),
+        };
+        assert!(
+            err.0.contains("utterance-level") && err.0.contains("per-token"),
+            "rejection message must clearly explain why: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn a_backend_reporting_per_token_confidence_is_accepted_at_startup() {
+        let (factory, _opened, _closed) = MockFactory::new();
+
+        assert!(ParticipantTokenStreams::new(factory).is_ok());
     }
 
     #[test]
     fn each_participant_gets_its_own_socket() {
         let (factory, opened, _closed) = MockFactory::new();
-        let mut streams = ParticipantTokenStreams::new(factory);
+        let mut streams =
+            ParticipantTokenStreams::new(factory).expect("factory reports per-token confidence");
 
         streams.dispatch(&"alice".to_string(), &[0; 10]);
         streams.dispatch(&"bob".to_string(), &[0; 20]);
@@ -132,26 +189,35 @@ mod tests {
         assert_eq!(streams.active_stream_count(), 2);
         assert!(streams.is_active("alice"));
         assert!(streams.is_active("bob"));
-        assert_eq!(opened.0.borrow().as_slice(), &["alice".to_string(), "bob".to_string()]);
+        assert_eq!(
+            opened.0.borrow().as_slice(),
+            &["alice".to_string(), "bob".to_string()]
+        );
     }
 
     #[test]
     fn repeated_dispatch_for_same_participant_reuses_one_socket() {
         let (factory, opened, _closed) = MockFactory::new();
-        let mut streams = ParticipantTokenStreams::new(factory);
+        let mut streams =
+            ParticipantTokenStreams::new(factory).expect("factory reports per-token confidence");
 
         for _ in 0..5 {
             streams.dispatch(&"alice".to_string(), &[0; 4]);
         }
 
         assert_eq!(streams.active_stream_count(), 1);
-        assert_eq!(opened.0.borrow().len(), 1, "socket must be opened once, not per frame");
+        assert_eq!(
+            opened.0.borrow().len(),
+            1,
+            "socket must be opened once, not per frame"
+        );
     }
 
     #[test]
     fn each_participant_emits_its_own_independent_event_stream() {
         let (factory, _opened, _closed) = MockFactory::new();
-        let mut streams = ParticipantTokenStreams::new(factory);
+        let mut streams =
+            ParticipantTokenStreams::new(factory).expect("factory reports per-token confidence");
 
         let alice_events = streams.dispatch(&"alice".to_string(), &[0; 3]);
         let bob_events = streams.dispatch(&"bob".to_string(), &[0; 7]);
@@ -169,7 +235,8 @@ mod tests {
     #[test]
     fn every_dispatched_token_carries_a_confidence_value() {
         let (factory, _opened, _closed) = MockFactory::new();
-        let mut streams = ParticipantTokenStreams::new(factory);
+        let mut streams =
+            ParticipantTokenStreams::new(factory).expect("factory reports per-token confidence");
 
         let events = streams.dispatch(&"alice".to_string(), &[0; 3]);
 
@@ -185,7 +252,8 @@ mod tests {
     #[test]
     fn ending_a_participant_closes_its_socket_and_frees_the_slot() {
         let (factory, opened, closed) = MockFactory::new();
-        let mut streams = ParticipantTokenStreams::new(factory);
+        let mut streams =
+            ParticipantTokenStreams::new(factory).expect("factory reports per-token confidence");
 
         streams.dispatch(&"alice".to_string(), &[0; 1]);
         streams.end("alice");
@@ -196,6 +264,9 @@ mod tests {
         // Dispatching again after end opens a brand new socket rather than
         // reusing the closed one.
         streams.dispatch(&"alice".to_string(), &[0; 1]);
-        assert_eq!(opened.0.borrow().as_slice(), &["alice".to_string(), "alice".to_string()]);
+        assert_eq!(
+            opened.0.borrow().as_slice(),
+            &["alice".to_string(), "alice".to_string()]
+        );
     }
 }

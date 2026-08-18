@@ -16,7 +16,9 @@ mod socket;
 
 pub use event::TokenEvent;
 pub use registry::ParticipantTokenStreams;
-pub use socket::{TokenSocket, TokenSocketFactory};
+pub use socket::{
+    validate_backend, BackendRejected, ConfidenceGranularity, TokenSocket, TokenSocketFactory,
+};
 
 /// Stable identifier for a meeting participant, as assigned by the managed
 /// capture vendor to one of its per-participant streams.

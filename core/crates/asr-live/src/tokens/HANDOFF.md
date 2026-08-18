@@ -28,6 +28,23 @@ inventing a placeholder value — see `registry.rs`'s
 `every_dispatched_token_carries_a_confidence_value` test for the shape that
 invariant takes at the `ParticipantTokenStreams::dispatch` boundary.
 
+## Rejecting utterance-level-only backends at startup (PRD FR-2.3, NFR-5.6)
+
+A vendor that only ever produces one confidence score per whole utterance
+can't back per-token confidence no matter how its `TokenSocket` is wired,
+since there's no per-word score to carry through in the first place.
+`TokenSocketFactory::confidence_granularity` makes a vendor declare which
+shape it produces, and `ParticipantTokenStreams::new` calls
+`socket::validate_backend` against that declaration before constructing
+anything — an `UtteranceLevel` vendor makes `new` return
+`Err(BackendRejected(..))` with a message naming both what the vendor
+reported and what the input-span gate requires, instead of the crate
+quietly accepting a vendor it can never gate correctly. See
+`registry.rs`'s `a_backend_reporting_only_utterance_level_confidence_is_rejected_at_startup`
+test. A real `TokenSocketFactory` implementation must return
+`ConfidenceGranularity::PerToken` truthfully — there is no default impl to
+fall back on, precisely so this can't be satisfied by omission.
+
 ## What's here
 
 - `mod.rs` — public API re-exports and the `ParticipantId` type alias
