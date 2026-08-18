@@ -1,5 +1,78 @@
 # parse module — handoff
 
+## Update: disabling the unnamed-actor trigger in pro-drop languages (PRD §8.2a)
+
+Implements "System disables the unnamed-actor trigger in pro-drop languages,
+because an English-derived rule fires on ordinary well-formed sentences there
+(PRD section 8.2a). Done when a pro-drop sentence emits no unnamed-actor
+trigger." This is the gap the prior update's own HANDOFF section (below)
+named explicitly: "Per-language dispatch is not addressed here either:
+`find_agentless_clauses` runs over whatever tokens it's handed with no
+language check of its own... calling it on non-English tokens was never
+validated and is expected to misfire."
+
+### What's here
+
+- `unnamed_actor.rs` — a new `PRO_DROP_LANGUAGES` constant (`["zh", "ja",
+  "ko"]`, the exact languages architecture §3.5 and the PRD name: "Chinese,
+  Japanese, Korean and others omit subjects as ordinary grammar rather than
+  as evasion") and `is_pro_drop_language`, which compares a `TaggedToken`'s
+  `lang` by its BCP-47 primary subtag — the same granularity
+  `lexicon::group_by_language` groups on, so `"zh-Hans"` and `"zh-TW"` both
+  count as `"zh"`. `find_agentless_clauses`'s `is_passive_pair` check now
+  additionally requires that neither the be-verb token nor the participle
+  token is tagged with a pro-drop language; a pair that is, is treated
+  exactly like any other non-match (scanning just advances past it), so a
+  pro-drop-tagged clause never becomes an `AgentlessClauseMatch` and never
+  reaches `gate_agentless_clauses`.
+- This is a per-token-pair check, not a whole-utterance one: a code-switched
+  utterance with an English-tagged agentless clause and a separately
+  Chinese-tagged one still fires only for the English half
+  (`a_code_switched_utterance_only_disables_the_pro_drop_tagged_half`) — the
+  trigger is disabled for the pro-drop language, not for every utterance
+  that happens to contain one.
+- Only the three languages the source docs name are included. The PRD's "and
+  others" is not resolved into a broader pro-drop classifier here — that
+  would be guessing at a list the docs never actually give; `PRO_DROP_LANGUAGES`
+  can grow later as specific languages are confirmed.
+
+### Why this satisfies "a pro-drop sentence emits no unnamed-actor trigger"
+
+`a_pro_drop_tagged_clause_is_not_a_match` uses the identical token sequence
+`gate_agentless_clauses_emits_a_fired_event_with_its_span` fires on for
+English, tagged `"zh"` instead — it produces zero matches.
+`japanese_and_korean_are_also_pro_drop_languages` proves the other two named
+languages the same way. `a_pro_drop_language_regional_variant_is_still_recognised`
+proves a region/script-qualified tag (`"zh-Hans"`) is still caught.
+`gate_agentless_clauses_emits_nothing_for_a_pro_drop_tagged_utterance` proves
+the exclusion holds through the full `gate_agentless_clauses` path, not just
+`find_agentless_clauses` in isolation — no `TriggerEvent`, fired or
+suppressed, is emitted at all for a pro-drop-tagged clause.
+
+### What's not done here
+
+- Restricting the rule to run only over the `"en"` language group via
+  `lexicon::group_by_language`, as the prior update's "wiring needed" section
+  suggested — that's the caller-side integration into
+  `lexicon::evaluation::evaluate_utterance`, still not wired (see that
+  section below), and a broader change than this feature's own "disables...
+  in pro-drop languages" scope. The check added here is sufficient on its
+  own: it disables the rule exactly for the named pro-drop languages
+  regardless of whether a future caller also restricts it to `"en"`.
+- Expanding `PRO_DROP_LANGUAGES` beyond the three languages the PRD and
+  architecture doc name by name — left for whoever confirms a specific
+  additional language (e.g. Spanish, Italian) is in scope.
+
+Verified with `cargo test -p trigger-gate` (89/89 pass — 72 prior tests
+untouched, 5 new `unnamed_actor` tests plus one new lang-tagged test helper),
+`cargo clippy -p trigger-gate --all-targets -- -D warnings` (clean),
+`rustfmt --check` on `unnamed_actor.rs` (clean; `ratelimit/regulation.rs` and
+`ratelimit/storm.rs` still carry the same pre-existing, unrelated formatting
+diffs prior updates in this crate already noted and left alone), and `cargo
+build --workspace` (still succeeds).
+
+## Original: unnamed-actor detection (PRD FR-5.3)
+
 Implements "System detects unnamed actors in English through a dependency
 parse over passive constructions and agentless clauses" (PRD FR-5.3,
 architecture §3.5's deterministic-tier table: "Unnamed actor — Dependency
