@@ -92,3 +92,31 @@ class SessionDiarization(BaseModel):
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
+
+
+class AudioDestructionStatus(str, Enum):
+    """Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4)."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class AudioDestructionEvent(BaseModel):
+    """Durable event marking that a session's raw retained audio was destroyed (PRD NFR-2.4).
+
+    NFR-2.4 requires the service discard the raw audio the moment record-path
+    transcription and full diarization both complete, retaining it no longer.
+    This event is what makes that discard observable: persisted whether the
+    deletion succeeded or failed, mirroring `SessionDiarization` and
+    `RecordPathTranscript` — a session with no destruction event at all would
+    be indistinguishable from one whose audio is still sitting there, so a
+    `FAILED` attempt must stay visible rather than silently leaving the raw
+    audio retained with no record of why.
+    """
+
+    session_id: str
+    audio_ref: str
+    status: AudioDestructionStatus
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
