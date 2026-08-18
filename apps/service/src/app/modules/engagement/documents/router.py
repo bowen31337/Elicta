@@ -8,11 +8,18 @@ reasoning as `app/modules/engagement/api/router.py`. Whoever wires the app
 factory (out of this feature's footprint) supplies the real,
 persistence-backed implementations and mounts the returned routers.
 
-The upload endpoint's required-status-tag validation (PRD FR-3.4) needs no
-handler code of its own: `DocumentUploadRequest.status` has no default, so
-FastAPI's request-body validation rejects a payload that omits it with a
-422 before `upload_document` is ever called, and the response body already
-names the missing field. `build_reference_document_link_router`'s
+The upload endpoint takes the reference document as a multipart file (PRD
+FR-3.2) rather than a JSON body, so `upload_engagement_document` reads
+`file`, `status`, and an optional `name` as separate `File`/`Form` params
+and assembles them into a `DocumentUploadRequest` itself; that DTO still
+carries `model_config = ConfigDict(extra="forbid")` for callers constructing
+it directly, but the HTTP layer can no longer reject unknown multipart
+fields at the framework level the way a JSON body could. The
+required-status-tag validation (PRD FR-3.4) still needs no handler code of
+its own: `status: DocumentStatus = Form(...)` has no default, so FastAPI's
+form validation rejects a request that omits it with a 422 before
+`upload_document` is ever called, and the response body already names the
+missing field. `build_reference_document_link_router`'s
 `DocumentLinkAttachmentRequest.url` validator works the same way for an
 unrecognized host (PRD FR-3.2).
 
@@ -27,8 +34,9 @@ never reaches — and never persists through — the callback that writes the
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .errors import (
     DocumentNotFoundError,
@@ -85,8 +93,21 @@ def build_engagement_documents_router(
         status_code=201,
     )
     async def upload_engagement_document(
-        engagement_id: str, payload: DocumentUploadRequest
+        engagement_id: str,
+        file: Annotated[UploadFile, File()],
+        status: Annotated[DocumentStatus, Form()],
+        name: Annotated[str | None, Form()] = None,
     ) -> EngagementDocument:
+        document_name = name or file.filename
+        if not document_name:
+            raise HTTPException(
+                status_code=422,
+                detail="file must have a filename, or name must be provided",
+            )
+        content = await file.read()
+        payload = DocumentUploadRequest(
+            name=document_name, status=status, content=content
+        )
         try:
             return await upload_document(engagement_id, payload)
         except EngagementNotFoundError as exc:

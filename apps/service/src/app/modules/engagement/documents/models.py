@@ -55,20 +55,22 @@ class DocumentStatusUpdateRequest(BaseModel):
 
 
 class DocumentUploadRequest(BaseModel):
-    """Body for uploading a reference document (POST .../documents).
+    """Assembled from a multipart upload (POST .../documents): the file's
+    name, its raw bytes, and the required status tag (PRD FR-3.2, FR-3.4).
 
     `status` has no default: every reference document must carry one of the
-    three status tags at upload time (PRD FR-3.4), so omitting it is a
-    validation failure rather than something to default away. FastAPI's
-    standard request-validation handling turns a missing required field
-    into a 422 whose `detail` names the offending field (`loc`), giving the
-    field-level error message FR-3.4 calls for.
+    three status tags at upload time (PRD FR-3.4), so a request that omits
+    the `status` form field is a validation failure rather than something to
+    default away — FastAPI's `Form(...)` handling turns that into a 422
+    whose `detail` names the offending field, giving the field-level error
+    message FR-3.4 calls for.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
     status: DocumentStatus
+    content: bytes
 
 
 class DocumentLinkAttachmentRequest(BaseModel):
