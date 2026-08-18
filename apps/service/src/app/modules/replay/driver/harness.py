@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import random
 
-from app.modules.replay.driver.clock import ReplayClock
+from app.modules.replay.driver.clock import RunClock
 from app.modules.replay.driver.models import ReplayRequest, ReplayResult, ReplayRunRow
 from app.modules.replay.driver.sink import ReplayRunSink
 from app.modules.replay.driver.workload import ReplayWorkload
@@ -34,7 +34,7 @@ class ReplayHarness:
 
     def __init__(
         self,
-        clock: ReplayClock,
+        clock: RunClock,
         workload: ReplayWorkload,
         sink: ReplayRunSink,
     ) -> None:
