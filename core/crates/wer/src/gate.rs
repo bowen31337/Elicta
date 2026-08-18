@@ -330,6 +330,77 @@ mod tests {
     }
 
     #[test]
+    fn monolingual_under_the_8_percent_bar_passes() {
+        let gate = LivePathGate::new();
+        let run = run_report_with_wer(0.05);
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        assert_eq!(report.verdict, Verdict::Pass);
+        assert!(report.passed());
+        assert_eq!(report.max_wer, 0.08);
+    }
+
+    #[test]
+    fn monolingual_exactly_at_the_8_percent_bar_passes() {
+        let gate = LivePathGate::new();
+        let run = run_report_with_wer(0.08);
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        assert_eq!(report.verdict, Verdict::Pass);
+    }
+
+    #[test]
+    fn monolingual_over_the_8_percent_bar_fails() {
+        let gate = LivePathGate::new();
+        let run = run_report_with_wer(0.081);
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        assert_eq!(report.verdict, Verdict::Fail);
+        assert!(!report.passed());
+    }
+
+    #[test]
+    fn monolingual_message_reports_language_capture_mode_and_percentages() {
+        let gate = LivePathGate::new();
+        let run = run_report_with_wer(0.081);
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        let message = report.message();
+        assert!(message.contains("en"));
+        assert!(message.contains("Monolingual"));
+        assert!(message.contains("8.10%"));
+        assert!(message.contains("8.00%"));
+        assert!(message.contains("exceeds"));
+    }
+
+    #[test]
+    fn evaluates_the_monolingual_wer_a_real_score_run_produces() {
+        // End-to-end sanity check against the actual scorer rather than a
+        // hand-built RunReport: an exact transcript match should always
+        // clear the 8% monolingual bar (NFR-5.2).
+        let vocab = EngagementVocabulary::default();
+        let weights = AlignmentWeights::default();
+        let reference: Vec<String> = "the client will not renew in Q3"
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let pairs: Vec<(&[String], &[String])> = vec![(&reference[..], &reference[..])];
+        let run = score_run(pairs, &vocab, &weights);
+
+        let gate = LivePathGate::new();
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        assert_eq!(report.verdict, Verdict::Pass);
+        assert_eq!(report.measured_wer, 0.0);
+    }
+
+    #[test]
+    fn custom_monolingual_bar_overrides_the_default_threshold() {
+        let gate = LivePathGate::new().with_bar(LivePathBar {
+            monolingual_max: 0.01,
+            code_switched_max: 0.15,
+        });
+        let run = run_report_with_wer(0.05);
+        let report = gate.evaluate("en", CaptureMode::Monolingual, &run);
+        assert_eq!(report.verdict, Verdict::Fail);
+    }
+
+    #[test]
     fn code_switched_under_the_15_percent_bar_passes() {
         let gate = LivePathGate::new();
         let run = run_report_with_wer(0.10);
