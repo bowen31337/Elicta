@@ -1,13 +1,13 @@
 //! Operator voice sample enrolment (PRD FR-1.5).
 //!
-//! The mixed-stream fallback path (see [`super::stream_identity`], PRD
-//! FR-1.6) verifies "who is speaking" against an enrolled operator
-//! voiceprint. This module owns the other half of that: recording the
-//! sample the operator enrols in the first place. It accumulates normalised
-//! 16kHz mono audio (the ring buffer's one output shape, see
-//! [`crate::ring`]) up to a hard cap of 60 seconds, then hands the result to
-//! an injected [`VoiceEmbedder`] to produce an [`OperatorVoiceprint`] shaped
-//! for the `operator_voiceprints` table (`operator_id`, `embedding`,
+//! The mixed-stream fallback path (see [`super::verification`], PRD FR-1.6)
+//! verifies "who is speaking" against an enrolled operator voiceprint. This
+//! module owns the other half of that: recording the sample the operator
+//! enrols in the first place. It accumulates normalised 16kHz mono audio
+//! (the ring buffer's one output shape, see [`crate::ring`]) up to a hard
+//! cap of 60 seconds, then hands the result to an injected [`VoiceEmbedder`]
+//! to produce an [`OperatorVoiceprint`] shaped for the
+//! `operator_voiceprints` table (`operator_id`, `embedding`,
 //! `embedding_model`, `sample_duration_ms`; `enrolled_at` is assigned by the
 //! persistence layer on insert). The embedding model itself is out of scope
 //! here — this module's job is the duration cap and the accumulation, not
@@ -29,6 +29,15 @@ pub trait VoiceEmbedder {
 
     /// Computes the embedding for a 16kHz mono PCM16 sample.
     fn embed(&self, samples: &[i16]) -> Vec<u8>;
+
+    /// Cosine similarity, in `[-1.0, 1.0]`, between two embeddings this
+    /// embedder produced (PRD FR-1.6). Left to the embedder rather than
+    /// decoded generically from the opaque bytes `embed` returns, since
+    /// interpreting those bytes as a vector is itself a property of the
+    /// concrete model — this crate has no opinion on the encoding, only on
+    /// what the comparison is used for once a score comes back (see
+    /// [`super::verification`]).
+    fn cosine_similarity(&self, a: &[u8], b: &[u8]) -> f32;
 }
 
 /// A row ready to persist to `operator_voiceprints`. One enrolled embedding
@@ -132,6 +141,12 @@ mod tests {
 
         fn embed(&self, samples: &[i16]) -> Vec<u8> {
             samples.iter().map(|s| (*s % 256) as u8).collect()
+        }
+
+        // Unused by these enrolment tests, which never compare two
+        // embeddings; see verification.rs for coverage of real cosine math.
+        fn cosine_similarity(&self, _a: &[u8], _b: &[u8]) -> f32 {
+            0.0
         }
     }
 
