@@ -30,12 +30,12 @@ class TranscriptSegment(BaseModel):
 
 
 class BatchTranscriptionOutput(BaseModel):
-    """What a highest-accuracy batch engine returns for one full session.
+    """What one highest-accuracy batch engine returns for one full session.
 
-    `engine` names which engine produced this (PRD FR-2.6 will run two
-    independent engines and reconcile; that reconciliation is a separate
-    feature — this shape already carries the one field it needs to attribute
-    a result to its engine).
+    `engine` names which engine produced this. PRD FR-2.6 runs two of these
+    independently over the same session audio, each persisting its own
+    `RecordPathTranscript` tagged by this field; reconciling the two engines'
+    output against each other is a separate feature, not done here.
     """
 
     engine: str
@@ -44,12 +44,15 @@ class BatchTranscriptionOutput(BaseModel):
 
 
 class RecordPathTranscript(BaseModel):
-    """Durable record-path transcript for one full session (PRD FR-2.5/2.7).
+    """Durable record-path transcript for one (session, engine) pair (PRD FR-2.5/2.6/2.7).
 
-    Persisted whether the batch run succeeded or failed, since a session
-    with no record-path transcript at all is indistinguishable from one that
-    simply hasn't been re-transcribed yet — `status` and `error` make a
-    failed attempt visible instead of silent.
+    One of these persists per engine configured for the session (PRD FR-2.6
+    runs two independent engines), not one per session — `engine` plus
+    `session_id` together identify a given transcript. Persisted whether the
+    batch run succeeded or failed, since a session with no record-path
+    transcript at all is indistinguishable from one that simply hasn't been
+    re-transcribed yet — `status` and `error` make a failed attempt visible
+    instead of silent.
     """
 
     session_id: str

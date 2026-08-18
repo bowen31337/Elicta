@@ -30,10 +30,11 @@ start_record_path_transcription_job = _service.start_record_path_transcription_j
 
 
 def make_output(
+    engine: str = "highest-accuracy-engine",
     text: str = "the full session transcript",
 ) -> BatchTranscriptionOutput:
     return BatchTranscriptionOutput(
-        engine="highest-accuracy-engine",
+        engine=engine,
         segments=[
             TranscriptSegment(start_seconds=0.0, end_seconds=1.5, text="the full"),
             TranscriptSegment(
@@ -44,15 +45,21 @@ def make_output(
     )
 
 
-def test_a_successful_run_persists_a_complete_transcript_for_the_full_session():
-    saved: list[RecordPathTranscript] = []
-
+def make_engine(name: str, *, fail: bool = False, text: str | None = None):
     async def transcribe(
         session_id: str, audio_ref: str, keyterms: list[str]
     ) -> BatchTranscriptionOutput:
-        assert session_id == "session-1"
-        assert audio_ref == "recordings/session-1.wav"
-        return make_output()
+        if fail:
+            raise RuntimeError(f"{name} vendor engine timed out")
+        return make_output(engine=name, text=text or f"transcript from {name}")
+
+    return (name, transcribe)
+
+
+def test_a_successful_run_persists_a_complete_transcript_per_engine():
+    saved: list[RecordPathTranscript] = []
+
+    engines = [make_engine("engine-a"), make_engine("engine-b")]
 
     async def save(transcript: RecordPathTranscript) -> None:
         saved.append(transcript)
@@ -60,29 +67,64 @@ def test_a_successful_run_persists_a_complete_transcript_for_the_full_session():
     async def get_vocabulary(session_id: str) -> list[str]:
         return ["Acme Corp", "Project Nightingale"]
 
-    result = asyncio.run(
+    results = asyncio.run(
         run_record_path_transcription(
-            "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
+            "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
         )
     )
 
-    assert result.status == TranscriptionStatus.COMPLETE
-    assert result.session_id == "session-1"
-    assert result.engine == "highest-accuracy-engine"
-    assert result.text == "the full session transcript"
-    assert len(result.segments) == 2
-    assert result.error is None
-    assert saved == [result]
+    assert len(results) == 2
+    assert {r.engine for r in results} == {"engine-a", "engine-b"}
+    for result in results:
+        assert result.status == TranscriptionStatus.COMPLETE
+        assert result.session_id == "session-1"
+        assert result.error is None
+    assert sorted(saved, key=lambda t: t.engine) == sorted(
+        results, key=lambda t: t.engine
+    )
 
 
-def test_the_engagement_vocabulary_is_sent_as_keyterms_on_every_batch_request():
+def test_the_two_engines_run_independently_one_failing_does_not_affect_the_other():
+    saved: list[RecordPathTranscript] = []
+
+    engines = [make_engine("engine-a", fail=True), make_engine("engine-b")]
+
+    async def save(transcript: RecordPathTranscript) -> None:
+        saved.append(transcript)
+
+    async def get_vocabulary(session_id: str) -> list[str]:
+        return []
+
+    results = asyncio.run(
+        run_record_path_transcription(
+            "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
+        )
+    )
+
+    by_engine = {r.engine: r for r in results}
+    assert by_engine["engine-a"].status == TranscriptionStatus.FAILED
+    assert by_engine["engine-a"].error == "engine-a vendor engine timed out"
+    assert by_engine["engine-b"].status == TranscriptionStatus.COMPLETE
+    assert by_engine["engine-b"].error is None
+    assert len(saved) == 2
+
+
+def test_the_engagement_vocabulary_is_sent_as_keyterms_on_every_engines_request():
     sent_keyterms: list[list[str]] = []
 
-    async def transcribe(
+    async def transcribe_a(
         session_id: str, audio_ref: str, keyterms: list[str]
     ) -> BatchTranscriptionOutput:
         sent_keyterms.append(keyterms)
-        return make_output()
+        return make_output(engine="engine-a")
+
+    async def transcribe_b(
+        session_id: str, audio_ref: str, keyterms: list[str]
+    ) -> BatchTranscriptionOutput:
+        sent_keyterms.append(keyterms)
+        return make_output(engine="engine-b")
+
+    engines = [("engine-a", transcribe_a), ("engine-b", transcribe_b)]
 
     async def save(transcript: RecordPathTranscript) -> None:
         pass
@@ -92,20 +134,19 @@ def test_the_engagement_vocabulary_is_sent_as_keyterms_on_every_batch_request():
 
     asyncio.run(
         run_record_path_transcription(
-            "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
+            "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
         )
     )
 
-    assert sent_keyterms == [["Acme Corp", "Project Nightingale", "SSO"]]
+    assert sent_keyterms == [
+        ["Acme Corp", "Project Nightingale", "SSO"],
+        ["Acme Corp", "Project Nightingale", "SSO"],
+    ]
 
 
 def test_requested_at_is_deterministic_when_supplied():
     fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    async def transcribe(
-        session_id: str, audio_ref: str, keyterms: list[str]
-    ) -> BatchTranscriptionOutput:
-        return make_output()
+    engines = [make_engine("engine-a"), make_engine("engine-b")]
 
     async def save(transcript: RecordPathTranscript) -> None:
         pass
@@ -113,28 +154,28 @@ def test_requested_at_is_deterministic_when_supplied():
     async def get_vocabulary(session_id: str) -> list[str]:
         return []
 
-    result = asyncio.run(
+    results = asyncio.run(
         run_record_path_transcription(
             "session-1",
             "recordings/session-1.wav",
-            transcribe,
+            engines,
             save,
             get_vocabulary,
             requested_at=fixed,
         )
     )
 
-    assert result.requested_at == fixed
-    assert result.completed_at >= fixed
+    for result in results:
+        assert result.requested_at == fixed
+        assert result.completed_at >= fixed
 
 
-def test_an_engine_failure_persists_a_failed_transcript_and_reraises():
+def test_both_engines_failing_persists_two_failed_transcripts_without_raising():
     saved: list[RecordPathTranscript] = []
-
-    async def transcribe(
-        session_id: str, audio_ref: str, keyterms: list[str]
-    ) -> BatchTranscriptionOutput:
-        raise RuntimeError("vendor engine timed out")
+    engines = [
+        make_engine("engine-a", fail=True),
+        make_engine("engine-b", fail=True),
+    ]
 
     async def save(transcript: RecordPathTranscript) -> None:
         saved.append(transcript)
@@ -142,27 +183,20 @@ def test_an_engine_failure_persists_a_failed_transcript_and_reraises():
     async def get_vocabulary(session_id: str) -> list[str]:
         return []
 
-    with pytest.raises(RuntimeError, match="vendor engine timed out"):
-        asyncio.run(
-            run_record_path_transcription(
-                "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
-            )
+    results = asyncio.run(
+        run_record_path_transcription(
+            "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
         )
+    )
 
-    assert len(saved) == 1
-    assert saved[0].status == TranscriptionStatus.FAILED
-    assert saved[0].session_id == "session-1"
-    assert saved[0].error == "vendor engine timed out"
-    assert saved[0].segments == []
+    assert len(results) == 2
+    assert all(r.status == TranscriptionStatus.FAILED for r in results)
+    assert len(saved) == 2
 
 
-def test_a_vocabulary_lookup_failure_also_persists_a_failed_transcript_and_reraises():
+def test_a_vocabulary_lookup_failure_persists_a_failed_transcript_per_engine_and_reraises():
     saved: list[RecordPathTranscript] = []
-
-    async def transcribe(
-        session_id: str, audio_ref: str, keyterms: list[str]
-    ) -> BatchTranscriptionOutput:
-        raise AssertionError("transcribe should not run if vocabulary lookup fails")
+    engines = [make_engine("engine-a"), make_engine("engine-b")]
 
     async def save(transcript: RecordPathTranscript) -> None:
         saved.append(transcript)
@@ -173,26 +207,25 @@ def test_a_vocabulary_lookup_failure_also_persists_a_failed_transcript_and_rerai
     with pytest.raises(RuntimeError, match="engagement lookup unavailable"):
         asyncio.run(
             run_record_path_transcription(
-                "session-1", "recordings/session-1.wav", transcribe, save, get_vocabulary
+                "session-1", "recordings/session-1.wav", engines, save, get_vocabulary
             )
         )
 
-    assert len(saved) == 1
-    assert saved[0].status == TranscriptionStatus.FAILED
-    assert saved[0].error == "engagement lookup unavailable"
+    assert len(saved) == 2
+    assert {s.engine for s in saved} == {"engine-a", "engine-b"}
+    assert all(s.status == TranscriptionStatus.FAILED for s in saved)
+    assert all(s.error == "engagement lookup unavailable" for s in saved)
 
 
-def make_job_deps(*, fail: bool = False):
+def make_job_deps(*, fail_a: bool = False, fail_b: bool = False):
     saved_transcripts: list[RecordPathTranscript] = []
     saved_jobs: list[RecordPathTranscriptionJob] = []
     scheduled: list = []
 
-    async def transcribe(
-        meeting_id: str, audio_ref: str, keyterms: list[str]
-    ) -> BatchTranscriptionOutput:
-        if fail:
-            raise RuntimeError("vendor engine unavailable")
-        return make_output()
+    engines = [
+        make_engine("engine-a", fail=fail_a),
+        make_engine("engine-b", fail=fail_b),
+    ]
 
     async def get_vocabulary(meeting_id: str) -> list[str]:
         return []
@@ -207,7 +240,7 @@ def make_job_deps(*, fail: bool = False):
         scheduled.append(work)
 
     return {
-        "transcribe": transcribe,
+        "engines": engines,
         "get_vocabulary": get_vocabulary,
         "save_transcript": save_transcript,
         "save_job": save_job,
@@ -226,7 +259,7 @@ def test_starting_a_job_persists_it_as_queued_and_returns_without_waiting():
         start_record_path_transcription_job(
             "meeting-1",
             "recordings/meeting-1.wav",
-            deps["transcribe"],
+            deps["engines"],
             deps["get_vocabulary"],
             deps["save_transcript"],
             deps["save_job"],
@@ -253,7 +286,7 @@ def test_a_job_id_is_generated_when_none_is_supplied():
         start_record_path_transcription_job(
             "meeting-1",
             "recordings/meeting-1.wav",
-            deps["transcribe"],
+            deps["engines"],
             deps["get_vocabulary"],
             deps["save_transcript"],
             deps["save_job"],
@@ -265,14 +298,14 @@ def test_a_job_id_is_generated_when_none_is_supplied():
     assert job.status == TranscriptionJobStatus.QUEUED
 
 
-def test_running_the_scheduled_work_completes_the_job_and_saves_the_transcript():
+def test_running_the_scheduled_work_completes_the_job_and_saves_one_transcript_per_engine():
     deps = make_job_deps()
 
     job = asyncio.run(
         start_record_path_transcription_job(
             "meeting-1",
             "recordings/meeting-1.wav",
-            deps["transcribe"],
+            deps["engines"],
             deps["get_vocabulary"],
             deps["save_transcript"],
             deps["save_job"],
@@ -283,20 +316,23 @@ def test_running_the_scheduled_work_completes_the_job_and_saves_the_transcript()
 
     asyncio.run(deps["scheduled"][0]())
 
-    assert deps["saved_transcripts"][0].session_id == "meeting-1"
-    assert deps["saved_transcripts"][0].status == TranscriptionStatus.COMPLETE
+    assert len(deps["saved_transcripts"]) == 2
+    assert all(t.session_id == "meeting-1" for t in deps["saved_transcripts"])
+    assert all(
+        t.status == TranscriptionStatus.COMPLETE for t in deps["saved_transcripts"]
+    )
     assert deps["saved_jobs"][-1].job_id == job.job_id
     assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.COMPLETE
 
 
-def test_running_the_scheduled_work_marks_the_job_failed_without_raising():
-    deps = make_job_deps(fail=True)
+def test_the_job_completes_when_only_one_of_the_two_engines_succeeds():
+    deps = make_job_deps(fail_a=True)
 
     asyncio.run(
         start_record_path_transcription_job(
             "meeting-1",
             "recordings/meeting-1.wav",
-            deps["transcribe"],
+            deps["engines"],
             deps["get_vocabulary"],
             deps["save_transcript"],
             deps["save_job"],
@@ -305,8 +341,34 @@ def test_running_the_scheduled_work_marks_the_job_failed_without_raising():
         )
     )
 
-    # Should not raise even though the batch engine failed.
+    asyncio.run(deps["scheduled"][0]())
+
+    statuses = {t.engine: t.status for t in deps["saved_transcripts"]}
+    assert statuses["engine-a"] == TranscriptionStatus.FAILED
+    assert statuses["engine-b"] == TranscriptionStatus.COMPLETE
+    assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.COMPLETE
+
+
+def test_the_job_fails_only_when_both_engines_fail():
+    deps = make_job_deps(fail_a=True, fail_b=True)
+
+    asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["engines"],
+            deps["get_vocabulary"],
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+        )
+    )
+
+    # Should not raise even though both batch engines failed.
     asyncio.run(deps["scheduled"][0]())
 
     assert deps["saved_jobs"][-1].status == TranscriptionJobStatus.FAILED
-    assert deps["saved_transcripts"][-1].status == TranscriptionStatus.FAILED
+    assert all(
+        t.status == TranscriptionStatus.FAILED for t in deps["saved_transcripts"]
+    )

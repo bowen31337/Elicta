@@ -1,20 +1,27 @@
-"""HTTP surface for record-path batch re-transcription (PRD FR-2.5).
+"""HTTP surface for record-path batch re-transcription (PRD FR-2.5/2.6).
 
 Both `build_record_path_router` (synchronous, session-keyed) and
 `build_meeting_transcription_router` (async job, meeting-keyed) take the
-batch engine call and the persistence reads/writes as injected callables
-rather than importing a concrete ASR vendor client or storage layer, since
-neither lives in this package. Whoever wires the app factory (out of this
-feature's footprint) supplies the real implementations and mounts the
-returned routers.
+batch engines and the persistence reads/writes as injected callables rather
+than importing a concrete ASR vendor client or storage layer, since neither
+lives in this package. Whoever wires the app factory (out of this feature's
+footprint) supplies the real implementations and mounts the returned
+routers.
+
+`engines` is a `Sequence[BatchEngine]` (PRD FR-2.6 wants two independent
+engines per session) rather than a single transcriber, so both endpoints
+now deal in lists of `RecordPathTranscript` — one entry per configured
+engine — instead of a single transcript.
 """
+
+from collections.abc import Sequence
 
 from fastapi import APIRouter, HTTPException
 
 from .models import RecordPathTranscript, RecordPathTranscriptionJob
 from .schemas import RecordPathTranscriptionRequest
 from .service import (
-    BatchTranscriber,
+    BatchEngine,
     GetEngagementVocabulary,
     GetRecordPathTranscript,
     SaveRecordPathTranscript,
@@ -26,42 +33,42 @@ from .service import (
 
 
 def build_record_path_router(
-    transcribe: BatchTranscriber,
+    engines: Sequence[BatchEngine],
     get_vocabulary: GetEngagementVocabulary,
     save_transcript: SaveRecordPathTranscript,
-    get_transcript: GetRecordPathTranscript,
+    get_transcripts: GetRecordPathTranscript,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/sessions", tags=["record-path-transcription"])
 
     @router.post(
         "/{session_id}/record-path-transcript",
-        response_model=RecordPathTranscript,
+        response_model=list[RecordPathTranscript],
         status_code=201,
     )
     async def create_record_path_transcript(
         session_id: str, payload: RecordPathTranscriptionRequest
-    ) -> RecordPathTranscript:
+    ) -> list[RecordPathTranscript]:
         return await run_record_path_transcription(
-            session_id, payload.audio_ref, transcribe, save_transcript, get_vocabulary
+            session_id, payload.audio_ref, engines, save_transcript, get_vocabulary
         )
 
     @router.get(
         "/{session_id}/record-path-transcript",
-        response_model=RecordPathTranscript,
+        response_model=list[RecordPathTranscript],
     )
-    async def get_record_path_transcript(session_id: str) -> RecordPathTranscript:
-        transcript = await get_transcript(session_id)
-        if transcript is None:
+    async def get_record_path_transcript(session_id: str) -> list[RecordPathTranscript]:
+        transcripts = await get_transcripts(session_id)
+        if not transcripts:
             raise HTTPException(
                 status_code=404, detail="record-path transcript not found"
             )
-        return transcript
+        return transcripts
 
     return router
 
 
 def build_meeting_transcription_router(
-    transcribe: BatchTranscriber,
+    engines: Sequence[BatchEngine],
     get_vocabulary: GetEngagementVocabulary,
     save_transcript: SaveRecordPathTranscript,
     save_job: SaveTranscriptionJob,
@@ -71,7 +78,7 @@ def build_meeting_transcription_router(
 
     A separate router (and separate dependency set) from
     `build_record_path_router` above: that one transcribes a session
-    synchronously and responds once the batch engine finishes, while this
+    synchronously and responds once every batch engine finishes, while this
     one is keyed by meeting rather than session and returns a job handle
     immediately (202) so a caller isn't left holding an HTTP connection open
     for a full-meeting batch run.
@@ -90,7 +97,7 @@ def build_meeting_transcription_router(
         return await start_record_path_transcription_job(
             meeting_id,
             payload.audio_ref,
-            transcribe,
+            engines,
             get_vocabulary,
             save_transcript,
             save_job,
