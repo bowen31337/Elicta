@@ -18,7 +18,10 @@ export function historyOpacity(index: number): number {
 /**
  * Renders exactly one nudge prominently; every prior nudge recedes into a
  * dimmed, most-recent-first history list beneath it (PRD FR-6.3). The
- * trigger reason is shown alongside both the active nudge and every history
+ * active nudge itself is two-tier: the glanceable stub renders above the
+ * full question, at a heavier weight than it, so an operator can register
+ * the gist without reading the whole question (PRD FR-6.2). The trigger
+ * reason is shown alongside both the active nudge and every history
  * entry, not just the active one, so trust calibration survives a nudge
  * receding into history (PRD FR-5.11).
  *

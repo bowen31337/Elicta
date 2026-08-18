@@ -20,6 +20,26 @@ describe('NudgeStack', () => {
     expect(screen.getByText('question a?')).toBeInTheDocument();
   });
 
+  describe('glanceable stub above the full question, at smaller weight (PRD FR-6.2)', () => {
+    it('positions the stub before the full question in document order', () => {
+      render(<NudgeStack active={makeNudge('a')} history={[]} />);
+      const stub = screen.getByText('stub-a');
+      const question = screen.getByText('question a?');
+      expect(
+        stub.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('renders the stub and question with distinct weight classes so the question reads at smaller weight', () => {
+      render(<NudgeStack active={makeNudge('a')} history={[]} />);
+      const stub = screen.getByText('stub-a');
+      const question = screen.getByText('question a?');
+      expect(stub).toHaveClass('nudge-stack__stub');
+      expect(question).toHaveClass('nudge-stack__question');
+      expect(stub.className).not.toBe(question.className);
+    });
+  });
+
   it('shows the trigger reason alongside the active nudge', () => {
     render(<NudgeStack active={makeNudge('a')} history={[]} />);
     expect(screen.getByText('reason-a')).toBeInTheDocument();
