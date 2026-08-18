@@ -7,7 +7,22 @@
 //! is checked against. The two are independent: `parse` never needs to know
 //! the running pass rate to gate a single span, and this module never needs
 //! to know why a span fired or was suppressed, only that it did or didn't.
+//!
+//! [`PassRateCounter`] only counts; it does not itself decide anything from
+//! the number it produces. Raising the gate's own thresholds in response to
+//! a high pass rate — the self-regulation half of architecture §3.5's "and
+//! raises its own thresholds if pass rate exceeds ~10%" — is a separate
+//! concern that consumes [`PassRateCounter::record`]'s return value, not
+//! part of counting it.
+//!
+//! [`storm`] is the sibling concern for the burstier failure mode in the
+//! architecture's risk table: an endpointing storm during cross-talk, where
+//! a flood of evaluations arrives faster than the rolling pass rate could
+//! ever react to. It watches evaluation arrival times directly rather than
+//! consuming [`PassRateCounter`]'s output.
 
 pub mod pass_rate;
+pub mod storm;
 
 pub use pass_rate::PassRateCounter;
+pub use storm::{StormGuard, StormOutcome};
