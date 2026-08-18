@@ -8,9 +8,18 @@ from app.modules.debrief.artifacts.models import (
     CoverageMatrixEntry,
     CoverageMatrixStatus,
     RequirementsCoverageMatrix,
+    RequirementsState,
 )
 from app.modules.debrief.artifacts.router import build_full_prd_router
-from app.modules.debrief.pipeline.models import BmadArtifactSet, ClaimProvenance, FillState, FollowUpEmailDraft, ProjectBriefDraft
+from app.modules.debrief.pipeline.models import (
+    ArtifactCitation,
+    BmadArtifactSet,
+    ClaimProvenance,
+    DecisionLogEntry,
+    FillState,
+    FollowUpEmailDraft,
+    ProjectBriefDraft,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -45,10 +54,35 @@ def make_artifact_set() -> BmadArtifactSet:
     )
 
 
+def make_decision(text: str, provenance: ClaimProvenance) -> DecisionLogEntry:
+    return DecisionLogEntry(
+        text=text,
+        decided_by="alice",
+        provenance=provenance,
+        citations=[
+            ArtifactCitation(
+                utterance_id="utt-1", session_id="session-1", start_seconds=0.0, end_seconds=1.0,
+                speaker_tag="alice", quoted_text="quoted", original_language="en",
+            )
+        ],
+    )
+
+
+def make_requirements_state(decisions: list[DecisionLogEntry]) -> RequirementsState:
+    return RequirementsState(
+        engagement_id="eng-1", confirmed_requirements=[], contradictions=[], decisions=decisions, updated_at=FIXED,
+    )
+
+
 def make_client(
-    matrices: list[RequirementsCoverageMatrix], *, threshold: float | None = None
+    matrices: list[RequirementsCoverageMatrix],
+    *,
+    threshold: float | None = None,
+    requirements_states: dict[str, RequirementsState] | None = None,
+    with_requirements_state: bool = True,
 ) -> tuple[TestClient, list[str]]:
     generate_calls: list[str] = []
+    states = requirements_states or {}
 
     async def get_matrices(engagement_id: str) -> list[RequirementsCoverageMatrix]:
         return matrices
@@ -57,8 +91,13 @@ def make_client(
         generate_calls.append(engagement_id)
         return make_artifact_set()
 
+    async def get_requirements_state(engagement_id: str) -> RequirementsState | None:
+        return states.get(engagement_id)
+
     app = FastAPI()
     kwargs = {} if threshold is None else {"threshold": threshold}
+    if with_requirements_state:
+        kwargs["get_requirements_state"] = get_requirements_state
     app.include_router(build_full_prd_router(get_matrices, generate, **kwargs))
     return TestClient(app), generate_calls
 
@@ -113,3 +152,36 @@ def test_a_lower_custom_threshold_allows_generation_with_partial_coverage():
 
     assert response.status_code == 201
     assert generate_calls == ["eng-1"]
+
+
+def test_getting_requirements_state_exposes_each_decisions_inference_marker_distinctly():
+    state = make_requirements_state(
+        [
+            make_decision("go with vendor A", ClaimProvenance.STATED),
+            make_decision("timeline likely slips a month", ClaimProvenance.INFERRED),
+        ]
+    )
+    client, _ = make_client([], requirements_states={"eng-1": state})
+
+    response = client.get("/api/engagements/eng-1/requirements-state")
+
+    assert response.status_code == 200
+    provenances = [decision["provenance"] for decision in response.json()["decisions"]]
+    assert provenances == ["stated", "inferred"]
+
+
+def test_getting_requirements_state_for_an_unknown_engagement_returns_404_when_wired():
+    client, _ = make_client([])
+
+    response = client.get("/api/engagements/unknown-engagement/requirements-state")
+
+    assert response.status_code == 404
+
+
+def test_the_requirements_state_route_is_not_registered_when_get_requirements_state_is_not_supplied():
+    client, _ = make_client([], with_requirements_state=False)
+
+    response = client.get("/api/engagements/eng-1/requirements-state")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] != "requirements state not found"

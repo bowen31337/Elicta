@@ -65,13 +65,13 @@ def make_matrix(
 def make_artifact_citation(utterance_id: str = "utt-1") -> ArtifactCitation:
     return ArtifactCitation(
         utterance_id=utterance_id, session_id="session-1", start_seconds=0.0, end_seconds=1.0,
-        speaker_tag="alice", quoted_text="quoted",
+        speaker_tag="alice", quoted_text="quoted", original_language="en",
     )
 
 
-def make_decision(text: str = "decided X") -> DecisionLogEntry:
+def make_decision(text: str = "decided X", provenance: ClaimProvenance = ClaimProvenance.STATED) -> DecisionLogEntry:
     return DecisionLogEntry(
-        text=text, decided_by="alice", provenance=ClaimProvenance.STATED, citations=[make_artifact_citation()],
+        text=text, decided_by="alice", provenance=provenance, citations=[make_artifact_citation()],
     )
 
 
@@ -203,3 +203,24 @@ def test_a_failed_matrix_contributes_no_new_confirmed_requirements_but_decisions
     assert [req.section_key for req in result.confirmed_requirements] == ["timeline"]
     assert [decision.text for decision in result.decisions] == ["go with vendor A", "set budget at 50k"]
     assert result.contradictions == []
+
+
+def test_a_decisions_inference_marker_survives_the_merge_unchanged():
+    async def save(state: RequirementsState) -> None:
+        pass
+
+    previous_state = make_state(decisions=[make_decision("go with vendor A", ClaimProvenance.STATED)])
+    matrix = make_matrix([make_entry("timeline", "Timeline", FillState.EMPTY)])
+    artifacts = make_artifacts(
+        decisions=[make_decision("timeline likely slips a month", ClaimProvenance.INFERRED)]
+    )
+
+    result = asyncio.run(
+        merge_requirements_state_forward("engagement-1", previous_state, matrix, artifacts, save, merged_at=FIXED)
+    )
+
+    provenance_by_text = {decision.text: decision.provenance for decision in result.decisions}
+    assert provenance_by_text == {
+        "go with vendor A": ClaimProvenance.STATED,
+        "timeline likely slips a month": ClaimProvenance.INFERRED,
+    }

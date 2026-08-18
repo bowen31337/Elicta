@@ -15,7 +15,10 @@ failed gate into a 409. `merge_requirements_state_forward` is the last
 pipeline stage: it folds one meeting's coverage matrix and BMAD artifacts
 into the engagement's standing `RequirementsState`, carrying confirmed
 requirements, contradictions, and decisions forward into the next meeting
-(PRD FR-8.9).
+(PRD FR-8.9). `build_full_prd_router` also optionally exposes that standing
+state via `GET /{engagement_id}/requirements-state`, so a UI can render each
+decision's `provenance` — `STATED` or `INFERRED` (PRD FR-8.8) — well before
+the full PRD is reachable.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from app.modules.debrief.artifacts.prd_gate import (
 from app.modules.debrief.artifacts.router import (
     GenerateFullPrd,
     GetEngagementCoverageMatrices,
+    GetRequirementsState,
     build_full_prd_router,
 )
 from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
@@ -56,6 +60,7 @@ __all__ = [
     "EngagementCoverageSummary",
     "GenerateFullPrd",
     "GetEngagementCoverageMatrices",
+    "GetRequirementsState",
     "PrdGenerationRefused",
     "RequirementsContradiction",
     "RequirementsCoverageMatrix",
