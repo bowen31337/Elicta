@@ -1,9 +1,20 @@
 import type { Nudge } from './types';
+import { getNudgeChromeCopy } from './chromeCopy';
 import './NudgeStack.css';
 
 export interface NudgeStackProps {
   active: Nudge | null;
   history: Nudge[];
+  /**
+   * BCP-47 tag for the operator's language, independent of whichever
+   * language the meeting is in (PRD FR-2.26). Governs only the static
+   * interface chrome this component renders itself — the empty state and
+   * the history list's label. `stub` and `triggerReason` on each `Nudge`
+   * are expected to already be phrased in this language by the time they
+   * reach here (PRD FR-2.25), same as `question` arrives pre-phrased in
+   * the meeting language (FR-2.24). Defaults to English.
+   */
+  operatorLanguage?: string;
 }
 
 const MIN_HISTORY_OPACITY = 0.25;
@@ -33,7 +44,9 @@ export function historyOpacity(index: number): number {
  * FR-6.4), matching the design system's "no typing animation, no streaming"
  * rule for nudge entry.
  */
-export function NudgeStack({ active, history }: NudgeStackProps) {
+export function NudgeStack({ active, history, operatorLanguage }: NudgeStackProps) {
+  const chrome = getNudgeChromeCopy(operatorLanguage);
+
   return (
     <div className="nudge-stack">
       {active ? (
@@ -43,11 +56,11 @@ export function NudgeStack({ active, history }: NudgeStackProps) {
           <p className="nudge-stack__reason">{active.triggerReason}</p>
         </article>
       ) : (
-        <p className="nudge-stack__empty">No active nudge</p>
+        <p className="nudge-stack__empty">{chrome.emptyState}</p>
       )}
 
       {history.length > 0 ? (
-        <ol className="nudge-stack__history" aria-label="Prior nudges">
+        <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
           {history.map((nudge, index) => (
             <li
               key={nudge.id}

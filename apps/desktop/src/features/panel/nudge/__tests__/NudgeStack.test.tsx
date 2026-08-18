@@ -87,6 +87,47 @@ describe('NudgeStack', () => {
     expect(screen.getByText(/no active nudge/i)).toBeInTheDocument();
   });
 
+  describe('interface chrome in the operator language (PRD FR-2.25)', () => {
+    it('renders chrome copy in English by default', () => {
+      render(
+        <NudgeStack active={null} history={[makeNudge('a'), makeNudge('b')]} />,
+      );
+      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
+    });
+
+    it('renders the empty state and history label in the operator language', () => {
+      render(
+        <NudgeStack
+          active={null}
+          history={[makeNudge('a'), makeNudge('b')]}
+          operatorLanguage="zh"
+        />,
+      );
+      expect(screen.getByText('当前没有提示')).toBeInTheDocument();
+      expect(screen.getByLabelText('历史提示')).toBeInTheDocument();
+    });
+
+    it('leaves stub, question, and trigger reason untouched by operator language, since they arrive pre-phrased', () => {
+      render(<NudgeStack active={makeNudge('a')} history={[]} operatorLanguage="zh" />);
+      expect(screen.getByText('stub-a')).toBeInTheDocument();
+      expect(screen.getByText('question a?')).toBeInTheDocument();
+      expect(screen.getByText('reason-a')).toBeInTheDocument();
+    });
+
+    it('falls back to English chrome for an operator language with no translation', () => {
+      render(
+        <NudgeStack
+          active={null}
+          history={[makeNudge('a')]}
+          operatorLanguage="fr"
+        />,
+      );
+      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
+    });
+  });
+
   it('floors history opacity instead of letting it reach zero', () => {
     expect(historyOpacity(0)).toBeGreaterThan(historyOpacity(10));
     expect(historyOpacity(10)).toBeGreaterThan(0);

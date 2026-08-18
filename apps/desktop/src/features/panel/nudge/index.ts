@@ -1,6 +1,8 @@
 export type { Nudge } from './types';
 export { NudgeStack, historyOpacity } from './NudgeStack';
 export type { NudgeStackProps } from './NudgeStack';
+export { getNudgeChromeCopy } from './chromeCopy';
+export type { NudgeChromeCopy } from './chromeCopy';
 export { useNudgeStack } from './useNudgeStack';
 export type { NudgeStackState, UseNudgeStackResult } from './useNudgeStack';
 
