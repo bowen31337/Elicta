@@ -1,0 +1,339 @@
+//! The single audited egress chokepoint for device-originated outbound
+//! requests (architecture §8, "Egress control"; PRD NFR-2.7).
+//!
+//! The core has exactly two device-originated egress paths today — the slow
+//! lane's rolling transcript-window sync and session-state sync — and both
+//! are required to route through one class rather than calling an HTTP
+//! client directly. That is the only way the "every path out of the system
+//! passes through a logged chokepoint" guarantee holds: it is enforced by
+//! there being nowhere else to call, not by convention at each call site.
+//!
+//! The actual network transport and the actual `egress_log` persistence are
+//! platform/storage bindings and stay out of this crate (mirroring how
+//! `health`'s `DiskSpaceSource` keeps the `statvfs` syscall out), supplied
+//! instead via [`EgressTransport`] and [`EgressLogSink`]. What lives here is
+//! the invariant itself: [`EgressChokepoint::send`] always writes exactly one
+//! [`EgressLogRow`], whether the underlying request succeeds or fails.
+
+/// The two device-originated egress paths named in architecture §8: the slow
+/// lane's rolling transcript-window sync and session-state sync. Kept as a
+/// closed enum, not a free-form string, so the audit log's `purpose` column
+/// can't drift from what the architecture actually enumerates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EgressPurpose {
+    SlowLaneSync,
+    SessionSync,
+}
+
+impl EgressPurpose {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EgressPurpose::SlowLaneSync => "slow_lane_sync",
+            EgressPurpose::SessionSync => "session_sync",
+        }
+    }
+}
+
+/// A request about to leave the device through the chokepoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressRequest {
+    pub purpose: EgressPurpose,
+    pub destination: String,
+    pub method: String,
+    pub body_bytes: u64,
+}
+
+/// A successful transport outcome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressSuccess {
+    pub status_code: u16,
+    pub response_bytes: u64,
+}
+
+/// A transport-level failure (connection refused, timeout, non-2xx, ...).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressTransportError(pub String);
+
+/// Sends the actual request over the network. Left as a trait so this crate
+/// never depends on a concrete HTTP client and so the chokepoint's logging
+/// invariant is testable without a real network.
+pub trait EgressTransport {
+    fn execute(&self, request: &EgressRequest) -> Result<EgressSuccess, EgressTransportError>;
+}
+
+/// How a routed request resolved, as recorded in the audit row. Carries a
+/// failure's message rather than dropping it, since a chokepoint that only
+/// logs successes isn't an audit trail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EgressOutcome {
+    Success {
+        status_code: u16,
+        response_bytes: u64,
+    },
+    Failure {
+        error: String,
+    },
+}
+
+/// One row as written to the `egress_log` table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressLogRow {
+    pub timestamp_ms: u64,
+    pub purpose: EgressPurpose,
+    pub destination: String,
+    pub method: String,
+    pub outcome: EgressOutcome,
+}
+
+/// A failure to persist the audit row itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressLogError(pub String);
+
+/// Persists one [`EgressLogRow`] to the `egress_log` table. Left as a trait
+/// so the storage binding (the encrypted on-device database, per
+/// architecture §8 "At rest") stays out of this crate.
+pub trait EgressLogSink {
+    fn record(&self, row: &EgressLogRow) -> Result<(), EgressLogError>;
+}
+
+/// Supplies the audit row's timestamp. A trait purely so tests can hold time
+/// fixed; production callers can use [`SystemClock`].
+pub trait EgressClock {
+    fn now_ms(&self) -> u64;
+}
+
+/// Wall-clock [`EgressClock`], suitable for production use — unlike free
+/// disk space, epoch time doesn't need a platform-specific syscall.
+pub struct SystemClock;
+
+impl EgressClock for SystemClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+}
+
+/// Either half of the chokepoint failing: the request itself, or persisting
+/// its audit row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EgressError {
+    Transport(EgressTransportError),
+    Logging(EgressLogError),
+}
+
+/// The single chokepoint every device-originated outbound request must be
+/// routed through (PRD NFR-2.7). Holding this as the only way to reach
+/// [`EgressTransport`] is what makes "every egress is logged" a structural
+/// guarantee instead of a call-site convention.
+pub struct EgressChokepoint<C, T, S> {
+    clock: C,
+    transport: T,
+    sink: S,
+}
+
+impl<C: EgressClock, T: EgressTransport, S: EgressLogSink> EgressChokepoint<C, T, S> {
+    pub fn new(clock: C, transport: T, sink: S) -> Self {
+        Self {
+            clock,
+            transport,
+            sink,
+        }
+    }
+
+    /// Executes `request` and unconditionally persists an `egress_log` row
+    /// for it before returning. The row is written whether the request
+    /// succeeded or failed, and a failure to persist it is surfaced as
+    /// [`EgressError::Logging`] rather than swallowed — an egress that
+    /// can't be audited is the failure this chokepoint exists to prevent.
+    pub fn send(&self, request: EgressRequest) -> Result<EgressSuccess, EgressError> {
+        let outcome = self.transport.execute(&request);
+
+        let row = EgressLogRow {
+            timestamp_ms: self.clock.now_ms(),
+            purpose: request.purpose,
+            destination: request.destination,
+            method: request.method,
+            outcome: match &outcome {
+                Ok(success) => EgressOutcome::Success {
+                    status_code: success.status_code,
+                    response_bytes: success.response_bytes,
+                },
+                Err(err) => EgressOutcome::Failure {
+                    error: err.0.clone(),
+                },
+            },
+        };
+
+        self.sink.record(&row).map_err(EgressError::Logging)?;
+
+        outcome.map_err(EgressError::Transport)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    struct FixedClock(u64);
+
+    impl EgressClock for FixedClock {
+        fn now_ms(&self) -> u64 {
+            self.0
+        }
+    }
+
+    struct StubTransport(Result<EgressSuccess, EgressTransportError>);
+
+    impl EgressTransport for StubTransport {
+        fn execute(&self, _request: &EgressRequest) -> Result<EgressSuccess, EgressTransportError> {
+            self.0.clone()
+        }
+    }
+
+    struct SpySink {
+        rows: RefCell<Vec<EgressLogRow>>,
+        fail: bool,
+    }
+
+    impl SpySink {
+        fn new() -> Self {
+            Self {
+                rows: RefCell::new(Vec::new()),
+                fail: false,
+            }
+        }
+
+        fn failing() -> Self {
+            Self {
+                rows: RefCell::new(Vec::new()),
+                fail: true,
+            }
+        }
+    }
+
+    impl EgressLogSink for SpySink {
+        fn record(&self, row: &EgressLogRow) -> Result<(), EgressLogError> {
+            if self.fail {
+                return Err(EgressLogError("disk full".to_string()));
+            }
+            self.rows.borrow_mut().push(row.clone());
+            Ok(())
+        }
+    }
+
+    fn sample_request() -> EgressRequest {
+        EgressRequest {
+            purpose: EgressPurpose::SlowLaneSync,
+            destination: "https://slow-lane.example/sync".to_string(),
+            method: "POST".to_string(),
+            body_bytes: 1024,
+        }
+    }
+
+    #[test]
+    fn a_successful_request_still_persists_an_egress_log_row() {
+        let chokepoint = EgressChokepoint::new(
+            FixedClock(1_000),
+            StubTransport(Ok(EgressSuccess {
+                status_code: 200,
+                response_bytes: 64,
+            })),
+            SpySink::new(),
+        );
+
+        let result = chokepoint.send(sample_request());
+
+        assert!(result.is_ok());
+        let rows = chokepoint.sink.rows.borrow();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].timestamp_ms, 1_000);
+        assert_eq!(rows[0].purpose, EgressPurpose::SlowLaneSync);
+        assert_eq!(rows[0].destination, "https://slow-lane.example/sync");
+        assert_eq!(
+            rows[0].outcome,
+            EgressOutcome::Success {
+                status_code: 200,
+                response_bytes: 64
+            }
+        );
+    }
+
+    #[test]
+    fn a_failed_request_still_persists_an_egress_log_row_and_surfaces_the_transport_error() {
+        let chokepoint = EgressChokepoint::new(
+            FixedClock(2_000),
+            StubTransport(Err(EgressTransportError("connection refused".to_string()))),
+            SpySink::new(),
+        );
+
+        let result = chokepoint.send(sample_request());
+
+        match result {
+            Err(EgressError::Transport(EgressTransportError(msg))) => {
+                assert_eq!(msg, "connection refused")
+            }
+            other => panic!("expected a transport error, got {other:?}"),
+        }
+
+        let rows = chokepoint.sink.rows.borrow();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].outcome,
+            EgressOutcome::Failure {
+                error: "connection refused".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_logging_failure_is_surfaced_even_when_the_request_itself_succeeded() {
+        let chokepoint = EgressChokepoint::new(
+            FixedClock(3_000),
+            StubTransport(Ok(EgressSuccess {
+                status_code: 200,
+                response_bytes: 64,
+            })),
+            SpySink::failing(),
+        );
+
+        let result = chokepoint.send(sample_request());
+
+        match result {
+            Err(EgressError::Logging(EgressLogError(msg))) => assert_eq!(msg, "disk full"),
+            other => panic!("expected a logging error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_call_through_the_chokepoint_persists_exactly_one_row_regardless_of_outcome() {
+        let success_chokepoint = EgressChokepoint::new(
+            FixedClock(4_000),
+            StubTransport(Ok(EgressSuccess {
+                status_code: 204,
+                response_bytes: 0,
+            })),
+            SpySink::new(),
+        );
+        let failure_chokepoint = EgressChokepoint::new(
+            FixedClock(4_001),
+            StubTransport(Err(EgressTransportError("timeout".to_string()))),
+            SpySink::new(),
+        );
+
+        for _ in 0..3 {
+            let _ = success_chokepoint.send(sample_request());
+        }
+        for _ in 0..2 {
+            let _ = failure_chokepoint.send(EgressRequest {
+                purpose: EgressPurpose::SessionSync,
+                ..sample_request()
+            });
+        }
+
+        assert_eq!(success_chokepoint.sink.rows.borrow().len(), 3);
+        assert_eq!(failure_chokepoint.sink.rows.borrow().len(), 2);
+    }
+}
