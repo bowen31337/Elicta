@@ -37,6 +37,17 @@
 //! branch, and [`dispatch::render`] is the one entry point that picks
 //! between the two the way §3.7 describes, so the branch is decided in one
 //! place rather than at every call site that hands phrasing a winner.
+//!
+//! Both branches must land the panel's question in the meeting language
+//! (PRD FR-2.24), but only one of them gets that for free. The
+//! slot-instantiation path inherits it structurally -- the stored
+//! `phrasing` was already authored in that language by the compiler, and
+//! `{term}` is filled with the client's own spoken word, which is in that
+//! language by definition. The fallback path has no such guarantee: a
+//! slow-lane candidate is rewritten from a bare `topic` with no compiled
+//! phrasing to inherit a language from, so [`fallback::Rewriter::rewrite`]
+//! takes the meeting language as an explicit argument rather than leaving
+//! the model to default to whichever language it would otherwise pick.
 
 mod dispatch;
 mod error;

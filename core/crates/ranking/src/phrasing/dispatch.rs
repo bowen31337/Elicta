@@ -55,6 +55,7 @@ mod tests {
         fn rewrite(
             &self,
             _topic: &str,
+            _lang: &str,
             _max_words: usize,
         ) -> Result<String, super::super::fallback::RewriteError> {
             Ok(self.0.to_string())
@@ -66,6 +67,7 @@ mod tests {
         fn rewrite(
             &self,
             _topic: &str,
+            _lang: &str,
             _max_words: usize,
         ) -> Result<String, super::super::fallback::RewriteError> {
             panic!("a phrased candidate must never reach the small-model rewriter");
@@ -98,6 +100,7 @@ mod tests {
         let winner = WinningCandidate::Unphrased(SlowLaneCandidate {
             id: "novel-candidate-1".to_string(),
             topic: "on-call coverage".to_string(),
+            lang: "en".to_string(),
         });
 
         let question = render(

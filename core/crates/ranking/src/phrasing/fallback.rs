@@ -48,10 +48,18 @@ pub const MAX_REWRITE_WORDS: usize = 25;
 /// because `stub` is the one field every candidate is guaranteed to have
 /// regardless of whether a phrasing was ever written for it -- unlike
 /// [`super::Candidate`], which exists only once a phrasing does.
+///
+/// `lang` is the meeting language this rewrite must land in (schema §3.6's
+/// `lang` column; PRD FR-2.24) -- a slow-lane candidate is written into the
+/// bank without a compiled `phrasing`, so unlike the slot-instantiation
+/// path (where `phrasing` was already authored in the right language by the
+/// compiler) nothing here fixes the rewrite's language unless it is passed
+/// through explicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlowLaneCandidate {
     pub id: String,
     pub topic: String,
+    pub lang: String,
 }
 
 /// A [`Rewriter`] call failed before ever producing text -- a transport
@@ -68,11 +76,13 @@ pub struct RewriteError(pub String);
 /// `egress::EgressTransport`, so this crate never depends on a concrete
 /// Messages API client and the fallback path is testable without a real
 /// network call or model spend. `max_words` is passed through so a real
-/// implementation can size its `max_tokens` request parameter (FR-6.1) --
-/// this module does not shape the request itself, only the policy around
-/// calling it.
+/// implementation can size its `max_tokens` request parameter (FR-6.1);
+/// `lang` is passed through the same way so a real implementation can
+/// instruct the model to answer in the meeting language rather than
+/// whatever language it defaults to (PRD FR-2.24) -- this module does not
+/// shape the request itself, only the policy around calling it.
 pub trait Rewriter {
-    fn rewrite(&self, topic: &str, max_words: usize) -> Result<String, RewriteError>;
+    fn rewrite(&self, topic: &str, lang: &str, max_words: usize) -> Result<String, RewriteError>;
 }
 
 /// Calls the small-model rewrite fallback for `candidate` and returns the
@@ -87,7 +97,7 @@ pub fn rewrite_fallback(
     rewriter: &dyn Rewriter,
 ) -> Result<String, PhrasingError> {
     let question = rewriter
-        .rewrite(&candidate.topic, MAX_REWRITE_WORDS)
+        .rewrite(&candidate.topic, &candidate.lang, MAX_REWRITE_WORDS)
         .map_err(|err| PhrasingError::RewriteFailed {
             candidate_id: candidate.id.clone(),
             reason: err.0,
@@ -118,6 +128,7 @@ mod tests {
         SlowLaneCandidate {
             id: "novel-candidate-1".to_string(),
             topic: topic.to_string(),
+            lang: "en".to_string(),
         }
     }
 
@@ -126,7 +137,12 @@ mod tests {
     }
 
     impl Rewriter for StubRewriter {
-        fn rewrite(&self, _topic: &str, _max_words: usize) -> Result<String, RewriteError> {
+        fn rewrite(
+            &self,
+            _topic: &str,
+            _lang: &str,
+            _max_words: usize,
+        ) -> Result<String, RewriteError> {
             self.response
                 .map(|text| text.to_string())
                 .map_err(|reason| RewriteError(reason.to_string()))
@@ -154,7 +170,12 @@ mod tests {
         }
 
         impl Rewriter for RecordingRewriter {
-            fn rewrite(&self, topic: &str, max_words: usize) -> Result<String, RewriteError> {
+            fn rewrite(
+                &self,
+                topic: &str,
+                _lang: &str,
+                max_words: usize,
+            ) -> Result<String, RewriteError> {
                 *self.seen.borrow_mut() = Some((topic.to_string(), max_words));
                 Ok("A short rewritten question?".to_string())
             }
@@ -170,6 +191,38 @@ mod tests {
             rewriter.seen.into_inner(),
             Some(("data retention policy".to_string(), MAX_REWRITE_WORDS))
         );
+    }
+
+    #[test]
+    fn passes_the_candidates_meeting_language_to_the_rewriter_so_the_rewrite_lands_in_it() {
+        struct RecordingRewriter {
+            seen: std::cell::RefCell<Option<String>>,
+        }
+
+        impl Rewriter for RecordingRewriter {
+            fn rewrite(
+                &self,
+                _topic: &str,
+                lang: &str,
+                _max_words: usize,
+            ) -> Result<String, RewriteError> {
+                *self.seen.borrow_mut() = Some(lang.to_string());
+                Ok("¿Cuál es la fecha límite?".to_string())
+            }
+        }
+
+        let rewriter = RecordingRewriter {
+            seen: std::cell::RefCell::new(None),
+        };
+        let candidate = SlowLaneCandidate {
+            id: "novel-candidate-1".to_string(),
+            topic: "deadline".to_string(),
+            lang: "es".to_string(),
+        };
+
+        rewrite_fallback(&candidate, &rewriter).unwrap();
+
+        assert_eq!(rewriter.seen.into_inner(), Some("es".to_string()));
     }
 
     #[test]
@@ -214,7 +267,12 @@ mod tests {
 
         struct OverLongRewriter(String);
         impl Rewriter for OverLongRewriter {
-            fn rewrite(&self, _topic: &str, _max_words: usize) -> Result<String, RewriteError> {
+            fn rewrite(
+                &self,
+                _topic: &str,
+                _lang: &str,
+                _max_words: usize,
+            ) -> Result<String, RewriteError> {
                 Ok(self.0.clone())
             }
         }
@@ -240,7 +298,12 @@ mod tests {
 
         struct ExactRewriter(String);
         impl Rewriter for ExactRewriter {
-            fn rewrite(&self, _topic: &str, _max_words: usize) -> Result<String, RewriteError> {
+            fn rewrite(
+                &self,
+                _topic: &str,
+                _lang: &str,
+                _max_words: usize,
+            ) -> Result<String, RewriteError> {
                 Ok(self.0.clone())
             }
         }
