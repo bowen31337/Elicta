@@ -1,3 +1,16 @@
+//! Word segmentation for scripts with no orthographic word boundaries
+//! (PRD FR-2.18; architecture §3.5).
+//!
+//! Chinese, Japanese, Thai, Lao, Myanmar and Khmer text carries no spaces
+//! between words, so a lexicon scan (Aho-Corasick over a curated word list,
+//! `trigger-gate`) has nothing to match against until segmentation has run.
+//! `segment_utterance` (this module) is that stage: it takes raw utterance
+//! text and returns `SegmentToken`s. It has no dependency on any lexicon or
+//! trigger type — segmentation is a pure function of text, callable and
+//! testable in complete isolation from matching, which is what makes the
+//! `segment -> match` ordering structural rather than a convention that a
+//! future call site could violate.
+//!
 //! Groups ASR output tokens by per-token language tag and routes each group
 //! to its own segmenter (architecture §3.5, "Language routing").
 //!
@@ -31,13 +44,76 @@
 //! [`PositionedToken`] carries what that step needs, and it is what makes
 //! the merge possible without re-deriving order from anything else.
 
+mod dictionary;
 pub mod merge;
+mod script;
 pub mod segmenter;
 
 use std::collections::HashMap;
+use std::ops::Range;
 
+pub use dictionary::DictionarySegmenter;
 pub use merge::merge_spans;
-pub use segmenter::{CharSegmenter, Segmenter, SegmenterRouter, Span, WhitespaceSegmenter};
+pub use script::{split_runs, Run, RunKind};
+pub use segmenter::{CharSegmenter, SegmenterRouter, Span, WhitespaceSegmenter};
+
+/// A single segmented word, with its byte range into the original utterance text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentToken {
+    pub text: String,
+    pub byte_range: Range<usize>,
+}
+
+/// Segments a run of text already known to be a single no-boundary script.
+///
+/// Distinct from [`segmenter::Segmenter`]: that trait segments a
+/// [`LanguageGroup`] of already-tagged, already-ASR-tokenised text into
+/// lexicon-matchable [`Span`]s, while this one segments a raw run of
+/// no-boundary-script text (FR-2.18) into [`SegmentToken`]s before any
+/// per-token language tag or ASR tokenisation is assumed to exist.
+pub trait NoBoundarySegmenter {
+    fn segment(&self, text: &str) -> Vec<SegmentToken>;
+}
+
+impl NoBoundarySegmenter for DictionarySegmenter {
+    fn segment(&self, text: &str) -> Vec<SegmentToken> {
+        self.segment_range(text)
+    }
+}
+
+/// Segments a full utterance into tokens, emitting them before any lexicon
+/// runs. No-boundary runs (Han, Kana, Thai, Lao, Myanmar, Khmer) are handed
+/// to `no_boundary_segmenter`; bounded runs (space-delimited scripts) are
+/// already word-shaped and pass through as single tokens; separator runs
+/// carry no lexical content and are dropped.
+///
+/// Tokens are returned in the order they occur in `text`, each carrying a
+/// byte range into `text` so a caller can recover its original span.
+pub fn segment_utterance(
+    text: &str,
+    no_boundary_segmenter: &dyn NoBoundarySegmenter,
+) -> Vec<SegmentToken> {
+    let mut tokens = Vec::new();
+
+    for run in split_runs(text) {
+        let slice = &text[run.range.clone()];
+        match run.kind {
+            RunKind::Separator => continue,
+            RunKind::Bounded => {
+                tokens.push(SegmentToken { text: slice.to_string(), byte_range: run.range });
+            }
+            RunKind::NoBoundary => {
+                for tok in no_boundary_segmenter.segment(slice) {
+                    let start = tok.byte_range.start + run.range.start;
+                    let end = tok.byte_range.end + run.range.start;
+                    tokens.push(SegmentToken { text: tok.text, byte_range: start..end });
+                }
+            }
+        }
+    }
+
+    tokens
+}
 
 /// A single ASR output token carrying its own per-token language tag
 /// (FR-2.13). Mirrors the `lang`/`lang_confidence`/`confidence` fields of
@@ -135,6 +211,16 @@ fn primary_subtag(language: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn emits_tokens_for_a_pure_no_boundary_utterance() {
+        let seg = DictionarySegmenter::with_builtin_zh();
+        let tokens = segment_utterance("我们大概尽快处理这个问题", &seg);
+        assert!(!tokens.is_empty(), "segmentation must emit tokens before any lexicon can run");
+        for tok in &tokens {
+            assert!(!tok.text.is_empty());
+        }
+    }
+
     fn token(text: &str, lang: &str, lang_confidence: f32) -> TaggedToken {
         TaggedToken {
             text: text.to_string(),
@@ -142,6 +228,62 @@ mod tests {
             lang: lang.to_string(),
             lang_confidence,
         }
+    }
+
+    #[test]
+    fn segments_a_code_switched_utterance_without_discarding_either_language() {
+        // The PRD's own example: "这个 API 的 latency 要求是什么" has no single
+        // language, and a token-level pipeline must preserve every token.
+        let seg = DictionarySegmenter::with_builtin_zh();
+        let text = "这个API的latency要求是什么";
+        let tokens = segment_utterance(text, &seg);
+
+        let joined: String = tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(joined, text, "no character may be dropped by segmentation");
+
+        assert!(tokens.iter().any(|t| t.text == "API"));
+        assert!(tokens.iter().any(|t| t.text == "latency"));
+        assert!(tokens.iter().any(|t| t.text == "这个"));
+    }
+
+    #[test]
+    fn preserves_left_to_right_order() {
+        let seg = DictionarySegmenter::with_builtin_zh();
+        let text = "hello世界world";
+        let tokens = segment_utterance(text, &seg);
+        let ranges: Vec<usize> = tokens.iter().map(|t| t.byte_range.start).collect();
+        let mut sorted = ranges.clone();
+        sorted.sort_unstable();
+        assert_eq!(ranges, sorted, "tokens must be emitted in source order");
+    }
+
+    #[test]
+    fn byte_ranges_reconstruct_the_original_token_text() {
+        let seg = DictionarySegmenter::with_builtin_zh();
+        let text = "我们 need 尽快 confirmation";
+        for tok in segment_utterance(text, &seg) {
+            assert_eq!(&text[tok.byte_range.clone()], tok.text);
+        }
+    }
+
+    #[test]
+    fn drops_whitespace_but_keeps_every_word() {
+        let seg = DictionarySegmenter::with_builtin_zh();
+        let tokens = segment_utterance("请 尽快 回复", &seg);
+        assert!(tokens.iter().all(|t| !t.text.trim().is_empty()));
+        assert!(tokens.iter().any(|t| t.text == "尽快"));
+    }
+
+    /// A generic dictionary generalises beyond Mandarin: any script without
+    /// orthographic word boundaries (Thai here) segments the same way, with
+    /// unknown text still producing single-character tokens rather than
+    /// stalling — segmentation never blocks on dictionary coverage.
+    #[test]
+    fn generalises_to_other_no_boundary_scripts() {
+        let seg = DictionarySegmenter::new(vec!["สวัสดี".to_string()]);
+        let tokens = segment_utterance("สวัสดีครับ", &seg);
+        assert_eq!(tokens[0].text, "สวัสดี");
+        assert!(tokens.len() > 1);
     }
 
     #[test]
