@@ -94,6 +94,54 @@ class SessionDiarization(BaseModel):
     error: str | None = None
 
 
+class TranscriptCleaningStatus(str, Enum):
+    """Terminal state of one transcript-cleaning run over a session's diarized utterances."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class CleanedUtterance(BaseModel):
+    """One `Utterance` with its cleaned text persisted alongside its verbatim original (PRD FR-7.2).
+
+    `verbatim_text` is always the record-path/diarization output untouched;
+    `cleaned_text` is what the cleaning engine produced by removing
+    disfluencies, correcting vocabulary, and restoring punctuation. Keeping
+    both fields on every record — rather than overwriting the transcript in
+    place — is what "the cleaned transcript persists alongside the verbatim
+    original" means: an operator or later debrief stage can always recover
+    exactly what was said, not just the cleaned rendering of it.
+    """
+
+    utterance_id: str
+    session_id: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    speaker_tag: str
+    verbatim_text: str
+    cleaned_text: str
+
+
+class SessionTranscriptCleaning(BaseModel):
+    """Durable record of one transcript-cleaning run over a session's diarized utterances (PRD FR-7.2).
+
+    Persisted whether the run succeeded or failed, mirroring
+    `SessionDiarization`: a session with no cleaning record at all would be
+    indistinguishable from one that simply hasn't been cleaned yet, so
+    `status` and `error` make a failed run visible instead of silent.
+    `utterances` is empty on a `FAILED` run — the verbatim originals still
+    live on in `SessionDiarization`, so nothing is lost.
+    """
+
+    session_id: str
+    status: TranscriptCleaningStatus
+    engine: str
+    utterances: list[CleanedUtterance]
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
+
+
 class AudioDestructionStatus(str, Enum):
     """Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4)."""
 
