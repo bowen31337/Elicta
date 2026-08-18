@@ -1,4 +1,4 @@
-"""Domain types for the hypothesis-verification compiling technique (PRD FR-4.9).
+"""Domain types for compiling techniques (PRD FR-4.6, FR-4.9).
 
 `HypothesisDocumentClaim` is a deliberately local input shape: no document
 claim-extraction pipeline exists yet in this codebase. The closest existing
@@ -15,13 +15,28 @@ enum: that module's own docstring already narrates this exact downstream
 behaviour ("hypothesis documents generate verification questions instead"
 of being treated as fact), so this technique firing only on
 `DocumentStatus.HYPOTHESIS` is the intended coupling, not incidental.
+
+`EngagementStage` and `CandidateShape` back `stage_suppression.py` (PRD
+FR-4.6). Neither an engagement-stage lifecycle nor a problem/solution/epic
+candidate taxonomy exists elsewhere in this codebase yet, so both are
+net-new local concepts rather than reuses of an existing enum.
+`ShapedCandidate` is the local input shape pairing an already-compiled
+`BankCandidate` with its shape tag: whoever classifies a candidate's shape
+(out of this feature's footprint — presumably the BMAD analyst pass from
+FR-4.1/FR-4.2 that assigns each candidate's target template section) is
+responsible for handing them to `suppress_out_of_stage_candidates` in this
+shape.
 """
 
 from __future__ import annotations
 
+from enum import Enum
+
 from pydantic import BaseModel, Field
 
 from app.modules.engagement.documents.models import DocumentStatus
+
+from ..bank.models import BankCandidate
 
 
 class HypothesisDocumentClaim(BaseModel):
@@ -31,3 +46,37 @@ class HypothesisDocumentClaim(BaseModel):
     claim_id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     document_status: DocumentStatus
+
+
+class EngagementStage(str, Enum):
+    """Which stage an engagement has reached (PRD FR-4.6).
+
+    `DISCOVERY` is the only stage `stage_suppression.py` treats specially:
+    it's the stage FR-4.6 requires banks to stay in problem space for.
+    `REQUIREMENTS` marks the point the requirements template starts calling
+    for solution- and epic-shaped questions, per FR-4.6's own wording.
+    """
+
+    DISCOVERY = "discovery"
+    REQUIREMENTS = "requirements"
+
+
+class CandidateShape(str, Enum):
+    """Where a compiled candidate sits relative to problem/solution space (PRD FR-4.6).
+
+    `PROBLEM` candidates explore the problem space and are always in scope.
+    `SOLUTION` and `EPIC` candidates presuppose a solution direction or
+    a delivery-sized unit of work respectively — exactly what FR-4.6 says a
+    discovery-stage bank must not surface yet.
+    """
+
+    PROBLEM = "problem"
+    SOLUTION = "solution"
+    EPIC = "epic"
+
+
+class ShapedCandidate(BaseModel):
+    """An already-compiled `BankCandidate` paired with its problem/solution/epic shape tag (PRD FR-4.6)."""
+
+    candidate: BankCandidate
+    shape: CandidateShape
