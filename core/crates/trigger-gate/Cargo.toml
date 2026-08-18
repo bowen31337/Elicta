@@ -1,0 +1,8 @@
+[package]
+name = "trigger-gate"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "trigger_gate"
+path = "src/lib.rs"

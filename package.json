@@ -1,0 +1,14 @@
+{
+  "name": "elicta",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter elicta-desktop tauri dev",
+    "build": "pnpm -r --if-present build",
+    "generate:api-client": "pnpm --filter api-client generate"
+  }
+}

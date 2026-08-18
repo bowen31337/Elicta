@@ -1,0 +1,8 @@
+[package]
+name = "asr-live"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "asr_live"
+path = "src/lib.rs"

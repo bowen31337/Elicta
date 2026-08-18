@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "core/shared/app",
+    "core/crates/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
