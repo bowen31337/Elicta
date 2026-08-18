@@ -1,6 +1,6 @@
-# score module — handoff (authority_match, trigger_match, coverage_urgency, priority, candidate_score, weights_config)
+# score module — handoff (authority_match, trigger_match, coverage_urgency, priority, recency_penalty, asked_penalty, candidate_score, weights_config)
 
-Implements three features layered in this module over time:
+Implements five features layered in this module over time:
 
 1. PRD FR-4.7 ("weight candidate ranking by attendee decision authority and
    domain -- surface questions the people actually in the room can
@@ -13,8 +13,8 @@ Implements three features layered in this module over time:
    candidate emits a score" -- `trigger_match.rs`, `coverage_urgency.rs`,
    `priority.rs`, and `candidate_score.rs`, which sums all four into one
    per-candidate total. This feature's scope is explicitly the four terms
-   its own description names -- `recency_penalty` and `asked_penalty` are
-   left out on purpose, not overlooked; see "What's not done here."
+   its own description names -- `recency_penalty` and `asked_penalty` were
+   left out on purpose, not overlooked, and added by features 4 and 5 below.
 3. "System reads ranking weights from configuration rather than from
    hardcoded constants, so the replay harness can tune them. Done when the
    run log emits the active weight set" -- `weights_config.rs`, which adds
@@ -22,7 +22,30 @@ Implements three features layered in this module over time:
    variables, falling back to `DEFAULT_WEIGHTS` field-by-field when unset
    or unparsable) and `active_weights_log_line` (formats the active weight
    set into the line whichever binary entry point owns the run log should
-   write, per this feature's acceptance criterion).
+   write, per this feature's acceptance criterion). At the time this
+   feature landed, only `w₁..w₄` existed; features 4 and 5 below each
+   extended `weights_from_env`/`active_weights_log_line` to their own
+   weight rather than re-deriving either function.
+4. "System subtracts an asked penalty for any thread the operator has
+   already marked with the Asked it chip. Done when an already-asked
+   thread emits a reduced score" (PRD FR-6.7) -- the `-w₆·asked_penalty`
+   term, `asked_penalty.rs`. Extended `CandidateScoreInputs` with
+   `is_asked: bool`, `ScoreWeights` with `asked_penalty: f32`, and
+   `weights_from_env`/`active_weights_log_line` with
+   `RANKING_WEIGHT_ASKED_PENALTY`/its formatted line.
+5. "System subtracts a recency penalty when a similar nudge was surfaced
+   recently in the same meeting. Done when a recently surfaced thread
+   emits a reduced score" -- the `-w₅·recency_penalty` term,
+   `recency_penalty.rs`. Extended `CandidateScoreInputs` with
+   `was_recently_surfaced: bool`, `ScoreWeights` with
+   `recency_penalty: f32`, and `weights_from_env`/`active_weights_log_line`
+   with `RANKING_WEIGHT_RECENCY_PENALTY`/its formatted line. Mirrors
+   feature 4's shape exactly (boolean flag in, `-weight` or `0.0` out) --
+   see `recency_penalty.rs`'s own doc comment for why a plain `bool` is the
+   right input shape here too: no module in this repo tracks
+   recently-surfaced nudges yet, so (like `is_asked` before it) this term
+   takes the caller's already-computed recency verdict rather than deriving
+   it from a timestamp/window itself.
 
 `core/crates/ranking` did not exist anywhere else in this repo before this
 feature (no `Cargo.toml`, no `src/lib.rs`). This feature's own footprint is
@@ -46,15 +69,17 @@ changed.
 
 ## Wiring needed
 
-None -- `src/lib.rs` already wires `pub mod score;`. `mod.rs` now declares
-`pub mod candidate_score;`, `pub mod coverage_urgency;`, `pub mod priority;`,
-`pub mod trigger_match;`, and `pub mod weights_config;` alongside the
-existing `pub mod authority_match;`. `authority_match`, `trigger_match`,
-`coverage_urgency`, and `priority` are each independent of one another and
-of `candidate_score` -- `candidate_score` is the only module here with an
-intra-crate dependency besides `weights_config`, importing each term
-function from its sibling module to sum them. `weights_config` depends on
-`candidate_score` for `ScoreWeights`/`DEFAULT_WEIGHTS` only.
+None -- `src/lib.rs` already wires `pub mod score;`. `mod.rs` declares
+`pub mod authority_match;`, `pub mod candidate_score;`, `pub mod
+coverage_urgency;`, `pub mod priority;`, `pub mod recency_penalty;`, `pub
+mod trigger_match;`, and `pub mod weights_config;` (plus the pre-existing
+`pub mod asked_penalty;`). `authority_match`, `trigger_match`,
+`coverage_urgency`, `priority`, `recency_penalty`, and `asked_penalty` are
+each independent of one another and of `candidate_score` -- `candidate_score`
+is the only module here with an intra-crate dependency besides
+`weights_config`, importing each term function from its sibling module to
+sum them. `weights_config` depends on `candidate_score` for
+`ScoreWeights`/`DEFAULT_WEIGHTS` only.
 
 ## What's here
 
@@ -101,33 +126,53 @@ function from its sibling module to sum them. `weights_config` depends on
   instead of dividing by zero, matching `retrieval::cosine::
   cosine_similarity`'s "malformed input degrades to ranked last, never
   panics" precedent.
-- `candidate_score.rs` -- `CandidateScoreInputs` (the four raw per-candidate
-  values), `ScoreWeights` (the four `w₁..w₄` weights) and `DEFAULT_WEIGHTS`,
+- `asked_penalty.rs` -- `asked_penalty_term(is_asked: bool, weight: f32) ->
+  f32`, the `-w₆·asked_penalty` term (PRD FR-6.7), plus
+  `DEFAULT_ASKED_PENALTY_WEIGHT`. Unlike the four reward terms above, this
+  one is negative-signed: an asked thread's term is `-weight`, an unasked
+  thread's is `0.0`. Takes the already-computed "Asked it" flag as a plain
+  `bool` -- no lookup or clock read of its own, same "pure function, no
+  I/O" contract as every other term here.
+- `recency_penalty.rs` -- `recency_penalty_term(was_recently_surfaced:
+  bool, weight: f32) -> f32`, the `-w₅·recency_penalty` term (architecture
+  §3.7: "similar nudge surfaced recently"), plus
+  `DEFAULT_RECENCY_PENALTY_WEIGHT`. Same shape as `asked_penalty_term`:
+  negative-signed, `-weight` when `was_recently_surfaced` else `0.0`. Takes
+  the already-computed recency verdict as a plain `bool` -- no module in
+  this repo tracks recently-surfaced nudges yet (per-thread
+  `lastSurfacedAt` and a recency window), so this term is written against
+  the contract that tracker will eventually satisfy, exactly mirroring how
+  `asked_penalty_term` predated "Asked it" state.
+- `candidate_score.rs` -- `CandidateScoreInputs` (all six raw per-candidate
+  values, including `was_recently_surfaced: bool` and `is_asked: bool`),
+  `ScoreWeights` (all six `w₁..w₆` weights) and `DEFAULT_WEIGHTS`,
   `CandidateScore` (id + total score), `score_candidate(inputs, weights) ->
-  f32` (sums the four terms for one candidate), and
-  `score_candidates(candidates: &[(String, CandidateScoreInputs)], weights)
-  -> Vec<CandidateScore>` (scores every candidate, order-preserving, one
-  `CandidateScore` per input -- the literal "every candidate emits a score"
-  acceptance criterion). Does not sort or pick a winner; that's a separate,
-  downstream concern this function doesn't decide, mirroring how
-  `retrieval::prerequisite`'s filter and `retrieval::cosine`'s ranker stay
-  decoupled from each other in the sibling `bank` crate.
+  f32` (sums all six terms for one candidate, matching architecture §3.7's
+  formula exactly), and `score_candidates(candidates: &[(String,
+  CandidateScoreInputs)], weights) -> Vec<CandidateScore>` (scores every
+  candidate, order-preserving, one `CandidateScore` per input -- the
+  literal "every candidate emits a score" acceptance criterion). Does not
+  sort or pick a winner; that's a separate, downstream concern this
+  function doesn't decide, mirroring how `retrieval::prerequisite`'s filter
+  and `retrieval::cosine`'s ranker stay decoupled from each other in the
+  sibling `bank` crate.
 - `weights_config.rs` -- `weights_from_env() -> ScoreWeights` (reads
   `RANKING_WEIGHT_TRIGGER_MATCH`, `RANKING_WEIGHT_COVERAGE_URGENCY`,
-  `RANKING_WEIGHT_AUTHORITY_MATCH`, and `RANKING_WEIGHT_PRIORITY` from
+  `RANKING_WEIGHT_AUTHORITY_MATCH`, `RANKING_WEIGHT_PRIORITY`,
+  `RANKING_WEIGHT_RECENCY_PENALTY`, and `RANKING_WEIGHT_ASKED_PENALTY` from
   process environment, falling back to `DEFAULT_WEIGHTS`'s matching field
   when a variable is unset, unparsable, or non-finite),
   `active_weights_log_line(weights: &ScoreWeights) -> String` (formats the
-  active weight set into one run-log line), and the four `*_WEIGHT_ENV`
-  name constants. Environment variables are the config channel because the
+  active weight set into one run-log line), and the six `*_WEIGHT_ENV` name
+  constants. Environment variables are the config channel because the
   replay harness's `SubprocessCoreEngine` (`apps/service/.../replay/
   harness/subprocess_engine.py`) invokes the shared core over a fixed
   `--seed`-plus-stdin contract -- setting environment on the subprocess
   before launch tunes weights per run without touching that contract.
-- `mod.rs` -- declares `pub mod authority_match;`, `pub mod
-  candidate_score;`, `pub mod coverage_urgency;`, `pub mod priority;`, `pub
-  mod trigger_match;`, and `pub mod weights_config;`, and re-exports every
-  public item from each.
+- `mod.rs` -- declares `pub mod asked_penalty;`, `pub mod authority_match;`,
+  `pub mod candidate_score;`, `pub mod coverage_urgency;`, `pub mod
+  priority;`, `pub mod recency_penalty;`, `pub mod trigger_match;`, and
+  `pub mod weights_config;`, and re-exports every public item from each.
 
 Tests added: 6 for `authority_match.rs` (a fully-matched candidate scores
 higher than an unmatched one -- the FR-4.7 acceptance criterion itself; a
@@ -144,24 +189,39 @@ does). 5 for `coverage_urgency.rs` (same shape again). 6 for `priority.rs`
 (best-priority-scores-higher, strict monotonic decrease as raw priority
 grows, zero weight ignores it, linear scaling, non-positive priority
 degrades to `0.0` instead of panicking, default weight never lets a better
-priority score lower). 6 for `candidate_score.rs`: every candidate in the
-input emits a score (length-preserving, the feature's own acceptance
-criterion, made concrete), order/id preservation, an empty input emits an
-empty output, the total is exactly the sum of the four terms (checked
-against a hand-computed expected value), a maximally-matched candidate
-outscores a maximally-unmatched one even at an extreme priority gap, and
-zeroing one term's weight changes the total by exactly that term's own
-contribution and no more -- proving the four terms are summed independently
-rather than interacting. 9 for `weights_config.rs`: `resolve_weight` falls
-back to default when unset, when unparsable, and for non-finite (`NaN`/
-`inf`) overrides, and reads a valid override; `weights_from_env` reads
-every configured override, falls back to `DEFAULT_WEIGHTS` entirely when
-nothing is set, and ignores an unparsable override on one field while still
-reading a valid override on another; the run-log line names every active
-weight; and a configured weight set reaches the formatted run-log line
-end-to-end (the literal "run log emits the active weight set" acceptance
-criterion). The env-mutating tests share a `Mutex` so they don't interleave
-across `cargo test`'s threads within this binary.
+priority score lower). 4 for `asked_penalty.rs` (an asked thread scores
+lower than an unasked one -- the FR-6.7 acceptance criterion itself; an
+unasked thread contributes nothing; an asked thread contributes exactly
+`-weight`; a zero weight makes the term ignore asked state entirely; the
+term scales linearly with weight). 5 for `recency_penalty.rs` (same shape
+as `asked_penalty.rs`'s tests, one-for-one: a recently-surfaced thread
+scores lower than one that wasn't -- this feature's own acceptance
+criterion; a thread with no recent similar nudge contributes nothing; a
+recently-surfaced thread contributes exactly `-weight`; a zero weight makes
+the term ignore recency entirely; the term scales linearly with weight). 9
+for `candidate_score.rs`: every candidate in the input emits a score
+(length-preserving, feature 2's own acceptance criterion, made concrete),
+order/id preservation, an empty input emits an empty output, the total is
+exactly the sum of all terms (checked against a hand-computed expected
+value), an already-asked candidate emits a reduced score (feature 4's
+acceptance criterion), a recently-surfaced candidate emits a reduced score
+(this feature's acceptance criterion), the recency and asked penalties
+stack independently (a candidate that is both recently-surfaced and asked
+scores lower still than one that is only recently-surfaced), a
+maximally-matched candidate outscores a maximally-unmatched one even at an
+extreme priority gap, and zeroing one term's weight changes the total by
+exactly that term's own contribution and no more -- proving every term is
+summed independently rather than interacting. 9 for `weights_config.rs`:
+`resolve_weight` falls back to default when unset, when unparsable, and
+for non-finite (`NaN`/`inf`) overrides, and reads a valid override;
+`weights_from_env` reads every configured override, falls back to
+`DEFAULT_WEIGHTS` entirely when nothing is set, and ignores an unparsable
+override on one field while still reading a valid override on another; the
+run-log line names every active weight; and a configured weight set
+reaches the formatted run-log line end-to-end (the literal "run log emits
+the active weight set" acceptance criterion). The env-mutating tests share
+a `Mutex` so they don't interleave across `cargo test`'s threads within
+this binary.
 
 ## What's not done here
 
@@ -171,15 +231,15 @@ across `cargo test`'s threads within this binary.
   next module to this crate (e.g. the phrasing/slot-instantiation half of
   architecture §3.7) should extend `lib.rs` with an additional `pub mod`
   line, not restructure what's here.
-- `recency_penalty` and `asked_penalty`, the remaining two terms of
-  architecture §3.7's full six-term formula ("similar nudge surfaced
-  recently" and "operator tapped 'Asked it' on this thread") -- out of this
-  feature's stated scope ("trigger match, coverage urgency, authority
-  match, and priority"), and each needs a state source (recently-surfaced
-  nudges, "Asked it" taps) that doesn't exist anywhere in this repo yet.
-  `candidate_score::score_candidate`/`score_candidates` sum exactly the
-  four terms this feature names; extending the sum to six terms once those
-  two exist is a follow-up feature's job, not a gap in this one.
+- A real state source for either penalty flag: no module in this repo
+  tracks recently-surfaced nudges (for `was_recently_surfaced`) or "Asked
+  it" taps (for `is_asked`) yet -- both `recency_penalty_term` and
+  `asked_penalty_term` are written against the contract those trackers
+  will eventually satisfy, same as `coverage_urgency_term` below.
+  `candidate_score::score_candidate`/`score_candidates` now sum all six
+  terms of architecture §3.7's formula; assembling the two boolean flags
+  from live state is whichever caller wires `store`/a nudge history to
+  `score` (see the loading bullet below).
 - Producing a real `coverage_urgency` value -- no coverage tracker (which
   template sections are filled, how much meeting time remains) exists
   anywhere in this repo; `coverage_urgency_term` and `CandidateScoreInputs`

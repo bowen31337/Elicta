@@ -1,4 +1,4 @@
-//! Reads the ranking formula's `w₁..w₄` weights (architecture §3.7) from
+//! Reads the ranking formula's `w₁..w₆` weights (architecture §3.7) from
 //! environment configuration rather than the hardcoded [`DEFAULT_WEIGHTS`]
 //! placeholder, so the replay harness (architecture §9) can tune them per
 //! run without recompiling. The harness invokes the shared core as a
@@ -24,6 +24,8 @@ pub const COVERAGE_URGENCY_WEIGHT_ENV: &str = "RANKING_WEIGHT_COVERAGE_URGENCY";
 pub const AUTHORITY_MATCH_WEIGHT_ENV: &str = "RANKING_WEIGHT_AUTHORITY_MATCH";
 /// Environment variable read for [`ScoreWeights::priority`].
 pub const PRIORITY_WEIGHT_ENV: &str = "RANKING_WEIGHT_PRIORITY";
+/// Environment variable read for [`ScoreWeights::recency_penalty`].
+pub const RECENCY_PENALTY_WEIGHT_ENV: &str = "RANKING_WEIGHT_RECENCY_PENALTY";
 /// Environment variable read for [`ScoreWeights::asked_penalty`].
 pub const ASKED_PENALTY_WEIGHT_ENV: &str = "RANKING_WEIGHT_ASKED_PENALTY";
 
@@ -38,7 +40,7 @@ fn resolve_weight(raw: Option<&str>, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-/// Reads all four weights from environment configuration, falling back to
+/// Reads all six weights from environment configuration, falling back to
 /// [`DEFAULT_WEIGHTS`] field-by-field for whichever are unset or
 /// unparsable -- the "configuration, not hardcoded constants" mechanism
 /// architecture §3.7 calls for, in the one form a subprocess-boundary
@@ -61,6 +63,10 @@ pub fn weights_from_env() -> ScoreWeights {
             std::env::var(PRIORITY_WEIGHT_ENV).ok().as_deref(),
             DEFAULT_WEIGHTS.priority,
         ),
+        recency_penalty: resolve_weight(
+            std::env::var(RECENCY_PENALTY_WEIGHT_ENV).ok().as_deref(),
+            DEFAULT_WEIGHTS.recency_penalty,
+        ),
         asked_penalty: resolve_weight(
             std::env::var(ASKED_PENALTY_WEIGHT_ENV).ok().as_deref(),
             DEFAULT_WEIGHTS.asked_penalty,
@@ -76,11 +82,12 @@ pub fn weights_from_env() -> ScoreWeights {
 /// so every run's log records precisely the weights that scored it.
 pub fn active_weights_log_line(weights: &ScoreWeights) -> String {
     format!(
-        "active ranking weights: trigger_match={:.4} coverage_urgency={:.4} authority_match={:.4} priority={:.4} asked_penalty={:.4}",
+        "active ranking weights: trigger_match={:.4} coverage_urgency={:.4} authority_match={:.4} priority={:.4} recency_penalty={:.4} asked_penalty={:.4}",
         weights.trigger_match,
         weights.coverage_urgency,
         weights.authority_match,
         weights.priority,
+        weights.recency_penalty,
         weights.asked_penalty
     )
 }
@@ -101,6 +108,7 @@ mod tests {
             COVERAGE_URGENCY_WEIGHT_ENV,
             AUTHORITY_MATCH_WEIGHT_ENV,
             PRIORITY_WEIGHT_ENV,
+            RECENCY_PENALTY_WEIGHT_ENV,
             ASKED_PENALTY_WEIGHT_ENV,
         ] {
             std::env::remove_var(key);
@@ -136,6 +144,7 @@ mod tests {
         std::env::set_var(COVERAGE_URGENCY_WEIGHT_ENV, "0.3");
         std::env::set_var(AUTHORITY_MATCH_WEIGHT_ENV, "0.2");
         std::env::set_var(PRIORITY_WEIGHT_ENV, "0.1");
+        std::env::set_var(RECENCY_PENALTY_WEIGHT_ENV, "0.15");
         std::env::set_var(ASKED_PENALTY_WEIGHT_ENV, "0.05");
 
         let weights = weights_from_env();
@@ -148,6 +157,7 @@ mod tests {
                 coverage_urgency: 0.3,
                 authority_match: 0.2,
                 priority: 0.1,
+                recency_penalty: 0.15,
                 asked_penalty: 0.05,
             }
         );
@@ -181,6 +191,7 @@ mod tests {
             coverage_urgency: 0.3,
             authority_match: 0.2,
             priority: 0.1,
+            recency_penalty: 0.15,
             asked_penalty: 0.05,
         };
         let line = active_weights_log_line(&weights);
@@ -188,6 +199,7 @@ mod tests {
         assert!(line.contains("0.3000"));
         assert!(line.contains("0.2000"));
         assert!(line.contains("0.1000"));
+        assert!(line.contains("0.1500"));
         assert!(line.contains("0.0500"));
     }
 
@@ -199,6 +211,7 @@ mod tests {
         std::env::set_var(COVERAGE_URGENCY_WEIGHT_ENV, "0.05");
         std::env::set_var(AUTHORITY_MATCH_WEIGHT_ENV, "0.03");
         std::env::set_var(PRIORITY_WEIGHT_ENV, "0.02");
+        std::env::set_var(RECENCY_PENALTY_WEIGHT_ENV, "0.04");
         std::env::set_var(ASKED_PENALTY_WEIGHT_ENV, "0.01");
 
         let weights = weights_from_env();
@@ -210,6 +223,7 @@ mod tests {
         assert!(line.contains("0.0500"));
         assert!(line.contains("0.0300"));
         assert!(line.contains("0.0200"));
+        assert!(line.contains("0.0400"));
         assert!(line.contains("0.0100"));
     }
 }

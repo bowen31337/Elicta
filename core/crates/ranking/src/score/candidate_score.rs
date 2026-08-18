@@ -2,19 +2,20 @@ use super::asked_penalty::asked_penalty_term;
 use super::authority_match::authority_match_term;
 use super::coverage_urgency::coverage_urgency_term;
 use super::priority::priority_term;
+use super::recency_penalty::recency_penalty_term;
 use super::trigger_match::trigger_match_term;
 
 /// The already-computed per-candidate values this feature scores --
-/// architecture §3.7's ranking formula minus the `recency_penalty` term,
-/// which is a separate, not-yet-built concern (no module in this repo
-/// tracks recently-surfaced nudges yet). Every field here is a plain scalar
-/// rather than the richer type it derives from -- `trigger_match` is a
-/// cosine similarity from `core/crates/bank`'s
+/// architecture §3.7's full six-term ranking formula. Every field here is a
+/// plain scalar rather than the richer type it derives from -- `trigger_match`
+/// is a cosine similarity from `core/crates/bank`'s
 /// `retrieval::cosine::RankedCandidate::score`, `authority_match` is
 /// `compute_candidate_authority_match`'s output, `priority` is the
 /// candidate's raw stored `priority` column, `is_asked` is whether the
 /// operator has already tapped the "Asked it" chip for this candidate's
-/// thread (PRD FR-6.7; `coverage_slots.satisfied_at` being non-null) --
+/// thread (PRD FR-6.7; `coverage_slots.satisfied_at` being non-null),
+/// `was_recently_surfaced` is whether a similar nudge was already surfaced
+/// recently in the same meeting (architecture §3.7's `recency_penalty`) --
 /// matching every individual term function's own "pure function, no I/O"
 /// contract (architecture §3.7).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,6 +24,7 @@ pub struct CandidateScoreInputs {
     pub coverage_urgency: f32,
     pub authority_match: f32,
     pub priority: i64,
+    pub was_recently_surfaced: bool,
     pub is_asked: bool,
 }
 
@@ -37,6 +39,7 @@ pub struct ScoreWeights {
     pub coverage_urgency: f32,
     pub authority_match: f32,
     pub priority: f32,
+    pub recency_penalty: f32,
     pub asked_penalty: f32,
 }
 
@@ -52,6 +55,7 @@ pub const DEFAULT_WEIGHTS: ScoreWeights = ScoreWeights {
     coverage_urgency: super::coverage_urgency::DEFAULT_COVERAGE_URGENCY_WEIGHT,
     authority_match: super::authority_match::DEFAULT_AUTHORITY_MATCH_WEIGHT,
     priority: super::priority::DEFAULT_PRIORITY_WEIGHT,
+    recency_penalty: super::recency_penalty::DEFAULT_RECENCY_PENALTY_WEIGHT,
     asked_penalty: super::asked_penalty::DEFAULT_ASKED_PENALTY_WEIGHT,
 };
 
@@ -62,20 +66,22 @@ pub struct CandidateScore {
     pub score: f32,
 }
 
-/// Sums a single candidate's terms into its total score -- the
-/// `w₁·trigger_match + w₂·coverage_urgency + w₃·authority_match +
-/// w₄·priority - asked_penalty` slice of architecture §3.7's formula this
-/// feature covers. Each term is computed by its own already-tested
+/// Sums a single candidate's terms into its total score -- architecture
+/// §3.7's full formula: `w₁·trigger_match + w₂·coverage_urgency +
+/// w₃·authority_match + w₄·priority − w₅·recency_penalty −
+/// w₆·asked_penalty`. Each term is computed by its own already-tested
 /// function; this function only adds them, so a bug in any one term's shape
 /// (sign, scaling, degenerate-input handling) is caught by that term's own
-/// tests rather than needing to be re-proven here. `asked_penalty_term`
-/// already returns a non-positive contribution when `is_asked` is set (see
-/// its own doc comment), so this sum needs no separate subtraction step.
+/// tests rather than needing to be re-proven here. `recency_penalty_term`
+/// and `asked_penalty_term` already return a non-positive contribution when
+/// their respective flag is set (see each function's own doc comment), so
+/// this sum needs no separate subtraction step.
 pub fn score_candidate(inputs: &CandidateScoreInputs, weights: &ScoreWeights) -> f32 {
     trigger_match_term(inputs.trigger_match, weights.trigger_match)
         + coverage_urgency_term(inputs.coverage_urgency, weights.coverage_urgency)
         + authority_match_term(inputs.authority_match, weights.authority_match)
         + priority_term(inputs.priority, weights.priority)
+        + recency_penalty_term(inputs.was_recently_surfaced, weights.recency_penalty)
         + asked_penalty_term(inputs.is_asked, weights.asked_penalty)
 }
 
@@ -118,11 +124,30 @@ mod tests {
         priority: i64,
         is_asked: bool,
     ) -> CandidateScoreInputs {
+        recency_inputs(
+            trigger_match,
+            coverage_urgency,
+            authority_match,
+            priority,
+            false,
+            is_asked,
+        )
+    }
+
+    fn recency_inputs(
+        trigger_match: f32,
+        coverage_urgency: f32,
+        authority_match: f32,
+        priority: i64,
+        was_recently_surfaced: bool,
+        is_asked: bool,
+    ) -> CandidateScoreInputs {
         CandidateScoreInputs {
             trigger_match,
             coverage_urgency,
             authority_match,
             priority,
+            was_recently_surfaced,
             is_asked,
         }
     }
@@ -162,10 +187,12 @@ mod tests {
             coverage_urgency: 1.0,
             authority_match: 1.0,
             priority: 1.0,
+            recency_penalty: 1.0,
             asked_penalty: 1.0,
         };
         // trigger_match_term = 0.5, coverage_urgency_term = 0.25,
         // authority_match_term = 1.0, priority_term = 1.0 / 2 = 0.5,
+        // recency_penalty_term = 0.0 (not recently surfaced),
         // asked_penalty_term = 0.0 (not asked)
         let total = score_candidate(&inputs(0.5, 0.25, 1.0, 2), &weights);
         assert!((total - 2.25).abs() < 1e-6);
@@ -179,6 +206,29 @@ mod tests {
         let unasked_score = score_candidate(&same_inputs_unasked, &weights);
         let asked_score = score_candidate(&same_inputs_asked, &weights);
         assert!(asked_score < unasked_score);
+    }
+
+    #[test]
+    fn a_recently_surfaced_thread_emits_a_reduced_score() {
+        let weights = DEFAULT_WEIGHTS;
+        let not_recent = recency_inputs(0.5, 0.5, 0.5, 2, false, false);
+        let recent = recency_inputs(0.5, 0.5, 0.5, 2, true, false);
+        let not_recent_score = score_candidate(&not_recent, &weights);
+        let recent_score = score_candidate(&recent, &weights);
+        assert!(recent_score < not_recent_score);
+    }
+
+    #[test]
+    fn recency_and_asked_penalties_stack_independently() {
+        let weights = DEFAULT_WEIGHTS;
+        let neither = recency_inputs(0.5, 0.5, 0.5, 2, false, false);
+        let recent_only = recency_inputs(0.5, 0.5, 0.5, 2, true, false);
+        let both = recency_inputs(0.5, 0.5, 0.5, 2, true, true);
+        let neither_score = score_candidate(&neither, &weights);
+        let recent_only_score = score_candidate(&recent_only, &weights);
+        let both_score = score_candidate(&both, &weights);
+        assert!(recent_only_score < neither_score);
+        assert!(both_score < recent_only_score);
     }
 
     #[test]
@@ -196,6 +246,7 @@ mod tests {
             coverage_urgency: 1.0,
             authority_match: 1.0,
             priority: 1.0,
+            recency_penalty: 1.0,
             asked_penalty: 1.0,
         };
         let trigger_zeroed = ScoreWeights {
