@@ -89,6 +89,7 @@ mod tests {
         CoverageSlot {
             template_section: template_section.to_string(),
             fill_state,
+            satisfied_at: None,
         }
     }
 

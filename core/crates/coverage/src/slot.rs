@@ -75,12 +75,18 @@ impl rusqlite::types::FromSql for FillState {
     }
 }
 
-/// One row of the coverage matrix for a meeting: a template section and the
-/// [`FillState`] it currently maps to.
+/// One row of the coverage matrix for a meeting: a template section, the
+/// [`FillState`] it currently maps to, and — when an operator's `Asked it`
+/// chip tap put it there (PRD FR-6.7) — the timestamp of that tap.
+///
+/// `satisfied_at` is `None` until the chip is tapped, and is what lets a
+/// suggestion facility tell "confirmed covered, don't re-suggest" apart
+/// from a `Filled` state reached some other way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoverageSlot {
     pub template_section: String,
     pub fill_state: FillState,
+    pub satisfied_at: Option<String>,
 }
 
 #[cfg(test)]

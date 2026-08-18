@@ -46,6 +46,11 @@ impl CoverageStore {
     /// Maps `template_section` to `fill_state` for `meeting_id`, replacing
     /// whatever it was previously mapped to. Idempotent: setting the same
     /// section to the same state twice leaves exactly one row behind.
+    ///
+    /// Leaves `satisfied_at` untouched either way — this is the general
+    /// fill-state mapping used as the meeting progresses (PRD FR-8.2), not
+    /// the operator's `Asked it` chip tap. Use [`Self::mark_satisfied`] for
+    /// that (PRD FR-6.7).
     pub fn set_fill_state(
         &self,
         meeting_id: &str,
@@ -58,6 +63,33 @@ impl CoverageStore {
              ON CONFLICT (meeting_id, template_section)
              DO UPDATE SET fill_state = excluded.fill_state",
             params![meeting_id, template_section, fill_state],
+        )?;
+        Ok(())
+    }
+
+    /// Marks `template_section` satisfied for `meeting_id`: sets its
+    /// [`FillState`] to [`FillState::Filled`] and records `satisfied_at`,
+    /// the moment the operator tapped the `Asked it` chip (PRD FR-6.7).
+    ///
+    /// `satisfied_at` is carried as the caller's own timestamp string
+    /// (mirroring [`crate`]'s other stores) rather than read from the
+    /// system clock here, so this store stays deterministic to test and
+    /// agnostic to whatever clock or format the caller uses.
+    ///
+    /// Idempotent like [`Self::set_fill_state`]: tapping the chip again
+    /// just overwrites the timestamp with the new tap's.
+    pub fn mark_satisfied(
+        &self,
+        meeting_id: &str,
+        template_section: &str,
+        satisfied_at: &str,
+    ) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO coverage_slots (meeting_id, template_section, fill_state, satisfied_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (meeting_id, template_section)
+             DO UPDATE SET fill_state = excluded.fill_state, satisfied_at = excluded.satisfied_at",
+            params![meeting_id, template_section, FillState::Filled, satisfied_at],
         )?;
         Ok(())
     }
@@ -81,11 +113,34 @@ impl CoverageStore {
         Ok(state)
     }
 
+    /// The `satisfied_at` timestamp recorded by an operator's `Asked it`
+    /// chip tap (PRD FR-6.7) for `template_section` in `meeting_id` — `None`
+    /// if the chip has never been tapped for that section (whether because
+    /// the section has never been set at all, or because it's been set only
+    /// via [`Self::set_fill_state`]).
+    pub fn satisfied_at(
+        &self,
+        meeting_id: &str,
+        template_section: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let satisfied_at = self
+            .conn
+            .query_row(
+                "SELECT satisfied_at FROM coverage_slots
+                 WHERE meeting_id = ?1 AND template_section = ?2",
+                params![meeting_id, template_section],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(satisfied_at)
+    }
+
     /// Every template section mapped so far for `meeting_id`, ordered by
     /// section name — the coverage matrix as it currently stands.
     pub fn slots(&self, meeting_id: &str) -> Result<Vec<CoverageSlot>, StoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT template_section, fill_state FROM coverage_slots
+            "SELECT template_section, fill_state, satisfied_at FROM coverage_slots
              WHERE meeting_id = ?1
              ORDER BY template_section ASC",
         )?;
@@ -93,6 +148,7 @@ impl CoverageStore {
             Ok(CoverageSlot {
                 template_section: row.get(0)?,
                 fill_state: row.get::<_, FillState>(1)?,
+                satisfied_at: row.get::<_, Option<String>>(2)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(StoreError::from)
@@ -106,6 +162,7 @@ fn ensure_schema(conn: &Connection) -> Result<(), StoreError> {
             meeting_id       TEXT NOT NULL,
             template_section TEXT NOT NULL,
             fill_state       TEXT NOT NULL,
+            satisfied_at     TEXT,
             PRIMARY KEY (meeting_id, template_section)
         );
         ",
@@ -122,7 +179,123 @@ mod tests {
         let store = CoverageStore::open_in_memory().unwrap();
 
         assert_eq!(store.fill_state("meeting-1", "scope").unwrap(), None);
+        assert_eq!(store.satisfied_at("meeting-1", "scope").unwrap(), None);
         assert!(store.slots("meeting-1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_section_only_ever_mapped_via_set_fill_state_has_no_satisfied_at() {
+        let store = CoverageStore::open_in_memory().unwrap();
+
+        store
+            .set_fill_state("meeting-1", "scope", FillState::Filled)
+            .unwrap();
+
+        assert_eq!(store.satisfied_at("meeting-1", "scope").unwrap(), None);
+    }
+
+    #[test]
+    fn marking_a_section_satisfied_fills_it_and_records_the_tap_timestamp() {
+        let store = CoverageStore::open_in_memory().unwrap();
+
+        store
+            .mark_satisfied("meeting-1", "scope", "2026-08-19T10:00:00Z")
+            .unwrap();
+
+        assert_eq!(
+            store.fill_state("meeting-1", "scope").unwrap(),
+            Some(FillState::Filled)
+        );
+        assert_eq!(
+            store.satisfied_at("meeting-1", "scope").unwrap(),
+            Some("2026-08-19T10:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn marking_a_section_satisfied_again_overwrites_the_timestamp_rather_than_duplicating_the_row()
+    {
+        let store = CoverageStore::open_in_memory().unwrap();
+
+        store
+            .mark_satisfied("meeting-1", "scope", "2026-08-19T10:00:00Z")
+            .unwrap();
+        store
+            .mark_satisfied("meeting-1", "scope", "2026-08-19T11:00:00Z")
+            .unwrap();
+
+        assert_eq!(
+            store.satisfied_at("meeting-1", "scope").unwrap(),
+            Some("2026-08-19T11:00:00Z".to_string())
+        );
+        assert_eq!(store.slots("meeting-1").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn set_fill_state_leaves_an_existing_satisfied_at_timestamp_untouched() {
+        let store = CoverageStore::open_in_memory().unwrap();
+
+        store
+            .mark_satisfied("meeting-1", "scope", "2026-08-19T10:00:00Z")
+            .unwrap();
+        store
+            .set_fill_state("meeting-1", "scope", FillState::Partial)
+            .unwrap();
+
+        assert_eq!(
+            store.fill_state("meeting-1", "scope").unwrap(),
+            Some(FillState::Partial)
+        );
+        assert_eq!(
+            store.satisfied_at("meeting-1", "scope").unwrap(),
+            Some("2026-08-19T10:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn slots_carries_each_sections_satisfied_at_alongside_its_fill_state() {
+        let store = CoverageStore::open_in_memory().unwrap();
+
+        store
+            .mark_satisfied("meeting-1", "scope", "2026-08-19T10:00:00Z")
+            .unwrap();
+        store
+            .set_fill_state("meeting-1", "risks", FillState::Empty)
+            .unwrap();
+
+        let slots = store.slots("meeting-1").unwrap();
+        let scope = slots
+            .iter()
+            .find(|s| s.template_section == "scope")
+            .unwrap();
+        let risks = slots
+            .iter()
+            .find(|s| s.template_section == "risks")
+            .unwrap();
+
+        assert_eq!(scope.satisfied_at, Some("2026-08-19T10:00:00Z".to_string()));
+        assert_eq!(risks.satisfied_at, None);
+    }
+
+    #[test]
+    fn a_satisfied_at_timestamp_persists_across_a_reopened_connection() {
+        let path = temp_db_path("satisfied-at-persists-across-reopen");
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let store = CoverageStore::open(&path).unwrap();
+            store
+                .mark_satisfied("meeting-1", "scope", "2026-08-19T10:00:00Z")
+                .unwrap();
+        }
+
+        let reopened = CoverageStore::open(&path).unwrap();
+        assert_eq!(
+            reopened.satisfied_at("meeting-1", "scope").unwrap(),
+            Some("2026-08-19T10:00:00Z".to_string())
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
