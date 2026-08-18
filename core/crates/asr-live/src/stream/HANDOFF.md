@@ -124,6 +124,23 @@ required for it specifically.
   re-evaluation has already merged, and it carries the same FR-2.3 fields
   a `Final` would.
 
+- `frozen_match.rs` — `TokenStability`/`StableInterim`/`CommittedCandidate`/
+  `commit_on_frozen_match` (PRD FR-2.4, architecture §14.2 "use the
+  frozen-but-not-ended signal"). Deepgram distinguishes `is_final` (a
+  frozen interim's text will not be revised) from `speech_final` (the
+  endpoint itself firing) — two independent bits `backend::InterimHypothesis`
+  has no field for yet. `TokenStability` (`Frozen`/`Revisable`) and
+  `StableInterim` (an `InterimHypothesis` paired with that bit) let a caller
+  who does have it from the wire attach it, the same way `interim_latency.rs`
+  takes `observed_at` rather than reading a clock of its own.
+  `commit_on_frozen_match(&StableInterim, matcher)` runs `matcher` against
+  the interim's text only when `stability` is `Frozen`, returning a
+  `CommittedCandidate` on a match — immediately, without waiting for that
+  stream's endpoint. A match against `Revisable` text never reaches
+  `matcher` at all: committing on text the vendor might still rewrite is
+  exactly the invalidation-prone case immutable partials (FR-2.4) exist to
+  avoid, so revisable text is left for the endpoint to confirm instead.
+
 ## Suggested integration point
 
 Whatever currently drains `TranscriptionBackend::poll_events()` and hands
@@ -176,6 +193,16 @@ phrasing refers to) should call `on_endpoint` on every
 it returns `Some` for — skipping `None` (an `Interim`) — rather than
 serialising `FinalUtterance` itself, so `text` and `audio_ref` never
 accidentally leak across that boundary.
+
+Whoever owns the real vendor `TranscriptionBackend` connection (Deepgram in
+particular — it is the vendor architecture §14.2 names for this signal)
+should read that vendor's per-message `is_final` bit off the wire, wrap
+each `InterimHypothesis` it produces in a `StableInterim` with the matching
+`TokenStability`, and run the trigger gate's lexicon scan through
+`commit_on_frozen_match` before that stream's endpoint fires — not just
+once the utterance closes. A `CommittedCandidate` needs no discard path if
+the endpoint later closes the utterance differently: the frozen span it
+matched against is, by the vendor's own guarantee, never rewritten.
 
 ## Deliberately out of scope here
 
@@ -256,8 +283,27 @@ accidentally leak across that boundary.
   far"), and picking a serialisation format is a decision for whoever
   actually owns the endpoint FR-2.3 emits over, not this module. This
   module's job ends at producing the right plain Rust value.
+- Adding an `is_final`-shaped field to `backend::InterimHypothesis` itself
+  is not attempted: that type lives in `backend/`, outside this directory,
+  and this module can express the same distinction as a caller-supplied
+  wrapper (`StableInterim`) without changing it — the same reasoning
+  `check_interim_latency` takes `observed_at` as a parameter rather than
+  asking `backend::event` to carry a clock.
+- The actual lexicon/keyterm match `commit_on_frozen_match`'s `matcher`
+  parameter runs is not implemented here: that logic belongs to the
+  trigger gate (a separate crate, per architecture's component diagram),
+  and this module stays dependency-free of it the same way `fake.rs` and
+  `endpointing_threshold.rs` already do for their own reasons. `matcher` is
+  `impl FnOnce(&str) -> Option<M>` precisely so the trigger gate's real scan
+  can be passed in without this crate depending on it.
+- Deciding what happens to a stream's *later* endpoint once a
+  `CommittedCandidate` has already fired for it (e.g. suppressing a
+  duplicate nudge when `on_endpoint` subsequently confirms the same text)
+  is not attempted: that reconciliation is downstream of both this module
+  and `on_endpoint`, and belongs with whoever actually surfaces nudges to
+  the operator, not with either event-shaping module here.
 
-Verified with `cargo test` and `cargo clippy` (82 passing tests, no
+Verified with `cargo test` and `cargo clippy` (94 passing tests, no
 warnings) in a scratch crate mirroring this module tree plus the existing
 `backend` module, since the crate-level `Cargo.toml`/`lib.rs` in this
 worktree only registers `backend` and `tokens` as of this writing. That

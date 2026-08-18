@@ -37,6 +37,13 @@
 //! FR-2.3 names, and leaving `text`/`audio_ref` behind as this crate's own
 //! bookkeeping.
 //!
+//! And [`TokenStability`]/[`commit_on_frozen_match`] (PRD FR-2.4,
+//! architecture §14.2 "use the frozen-but-not-ended signal"): the
+//! distinction between a vendor's frozen (`is_final`, immutable) tokens and
+//! that stream's endpoint (`speech_final`) actually firing, so a match
+//! against already-immutable text can commit to a [`CommittedCandidate`]
+//! ahead of the endpoint instead of waiting for it.
+//!
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
@@ -45,6 +52,7 @@ mod event;
 mod fake;
 mod final_utterance_event;
 mod first_partial_delay;
+mod frozen_match;
 mod interim_latency;
 mod reevaluate;
 mod turn_silence;
@@ -53,6 +61,7 @@ pub use endpointing_threshold::{CaptureMode, EndpointingThresholds, DEFAULT_ENDP
 pub use event::StreamEvent;
 pub use final_utterance_event::{on_endpoint, FinalUtteranceEvent};
 pub use fake::PrematureEndpointFakeBackend;
+pub use frozen_match::{commit_on_frozen_match, CommittedCandidate, StableInterim, TokenStability};
 pub use first_partial_delay::{
     FirstPartialDelay, FirstPartialDelayOutOfRange, FIRST_PARTIAL_DELAY, MAX_FIRST_PARTIAL_DELAY,
     MIN_FIRST_PARTIAL_DELAY,
