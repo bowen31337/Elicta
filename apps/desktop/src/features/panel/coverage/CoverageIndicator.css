@@ -1,0 +1,23 @@
+.coverage-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.coverage-indicator__count {
+  padding: 0.125rem 0.4rem;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.coverage-indicator__time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.coverage-indicator--pending .coverage-indicator__count {
+  opacity: 0.5;
+  font-style: italic;
+}

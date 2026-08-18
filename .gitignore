@@ -39,6 +39,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 coverage/
+# `coverage/` above targets test-coverage report output, but also matches
+# the desktop panel's coverage feature directory by name -- un-ignore it.
+!apps/desktop/src/features/panel/coverage/
 *.log
 *.bak
 *.tmp
