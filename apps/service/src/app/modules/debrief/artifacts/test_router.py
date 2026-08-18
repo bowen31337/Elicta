@@ -4,24 +4,30 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.modules.debrief.artifacts.models import (
     CoverageMatrixEntry,
     CoverageMatrixStatus,
     RequirementsCoverageMatrix,
     RequirementsState,
 )
-from app.modules.debrief.artifacts.router import build_full_prd_router
+from app.modules.debrief.artifacts.router import (
+    build_full_prd_router,
+    build_project_brief_router,
+)
 from app.modules.debrief.pipeline.models import (
     ArtifactCitation,
+    BmadAnalystChainStatus,
     BmadArtifactSet,
     ClaimProvenance,
     DecisionLogEntry,
     FillState,
     FollowUpEmailDraft,
     ProjectBriefDraft,
+    SessionBmadAnalystChain,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -185,3 +191,55 @@ def test_the_requirements_state_route_is_not_registered_when_get_requirements_st
 
     assert response.status_code == 404
     assert response.json()["detail"] != "requirements state not found"
+
+
+def make_bmad_chain(
+    session_id: str = "session-1", *, status: BmadAnalystChainStatus = BmadAnalystChainStatus.COMPLETE,
+) -> SessionBmadAnalystChain:
+    return SessionBmadAnalystChain(
+        session_id=session_id,
+        status=status,
+        engine="claude-agent-sdk",
+        artifacts=make_artifact_set() if status == BmadAnalystChainStatus.COMPLETE else None,
+        requested_at=FIXED,
+        completed_at=FIXED,
+        error=None if status == BmadAnalystChainStatus.COMPLETE else "chain run failed",
+    )
+
+
+def make_project_brief_client(chains: dict[str, SessionBmadAnalystChain]) -> TestClient:
+    async def get_chain(session_id: str) -> SessionBmadAnalystChain | None:
+        return chains.get(session_id)
+
+    app = FastAPI()
+    app.include_router(build_project_brief_router(get_chain))
+    return TestClient(app)
+
+
+def test_getting_a_sessions_draft_project_brief_returns_its_body_and_provenance():
+    client = make_project_brief_client({"session-1": make_bmad_chain("session-1")})
+
+    response = client.get("/api/sessions/session-1/project-brief")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["body"] == "draft brief"
+    assert body["provenance"] == "stated"
+
+
+def test_getting_the_draft_project_brief_for_a_session_with_no_chain_record_returns_404():
+    client = make_project_brief_client({})
+
+    response = client.get("/api/sessions/unknown-session/project-brief")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "draft project brief not found"
+
+
+def test_getting_the_draft_project_brief_for_a_session_whose_chain_run_failed_returns_404():
+    client = make_project_brief_client({"session-1": make_bmad_chain("session-1", status=BmadAnalystChainStatus.FAILED)})
+
+    response = client.get("/api/sessions/session-1/project-brief")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "draft project brief not found"

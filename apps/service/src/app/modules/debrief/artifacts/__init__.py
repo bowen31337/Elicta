@@ -18,7 +18,12 @@ requirements, contradictions, and decisions forward into the next meeting
 (PRD FR-8.9). `build_full_prd_router` also optionally exposes that standing
 state via `GET /{engagement_id}/requirements-state`, so a UI can render each
 decision's `provenance` — `STATED` or `INFERRED` (PRD FR-8.8) — well before
-the full PRD is reachable.
+the full PRD is reachable. `build_project_brief_router` exposes the draft
+project brief the same way, one meeting at a time: a plain
+`GET /api/sessions/{session_id}/project-brief` reading the session's own
+`SessionBmadAnalystChain` (built in `debrief/pipeline`), with no coverage
+gate at all since a single meeting's draft brief needs no cross-meeting
+evidence (PRD FR-8.5).
 """
 
 from __future__ import annotations
@@ -45,7 +50,9 @@ from app.modules.debrief.artifacts.router import (
     GenerateFullPrd,
     GetEngagementCoverageMatrices,
     GetRequirementsState,
+    GetSessionBmadAnalystChain,
     build_full_prd_router,
+    build_project_brief_router,
 )
 from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
 
@@ -61,6 +68,7 @@ __all__ = [
     "GenerateFullPrd",
     "GetEngagementCoverageMatrices",
     "GetRequirementsState",
+    "GetSessionBmadAnalystChain",
     "PrdGenerationRefused",
     "RequirementsContradiction",
     "RequirementsCoverageMatrix",
@@ -69,6 +77,7 @@ __all__ = [
     "SaveRequirementsState",
     "build_coverage_matrix",
     "build_full_prd_router",
+    "build_project_brief_router",
     "merge_requirements_state_forward",
     "require_prd_generation_coverage",
     "summarize_engagement_coverage",

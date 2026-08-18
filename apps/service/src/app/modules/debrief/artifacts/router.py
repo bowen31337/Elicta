@@ -1,4 +1,4 @@
-"""HTTP surface for full PRD generation and standing requirements state (PRD FR-8.8, FR-8.9, FR-8.10).
+"""HTTP surface for full PRD generation, standing requirements state, and the per-meeting draft project brief (PRD FR-8.5, FR-8.8, FR-8.9, FR-8.10).
 
 `build_full_prd_router` takes the coverage lookup, the generation step, and
 (optionally) a requirements-state lookup as injected callables, mirroring
@@ -22,21 +22,39 @@ from the BMAD analyst chain — nothing in this router or in
 `merge_requirements_state_forward` rewrites it — so a `GET` of that state
 lets a UI render the inference marker on every decision as soon as it
 exists, not only once a full PRD can be generated.
+
+`build_project_brief_router` exposes that same early-availability property
+for one artifact specifically: the draft project brief `run_bmad_analyst_chain`
+(PRD FR-4.1, FR-8, in `debrief/pipeline`) already builds from a single
+meeting's classified transcript and persists on its `SessionBmadAnalystChain`
+(PRD FR-8.5). That draft needs no cross-meeting coverage at all — it is
+grounded entirely in the one meeting's own content — so this is a plain
+session-scoped `GET`, not gated the way full PRD generation is.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from app.modules.debrief.pipeline.models import BmadArtifactSet
 from fastapi import APIRouter, HTTPException
 
+from app.modules.debrief.pipeline.models import (
+    BmadArtifactSet,
+    ProjectBriefDraft,
+    SessionBmadAnalystChain,
+)
+
 from .models import RequirementsCoverageMatrix, RequirementsState
-from .prd_gate import DEFAULT_PRD_COVERAGE_THRESHOLD, PrdGenerationRefused, require_prd_generation_coverage
+from .prd_gate import (
+    DEFAULT_PRD_COVERAGE_THRESHOLD,
+    PrdGenerationRefused,
+    require_prd_generation_coverage,
+)
 
 GetEngagementCoverageMatrices = Callable[[str], Awaitable[list[RequirementsCoverageMatrix]]]
 GenerateFullPrd = Callable[[str], Awaitable[BmadArtifactSet]]
 GetRequirementsState = Callable[[str], Awaitable[RequirementsState | None]]
+GetSessionBmadAnalystChain = Callable[[str], Awaitable[SessionBmadAnalystChain | None]]
 
 
 def build_full_prd_router(
@@ -78,5 +96,29 @@ def build_full_prd_router(
             if state is None:
                 raise HTTPException(status_code=404, detail="requirements state not found")
             return state
+
+    return router
+
+
+def build_project_brief_router(get_chain: GetSessionBmadAnalystChain) -> APIRouter:
+    """Build the per-meeting draft project brief read router (PRD FR-8.5).
+
+    `get_chain` looks up the session's `SessionBmadAnalystChain` — the same
+    durable record `run_bmad_analyst_chain` persists — rather than this
+    package computing or caching the brief itself; this router is a plain
+    read of what the pipeline already built. A session with no chain record
+    yet, or one whose run `FAILED` (`artifacts` is `None`), has no draft
+    project brief to return, so both cases 404 rather than one looking like
+    a real brief and the other an error.
+    """
+
+    router = APIRouter(prefix="/api/sessions", tags=["debrief-project-brief"])
+
+    @router.get("/{session_id}/project-brief", response_model=ProjectBriefDraft)
+    async def get_session_project_brief(session_id: str) -> ProjectBriefDraft:
+        chain = await get_chain(session_id)
+        if chain is None or chain.artifacts is None:
+            raise HTTPException(status_code=404, detail="draft project brief not found")
+        return chain.artifacts.project_brief
 
     return router
