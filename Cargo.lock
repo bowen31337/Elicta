@@ -11,6 +11,14 @@ name = "capture"
 version = "0.1.0"
 
 [[package]]
+name = "e2e-tests"
+version = "0.1.0"
+dependencies = [
+ "language",
+ "trigger-gate",
+]
+
+[[package]]
 name = "elicta-app"
 version = "0.1.0"
 

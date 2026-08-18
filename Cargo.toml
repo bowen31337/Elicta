@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "core/shared/app",
     "core/crates/*",
+    "tests/e2e",
 ]
 
 [workspace.package]

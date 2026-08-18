@@ -1,0 +1,13 @@
+[package]
+name = "e2e-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "e2e_tests"
+path = "src/lib.rs"
+
+[dependencies]
+language = { path = "../../core/crates/language" }
+trigger-gate = { path = "../../core/crates/trigger-gate" }
