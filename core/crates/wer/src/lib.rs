@@ -10,18 +10,20 @@
 //! vocabulary — so the published figure reflects the errors that actually
 //! break a trigger, not the errors that don't.
 //!
-//! Four entry points cover what a caller needs: [`score_utterance`] scores
+//! Five entry points cover what a caller needs: [`score_utterance`] scores
 //! one reference/hypothesis pair, [`score_run`] folds a whole run's pairs
-//! into the single published figure NFR-5.7 asks for per language and per
-//! capture mode — partition pairs by language/capture-mode upstream and call
-//! this once per partition — [`RecordPathGate`] turns that figure into a
-//! pass/fail verdict against the record path's per-tier bar (NFR-5.4,
-//! NFR-5.5), and [`LivePathGate`] turns it into a pass/fail verdict against
-//! the live path's per-capture-mode bar (NFR-5.2 monolingual, NFR-5.3
-//! code-switched).
+//! into one figure for a single partition, [`WerPublication`] is the
+//! caller-facing surface for NFR-5.7 — it scores and keeps every
+//! language/capture-mode partition's figure separate, with no method
+//! anywhere that folds them into one global number — [`RecordPathGate`]
+//! turns a partition's figure into a pass/fail verdict against the record
+//! path's per-tier bar (NFR-5.4, NFR-5.5), and [`LivePathGate`] turns it
+//! into a pass/fail verdict against the live path's per-capture-mode bar
+//! (NFR-5.2 monolingual, NFR-5.3 code-switched).
 
 mod entity;
 mod gate;
+mod publish;
 mod score;
 
 pub use entity::{classify, EngagementVocabulary, EntityClass};
@@ -29,4 +31,5 @@ pub use gate::{
     CaptureMode, GateReport, LanguageTier, LiveGateReport, LivePathBar, LivePathGate,
     RecordPathBar, RecordPathGate, Verdict,
 };
+pub use publish::{PublishKey, PublishedFigure, WerPublication};
 pub use score::{score_run, score_utterance, AlignmentWeights, RunReport, UtteranceReport};
