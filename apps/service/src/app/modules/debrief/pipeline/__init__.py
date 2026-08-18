@@ -14,10 +14,22 @@ rendering alongside the verbatim original rather than in place of it (PRD
 FR-7.2). Once the transcript is cleaned, `run_section_classification`
 classifies every utterance to a template section and persists a fill_state
 per coverage slot (PRD FR-8.2), feeding the requirements coverage matrix.
+Once classification completes, `run_bmad_analyst_chain` runs a BMAD Analyst
+chain over the full classified transcript and persists the full artifact
+set — open questions, the decision log, the draft project brief, and the
+draft follow-up email — every claim grounded in a citation back to the
+classified utterances (PRD FR-4.1, FR-8).
 """
 
 from __future__ import annotations
 
+from app.modules.debrief.pipeline.bmad_analyst import (
+    RunBmadAnalystChain,
+    SaveSessionBmadAnalystChain,
+    normalize_provenance,
+    resolve_citations,
+    run_bmad_analyst_chain,
+)
 from app.modules.debrief.pipeline.classification import (
     ClassifyUtterances,
     SaveSessionSectionClassification,
@@ -34,15 +46,29 @@ from app.modules.debrief.pipeline.diarization import tag_span_speaker, tag_spans
 from app.modules.debrief.pipeline.models import (
     UNCLASSIFIED_SECTION_KEY,
     UNKNOWN_SPEAKER_TAG,
+    ArtifactCitation,
     AudioDestructionEvent,
     AudioDestructionStatus,
+    BmadAnalystChainOutput,
+    BmadAnalystChainStatus,
+    BmadArtifactSet,
+    BmadDecisionDraft,
+    BmadFollowUpEmailDraft,
+    BmadOpenQuestionDraft,
+    BmadProjectBriefDraft,
+    ClaimProvenance,
     ClassifiedUtterance,
     CleanedUtterance,
     CoverageSlotState,
+    DecisionLogEntry,
     DiarizationOutput,
     DiarizationStatus,
     FillState,
+    FollowUpEmailDraft,
+    OpenQuestion,
+    ProjectBriefDraft,
     SectionClassificationStatus,
+    SessionBmadAnalystChain,
     SessionDiarization,
     SessionSectionClassification,
     SessionTranscriptCleaning,
@@ -63,23 +89,39 @@ from app.modules.debrief.pipeline.service import DiarizeAudio, SaveSessionDiariz
 __all__ = [
     "UNCLASSIFIED_SECTION_KEY",
     "UNKNOWN_SPEAKER_TAG",
+    "ArtifactCitation",
     "AudioDestructionEvent",
     "AudioDestructionStatus",
+    "BmadAnalystChainOutput",
+    "BmadAnalystChainStatus",
+    "BmadArtifactSet",
+    "BmadDecisionDraft",
+    "BmadFollowUpEmailDraft",
+    "BmadOpenQuestionDraft",
+    "BmadProjectBriefDraft",
+    "ClaimProvenance",
     "ClassifiedUtterance",
     "ClassifyUtterances",
     "CleanTranscript",
     "CleanedUtterance",
     "CoverageSlotState",
+    "DecisionLogEntry",
     "DeleteAudio",
     "DiarizationOutput",
     "DiarizationStatus",
     "DiarizeAudio",
     "EmitAudioDestructionEvent",
     "FillState",
+    "FollowUpEmailDraft",
+    "OpenQuestion",
+    "ProjectBriefDraft",
+    "RunBmadAnalystChain",
+    "SaveSessionBmadAnalystChain",
     "SaveSessionDiarization",
     "SaveSessionSectionClassification",
     "SaveSessionTranscriptCleaning",
     "SectionClassificationStatus",
+    "SessionBmadAnalystChain",
     "SessionDiarization",
     "SessionSectionClassification",
     "SessionTranscriptCleaning",
@@ -91,7 +133,10 @@ __all__ = [
     "compute_slot_fill_states",
     "destroy_retained_audio",
     "is_ready_for_audio_destruction",
+    "normalize_provenance",
     "normalize_section_key",
+    "resolve_citations",
+    "run_bmad_analyst_chain",
     "run_diarization",
     "run_section_classification",
     "run_transcript_cleaning",

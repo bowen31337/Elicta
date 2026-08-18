@@ -230,6 +230,171 @@ class SessionSectionClassification(BaseModel):
     error: str | None = None
 
 
+class ClaimProvenance(str, Enum):
+    """Whether a BMAD analyst artifact claim was directly heard or inferred by the chain (PRD FR-8.8).
+
+    PRD FR-8.8 requires anything the system inferred rather than heard to be
+    visually flagged as inference. `normalize_provenance` in `bmad_analyst.py`
+    only ever returns `STATED` for a chain output the caller explicitly
+    marked as such; anything else — an unrecognized value, a typo, a vendor
+    that omitted the field — falls back to `INFERRED`, the same
+    fail-safe-to-the-visible-flag reasoning `UNKNOWN_SPEAKER_TAG` and
+    `UNCLASSIFIED_SECTION_KEY` use elsewhere in this package: an operator
+    wrongly told "the client said this" cannot un-hear it, while an operator
+    wrongly told "the system inferred this" only has to double-check.
+    """
+
+    STATED = "stated"
+    INFERRED = "inferred"
+
+
+class ArtifactCitation(BaseModel):
+    """One BMAD analyst artifact claim's grounding in an actual classified utterance (PRD FR-2.7, FR-8.7).
+
+    Never constructed from whatever timestamp, speaker, or wording the
+    analyst chain claims for a citation — `resolve_citations` in
+    `bmad_analyst.py` builds every field here by looking the cited
+    `utterance_id` up in the session's own `ClassifiedUtterance`s, the same
+    record-path-derived data every earlier debrief stage persisted. A chain
+    output citing an `utterance_id` that isn't one of them fails the run
+    rather than persisting a citation nothing backs.
+    """
+
+    utterance_id: str
+    session_id: str
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    speaker_tag: str
+    quoted_text: str
+
+
+class OpenQuestion(BaseModel):
+    """One ranked open question the BMAD analyst chain raised for the client (PRD FR-8.3)."""
+
+    text: str
+    impact_rank: int = Field(ge=1)
+    provenance: ClaimProvenance
+    citations: list[ArtifactCitation]
+
+
+class DecisionLogEntry(BaseModel):
+    """One decision or commitment the BMAD analyst chain identified in the session (PRD FR-8.4)."""
+
+    text: str
+    decided_by: str
+    provenance: ClaimProvenance
+    citations: list[ArtifactCitation]
+
+
+class ProjectBriefDraft(BaseModel):
+    """The BMAD analyst chain's draft project brief for the session (PRD FR-8.5)."""
+
+    body: str
+    provenance: ClaimProvenance
+    citations: list[ArtifactCitation]
+
+
+class FollowUpEmailDraft(BaseModel):
+    """The BMAD analyst chain's draft follow-up email for the session (PRD FR-8.6)."""
+
+    subject: str
+    body: str
+    provenance: ClaimProvenance
+    citations: list[ArtifactCitation]
+
+
+class BmadArtifactSet(BaseModel):
+    """The full set of artifacts one BMAD analyst chain run must produce to count as complete.
+
+    A run that produced only some of these — an open-questions list but no
+    project brief, say — is a vendor contract violation, not a partial
+    success: `run_bmad_analyst_chain` only ever persists a `BmadArtifactSet`
+    on a `COMPLETE` run, never a partially-populated one.
+    """
+
+    open_questions: list[OpenQuestion]
+    decisions: list[DecisionLogEntry]
+    project_brief: ProjectBriefDraft
+    follow_up_email: FollowUpEmailDraft
+
+
+class BmadOpenQuestionDraft(BaseModel):
+    """One open question as the analyst chain returns it, citing utterances by id only.
+
+    `citation_utterance_ids` names utterances the chain claims to have drawn
+    this question from; `run_bmad_analyst_chain` resolves each id against the
+    session's actual `ClassifiedUtterance`s via `resolve_citations` rather
+    than trusting the chain's own account of what a citation says.
+    """
+
+    text: str
+    impact_rank: int = Field(ge=1)
+    provenance: str
+    citation_utterance_ids: list[str]
+
+
+class BmadDecisionDraft(BaseModel):
+    """One decision-log entry as the analyst chain returns it, citing utterances by id only."""
+
+    text: str
+    decided_by: str
+    provenance: str
+    citation_utterance_ids: list[str]
+
+
+class BmadProjectBriefDraft(BaseModel):
+    """The draft project brief as the analyst chain returns it, citing utterances by id only."""
+
+    body: str
+    provenance: str
+    citation_utterance_ids: list[str]
+
+
+class BmadFollowUpEmailDraft(BaseModel):
+    """The draft follow-up email as the analyst chain returns it, citing utterances by id only."""
+
+    subject: str
+    body: str
+    provenance: str
+    citation_utterance_ids: list[str]
+
+
+class BmadAnalystChainOutput(BaseModel):
+    """The raw bundle one BMAD analyst chain run returns, before citation resolution (PRD FR-4.1, FR-8)."""
+
+    open_questions: list[BmadOpenQuestionDraft]
+    decisions: list[BmadDecisionDraft]
+    project_brief: BmadProjectBriefDraft
+    follow_up_email: BmadFollowUpEmailDraft
+
+
+class BmadAnalystChainStatus(str, Enum):
+    """Terminal state of one BMAD analyst chain run over a session's classified utterances."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class SessionBmadAnalystChain(BaseModel):
+    """Durable record of one BMAD analyst chain run over a session's classified utterances (PRD FR-4.1, FR-8).
+
+    Persisted whether the run succeeded or failed, mirroring
+    `SessionSectionClassification`: a session with no chain record at all
+    would be indistinguishable from one that simply hasn't been run yet, so
+    `status` and `error` make a failed run visible instead of silent.
+    `artifacts` is `None` on a `FAILED` run — the classified utterances still
+    live on in `SessionSectionClassification`, so nothing is lost.
+    """
+
+    session_id: str
+    status: BmadAnalystChainStatus
+    engine: str
+    artifacts: BmadArtifactSet | None
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
+
+
 class AudioDestructionStatus(str, Enum):
     """Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4)."""
 
