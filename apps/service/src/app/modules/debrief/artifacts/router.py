@@ -38,6 +38,13 @@ already derives per meeting, recording what was agreed and `decided_by` whom
 coverage — it is a plain session-scoped `GET` of what that one meeting's chain
 run already persisted, not a rebuild of the engagement-wide `decisions` list
 `merge_requirements_state_forward` (PRD FR-8.9) accumulates in `state.py`.
+
+`build_open_questions_router` exposes the same chain's `open_questions` the
+same way, but ordered: the analyst chain assigns each question its
+`impact_rank` (PRD FR-8.3) without guaranteeing it returned them in that
+order, so this route sorts by `impact_rank` ascending before responding —
+callers always see the list ranked by impact on the build, never in
+whatever order the chain happened to produce them.
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ from fastapi import APIRouter, HTTPException
 from app.modules.debrief.pipeline.models import (
     BmadArtifactSet,
     DecisionLogEntry,
+    OpenQuestion,
     ProjectBriefDraft,
     SessionBmadAnalystChain,
 )
@@ -154,5 +162,32 @@ def build_decision_log_router(get_chain: GetSessionBmadAnalystChain) -> APIRoute
         if chain is None or chain.artifacts is None:
             raise HTTPException(status_code=404, detail="decision log not found")
         return chain.artifacts.decisions
+
+    return router
+
+
+def build_open_questions_router(get_chain: GetSessionBmadAnalystChain) -> APIRouter:
+    """Build the per-meeting open-questions list read router, ranked by impact (PRD FR-8.3).
+
+    `get_chain` looks up the same session's `SessionBmadAnalystChain` the
+    draft project brief and decision log routes read. The chain's
+    `open_questions` are re-sorted by `impact_rank` ascending before being
+    returned — the analyst chain guarantees each question a rank, not that it
+    already returned them in rank order — so the response is always the
+    open-questions list ranked by impact on the build, not whatever order the
+    chain produced. A session with no chain record yet, or one whose run
+    `FAILED` (`artifacts` is `None`), has no open-questions list to return, so
+    both cases 404 rather than one looking like an empty list and the other
+    an error.
+    """
+
+    router = APIRouter(prefix="/api/sessions", tags=["debrief-open-questions"])
+
+    @router.get("/{session_id}/open-questions", response_model=list[OpenQuestion])
+    async def get_session_open_questions(session_id: str) -> list[OpenQuestion]:
+        chain = await get_chain(session_id)
+        if chain is None or chain.artifacts is None:
+            raise HTTPException(status_code=404, detail="open questions list not found")
+        return sorted(chain.artifacts.open_questions, key=lambda question: question.impact_rank)
 
     return router

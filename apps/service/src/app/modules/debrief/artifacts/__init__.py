@@ -27,7 +27,11 @@ evidence (PRD FR-8.5). `build_decision_log_router` exposes that same
 session's decision and commitment log the same way: a plain
 `GET /api/sessions/{session_id}/decision-log` reading the `DecisionLogEntry`
 list — what was agreed, and by whom — the chain already persisted (PRD
-FR-8.4).
+FR-8.4). `build_open_questions_router` exposes that same session's
+open-questions list the same way, but ranked: a plain
+`GET /api/sessions/{session_id}/open-questions` reading the `OpenQuestion`
+list the chain already persisted, re-sorted by `impact_rank` ascending so
+callers always see it ranked by impact on the build (PRD FR-8.3).
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ from app.modules.debrief.artifacts.router import (
     GetSessionBmadAnalystChain,
     build_decision_log_router,
     build_full_prd_router,
+    build_open_questions_router,
     build_project_brief_router,
 )
 from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
@@ -83,6 +88,7 @@ __all__ = [
     "build_coverage_matrix",
     "build_decision_log_router",
     "build_full_prd_router",
+    "build_open_questions_router",
     "build_project_brief_router",
     "merge_requirements_state_forward",
     "require_prd_generation_coverage",

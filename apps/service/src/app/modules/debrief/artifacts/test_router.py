@@ -16,6 +16,7 @@ from app.modules.debrief.artifacts.models import (
 from app.modules.debrief.artifacts.router import (
     build_decision_log_router,
     build_full_prd_router,
+    build_open_questions_router,
     build_project_brief_router,
 )
 from app.modules.debrief.pipeline.models import (
@@ -26,6 +27,7 @@ from app.modules.debrief.pipeline.models import (
     DecisionLogEntry,
     FillState,
     FollowUpEmailDraft,
+    OpenQuestion,
     ProjectBriefDraft,
     SessionBmadAnalystChain,
 )
@@ -50,15 +52,21 @@ def make_matrix(
     )
 
 
-def make_artifact_set(decisions: list[DecisionLogEntry] | None = None) -> BmadArtifactSet:
+def make_artifact_set(
+    decisions: list[DecisionLogEntry] | None = None, open_questions: list[OpenQuestion] | None = None
+) -> BmadArtifactSet:
     return BmadArtifactSet(
-        open_questions=[],
+        open_questions=open_questions or [],
         decisions=decisions or [],
         project_brief=ProjectBriefDraft(body="draft brief", provenance=ClaimProvenance.STATED, citations=[]),
         follow_up_email=FollowUpEmailDraft(
             subject="Follow up", body="draft email", provenance=ClaimProvenance.STATED, citations=[]
         ),
     )
+
+
+def make_open_question(text: str, impact_rank: int) -> OpenQuestion:
+    return OpenQuestion(text=text, impact_rank=impact_rank, provenance=ClaimProvenance.STATED, citations=[])
 
 
 def make_decision(text: str, provenance: ClaimProvenance) -> DecisionLogEntry:
@@ -199,12 +207,13 @@ def make_bmad_chain(
     *,
     status: BmadAnalystChainStatus = BmadAnalystChainStatus.COMPLETE,
     decisions: list[DecisionLogEntry] | None = None,
+    open_questions: list[OpenQuestion] | None = None,
 ) -> SessionBmadAnalystChain:
     return SessionBmadAnalystChain(
         session_id=session_id,
         status=status,
         engine="claude-agent-sdk",
-        artifacts=make_artifact_set(decisions) if status == BmadAnalystChainStatus.COMPLETE else None,
+        artifacts=make_artifact_set(decisions, open_questions) if status == BmadAnalystChainStatus.COMPLETE else None,
         requested_at=FIXED,
         completed_at=FIXED,
         error=None if status == BmadAnalystChainStatus.COMPLETE else "chain run failed",
@@ -299,3 +308,63 @@ def test_getting_the_decision_log_for_a_session_whose_chain_run_failed_returns_4
 
     assert response.status_code == 404
     assert response.json()["detail"] == "decision log not found"
+
+
+def make_open_questions_client(chains: dict[str, SessionBmadAnalystChain]) -> TestClient:
+    async def get_chain(session_id: str) -> SessionBmadAnalystChain | None:
+        return chains.get(session_id)
+
+    app = FastAPI()
+    app.include_router(build_open_questions_router(get_chain))
+    return TestClient(app)
+
+
+def test_getting_a_sessions_open_questions_returns_them_ranked_by_impact_regardless_of_chain_order():
+    open_questions = [
+        make_open_question("what is the go-live date", impact_rank=2),
+        make_open_question("who owns data migration", impact_rank=1),
+        make_open_question("is legal sign-off required", impact_rank=3),
+    ]
+    client = make_open_questions_client(
+        {"session-1": make_bmad_chain("session-1", open_questions=open_questions)}
+    )
+
+    response = client.get("/api/sessions/session-1/open-questions")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [entry["text"] for entry in body] == [
+        "who owns data migration",
+        "what is the go-live date",
+        "is legal sign-off required",
+    ]
+    assert [entry["impact_rank"] for entry in body] == [1, 2, 3]
+
+
+def test_getting_the_open_questions_list_for_a_session_with_no_open_questions_returns_an_empty_list():
+    client = make_open_questions_client({"session-1": make_bmad_chain("session-1", open_questions=[])})
+
+    response = client.get("/api/sessions/session-1/open-questions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_getting_the_open_questions_list_for_a_session_with_no_chain_record_returns_404():
+    client = make_open_questions_client({})
+
+    response = client.get("/api/sessions/unknown-session/open-questions")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "open questions list not found"
+
+
+def test_getting_the_open_questions_list_for_a_session_whose_chain_run_failed_returns_404():
+    client = make_open_questions_client(
+        {"session-1": make_bmad_chain("session-1", status=BmadAnalystChainStatus.FAILED)}
+    )
+
+    response = client.get("/api/sessions/session-1/open-questions")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "open questions list not found"
