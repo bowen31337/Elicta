@@ -1,0 +1,35 @@
+.escape-hatch {
+  display: flex;
+  margin-top: 0.5rem;
+}
+
+/*
+ * De-emphasised on purpose (PRD FR-6.9): smaller than chip/body text, muted
+ * until focused, and bordered only by a faint underline rather than a full
+ * box, so it reads as a fallback rather than competing with the chips above
+ * it. Focus brings it to full opacity and a visible bottom border so it's
+ * still usable once the operator actually reaches for it.
+ */
+.escape-hatch__input {
+  width: 100%;
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  color: inherit;
+  opacity: 0.45;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  outline: none;
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.escape-hatch__input::placeholder {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.escape-hatch__input:focus,
+.escape-hatch__input:not(:placeholder-shown) {
+  opacity: 0.85;
+  border-bottom-color: rgba(255, 255, 255, 0.4);
+}
