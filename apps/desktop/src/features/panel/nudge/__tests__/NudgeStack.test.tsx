@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { NudgeStack, historyOpacity } from '../NudgeStack';
 import type { Nudge } from '../types';
@@ -70,5 +70,49 @@ describe('NudgeStack', () => {
   it('floors history opacity instead of letting it reach zero', () => {
     expect(historyOpacity(0)).toBeGreaterThan(historyOpacity(10));
     expect(historyOpacity(10)).toBeGreaterThan(0);
+  });
+
+  describe('single-paint rendering (PRD FR-6.4)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('renders the nudge complete on first paint, with nothing left to reveal later', () => {
+      render(<NudgeStack active={makeNudge('a')} history={[]} />);
+
+      // The stub, question, and trigger reason are all present immediately —
+      // no typing animation or streaming is at play (design system: "no
+      // typing animation, no streaming" for nudge entry).
+      expect(screen.getByText('stub-a')).toBeInTheDocument();
+      expect(screen.getByText('question a?')).toBeInTheDocument();
+      expect(screen.getByText('reason-a')).toBeInTheDocument();
+
+      vi.advanceTimersByTime(10_000);
+
+      // Nothing streams in afterward: the same complete content is still
+      // there, unchanged, because the component has no timers or effects
+      // that could reveal it incrementally.
+      expect(screen.getByText('stub-a')).toBeInTheDocument();
+      expect(screen.getByText('question a?')).toBeInTheDocument();
+      expect(screen.getByText('reason-a')).toBeInTheDocument();
+    });
+
+    it('replaces the active nudge with the new one whole, in one render, never a mix of old and new fields', () => {
+      const { rerender } = render(<NudgeStack active={makeNudge('a')} history={[]} />);
+      expect(screen.getByText('question a?')).toBeInTheDocument();
+
+      rerender(<NudgeStack active={makeNudge('b')} history={[makeNudge('a')]} />);
+
+      // The new nudge's fields are all present together; none of the old
+      // active nudge's fields linger in the prominent slot.
+      expect(screen.getByText('stub-b')).toBeInTheDocument();
+      expect(screen.getByText('question b?')).toBeInTheDocument();
+      expect(screen.getByText('reason-b')).toBeInTheDocument();
+      expect(screen.queryByText('question a?')).not.toBeInTheDocument();
+    });
   });
 });

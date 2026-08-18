@@ -52,4 +52,39 @@ describe('useNudgeStack', () => {
     expect(result.current.active).toBeNull();
     expect(result.current.history).toEqual([]);
   });
+
+  it('applies a pushed nudge as a single state mutation, never a partial one (PRD FR-6.4)', () => {
+    let renderCount = 0;
+    function useCounted() {
+      renderCount += 1;
+      return useNudgeStack();
+    }
+    const { result } = renderHook(() => useCounted());
+
+    const before = renderCount;
+    act(() => result.current.pushNudge(makeNudge('a')));
+
+    // One state mutation must produce exactly one render — the complete
+    // nudge lands in a single paint rather than being streamed in across
+    // several commits.
+    expect(renderCount).toBe(before + 1);
+    expect(result.current.active).toEqual(makeNudge('a'));
+  });
+
+  it('demotes the previous nudge and activates the new one in a single mutation', () => {
+    let renderCount = 0;
+    function useCounted() {
+      renderCount += 1;
+      return useNudgeStack();
+    }
+    const { result } = renderHook(() => useCounted());
+    act(() => result.current.pushNudge(makeNudge('a')));
+
+    const before = renderCount;
+    act(() => result.current.pushNudge(makeNudge('b')));
+
+    expect(renderCount).toBe(before + 1);
+    expect(result.current.active?.id).toBe('b');
+    expect(result.current.history.map((n) => n.id)).toEqual(['a']);
+  });
 });

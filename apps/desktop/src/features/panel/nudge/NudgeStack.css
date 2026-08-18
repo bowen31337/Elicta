@@ -38,7 +38,9 @@
 }
 
 .nudge-stack__history-item {
-  transition: opacity 200ms ease;
+  /* Capped at 120ms: nudge entry is instant, no fade longer than 120ms
+     (design system, PRD FR-6.4). */
+  transition: opacity 120ms ease;
   display: flex;
   flex-direction: column;
 }

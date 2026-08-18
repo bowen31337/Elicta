@@ -21,6 +21,14 @@ export function historyOpacity(index: number): number {
  * trigger reason is shown alongside both the active nudge and every history
  * entry, not just the active one, so trust calibration survives a nudge
  * receding into history (PRD FR-5.11).
+ *
+ * The active nudge is read straight off `active` and painted whole — stub,
+ * question, and trigger reason together — in the same render pass with no
+ * local state, timers, or effects of its own. There is nothing in this
+ * component that could reveal a nudge incrementally: streaming is disabled
+ * in live mode by the component simply not having a mechanism for it (PRD
+ * FR-6.4), matching the design system's "no typing animation, no streaming"
+ * rule for nudge entry.
  */
 export function NudgeStack({ active, history }: NudgeStackProps) {
   return (
