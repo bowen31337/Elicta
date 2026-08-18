@@ -8,6 +8,7 @@ pub mod pre_meeting;
 pub mod retention;
 pub mod tier;
 pub mod tier_drift;
+pub mod trigger_suppression;
 
 pub use accuracy_fallback::{AccuracyBar, AccuracyFallbackNotice, AccuracyFallbackWatcher};
 pub use attendee_preference::{AttendeeId, AttendeeLanguagePreference, AttendeeLanguagePreferences};
@@ -19,3 +20,4 @@ pub use pre_meeting::{MeetingSession, PreMeetingSetup, start_meeting};
 pub use retention::{RetainedUtterance, Translation};
 pub use tier::{LanguageTier, LanguageTierTable};
 pub use tier_drift::{AnnouncementSeverity, TierAnnouncement, TierDriftMonitor};
+pub use trigger_suppression::{DeterministicTriggerGate, GatedLanguageTag, TriggerSuppressionReason};
