@@ -26,6 +26,12 @@
 //! judgment of which systems, roles, and processes the conversation named
 //! into a [`novel_entity::NovelEntityTrigger`] for any name absent from the
 //! context pack.
+//! The contradiction decision rule (PRD FR-5.4) is the third of the three:
+//! [`contradiction::ContradictionDetector`] turns a per-tick judgment of
+//! which client statements conflict with an earlier utterance or a
+//! reference document into a [`contradiction::ContradictionTrigger`],
+//! enforcing FR-3.4's document-status gate -- only a `ground truth`
+//! document may ever back one -- along the way.
 //! Writing a slow-lane pass's novel *candidates* back into the on-device
 //! bank mid-meeting (§3.8) is, however, this crate's own
 //! [`bank_write_back::BankWriteBackStore`] — landing them durably for later
@@ -34,6 +40,7 @@
 
 pub mod bank_write_back;
 pub mod cache_lifetime;
+pub mod contradiction;
 pub mod coverage_gap_drift;
 pub mod model;
 pub mod novel_entity;
@@ -46,6 +53,9 @@ pub mod ticker;
 
 pub use bank_write_back::{BankWriteBackStore, NovelCandidate, WriteBackError};
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
+pub use contradiction::{
+    ContradictionCandidate, ContradictionDetector, ContradictionSource, ContradictionTrigger, DocumentStatus,
+};
 pub use coverage_gap_drift::{CoverageGapDriftDetector, CoverageGapDriftTrigger, TopicFocus};
 pub use model::{MeetingModel, ModelId};
 pub use novel_entity::{ContextPackEntities, EntityKind, MentionedEntity, NovelEntityDetector, NovelEntityTrigger};
@@ -437,6 +447,61 @@ mod orchestrator_ticks_end_to_end {
         ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
         let repeat = detector.on_tick(&[MentionedEntity::new("Shadow IT ticketing tool", EntityKind::System)]);
         assert_eq!(repeat, vec![], "a novel entity already reported earlier in the meeting must not refire");
+
+        ticker.stop();
+    }
+
+    /// PRD FR-5.4 end to end, driven by real [`TickEvent`]s from the same
+    /// ticker every other test in this module uses: a slow-lane pass that
+    /// judges a tick's client statement to conflict with a `ground truth`
+    /// reference document fires exactly one
+    /// [`contradiction::ContradictionTrigger`], the same statement judged
+    /// against a `superseded` document fires nothing -- FR-3.4's gate
+    /// against reproducing the M2 embarrassment failure -- and a repeat
+    /// judgment of the already-fired contradiction on a later tick does not
+    /// refire it, the same "decide once" shape
+    /// [`novel_entity::NovelEntityDetector`] uses.
+    #[test]
+    fn a_contradiction_with_a_ground_truth_document_emits_a_trigger_event_but_a_superseded_one_never_does() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let mut detector = ContradictionDetector::new();
+
+        // Tick 1: the slow-lane pass judges the client's statement to
+        // conflict with a superseded scoping deck -- FR-3.4 says this must
+        // never trigger.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let against_superseded = detector.on_tick(&[ContradictionCandidate::new(
+            "utterance-9",
+            "client said budget is $2M, contradicting a superseded scoping deck",
+            ContradictionSource::ReferenceDocument { doc_id: "doc-old".to_string(), status: DocumentStatus::Superseded },
+        )]);
+        assert_eq!(against_superseded, vec![], "a superseded document must never back a contradiction trigger");
+
+        // Tick 2: the same client statement is now judged to conflict with
+        // the signed, ground-truth SOW instead.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let candidate = ContradictionCandidate::new(
+            "utterance-9",
+            "client said budget is $2M, contradicting the signed SOW",
+            ContradictionSource::ReferenceDocument { doc_id: "doc-sow".to_string(), status: DocumentStatus::GroundTruth },
+        );
+        let against_ground_truth = detector.on_tick(&[candidate.clone()]);
+        assert_eq!(
+            against_ground_truth,
+            vec![ContradictionTrigger {
+                utterance_id: candidate.utterance_id.clone(),
+                summary: candidate.summary.clone(),
+                conflicts_with: candidate.conflicts_with.clone(),
+            }],
+            "a contradiction with a ground-truth reference document must emit a trigger event"
+        );
+
+        // Tick 3: the same contradiction is judged again -- already
+        // reported, must not refire.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let repeat = detector.on_tick(&[candidate]);
+        assert_eq!(repeat, vec![], "a contradiction already reported earlier in the meeting must not refire");
 
         ticker.stop();
     }
