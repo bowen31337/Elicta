@@ -17,3 +17,4 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "8.0.1"
+coreaudio-rs = "0.14"
