@@ -1,15 +1,17 @@
-"""Domain types for the offline document-extraction pass with native citations enabled (architecture §3.11).
+"""Domain types for the offline document-extraction and claim-structuring passes (architecture §3.11, §14.4).
 
-Architecture §3.11 ("Native citations, for the compiler") splits the compiler
-into two calls because document citations are incompatible with
+Architecture §3.11 ("Native citations, for the compiler") and §14.4 split the
+compiler into two calls because document citations are incompatible with
 `output_config.format`: "an extraction pass with citations enabled, then a
 structuring pass over the extracted claims with the schema applied." This
-package is that first pass. `agent/bmad_analyst.py`'s `AnalystContextPack`
-already models the *second* pass's input -- a document's content as flat
-`text`, with no citation grounding -- so this package defines its own,
-earlier-stage shapes rather than reusing that one: by the time a document
-reaches the structuring pass, its claims have already been extracted and
-grounded here.
+package is both of those calls -- `extraction.py` runs the first, citations
+pass; `structuring.py` runs the second, schema-constrained pass over that
+first pass's output. `agent/bmad_analyst.py`'s `AnalystContextPack` models a
+*different* structuring pass's input -- a whole context pack's documents as
+flat `text`, with no citation grounding -- so this package defines its own
+shapes rather than reusing that one: this structuring pass reads the
+already-extracted, already-grounded `ExtractedClaim` records this same
+package produces, not raw document text.
 
 `CitedSpan` mirrors the shape Claude's Messages API returns for a document
 content block with `citations: {enabled: true}` -- `cited_text` plus a
@@ -91,6 +93,84 @@ class EngagementDocumentExtractionPass(BaseModel):
     engagement_id: str = Field(min_length=1)
     status: ExtractionPassStatus
     claims: list[ExtractedClaim] | None
+    requested_at: datetime
+    completed_at: datetime
+    error: str | None = None
+
+
+class ClaimStructuringDraft(BaseModel):
+    """One structured candidate as the schema-constrained structuring pass chain returns it (architecture §14.4, §3.6).
+
+    `claim_id` names which `ExtractedClaim` this candidate was structured
+    from -- the chain is never asked for `source_doc` itself, since that
+    provenance string is derived deterministically from the named claim's
+    already-validated citation (`structuring.py`'s `build_structured_candidates`),
+    not trusted at face value the way `agent/models.py`'s `BmadCandidateDraft.source_doc`
+    is. The remaining fields mirror `BmadCandidateDraft` one-for-one: they're
+    the same `candidate` table columns (architecture §3.6) this pass is
+    responsible for filling in given a citation-grounded claim.
+    """
+
+    claim_id: str = Field(min_length=1)
+    template_section: str = Field(min_length=1)
+    trigger_types: list[str] = Field(min_length=1)
+    phrasing: str = Field(min_length=1)
+    stub: str = Field(min_length=1)
+    lang: str = Field(min_length=1)
+    priority: int = Field(ge=1)
+    requires: list[str] = Field(default_factory=list)
+    authority_match: list[str] = Field(default_factory=list)
+
+
+class ClaimStructuringOutput(BaseModel):
+    """The raw bundle one claim-structuring pass run returns, before candidate ids and `source_doc` are assigned."""
+
+    candidates: list[ClaimStructuringDraft]
+
+
+class StructuredCitationCandidate(BaseModel):
+    """One schema-valid candidate record structured from a citation-grounded claim (architecture §14.4, §3.6).
+
+    This is the pre-embedding candidate shape for a claim that went through
+    the citations pass -- everything the `candidate` table (architecture
+    §3.6) needs except `embedding` and `engagement_id`, mirroring
+    `agent/models.py`'s `AnalystBankCandidate`. `source_doc` is never `None`
+    here, unlike `AnalystBankCandidate.source_doc`: every candidate this
+    package structures traces back to an extracted claim, which always
+    carries a validated citation.
+    """
+
+    id: str = Field(min_length=1)
+    template_section: str
+    trigger_types: list[str]
+    phrasing: str
+    stub: str
+    lang: str
+    priority: int = Field(ge=1)
+    requires: list[str]
+    authority_match: list[str]
+    source_doc: str = Field(min_length=1)
+
+
+class ClaimStructuringPassStatus(str, Enum):
+    """Terminal state of one claim-structuring pass run over an engagement's extracted claims."""
+
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class EngagementClaimStructuringPass(BaseModel):
+    """Durable record of one claim-structuring pass run over an engagement's extracted claims (architecture §14.4).
+
+    Persisted whether the run succeeded or failed, mirroring this package's
+    own `EngagementDocumentExtractionPass`: an engagement with no pass
+    record at all would be indistinguishable from one that simply hasn't
+    been structured yet. `candidates` is `None` on a `FAILED` run.
+    """
+
+    engagement_id: str = Field(min_length=1)
+    status: ClaimStructuringPassStatus
+    candidates: list[StructuredCitationCandidate] | None
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
