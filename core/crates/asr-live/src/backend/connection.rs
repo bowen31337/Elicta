@@ -84,6 +84,10 @@ impl<B: TranscriptionBackend> TranscriptionBackend for CaptureStartBackend<B> {
     fn poll_events(&mut self) -> Vec<TranscriptionEvent> {
         self.inner.poll_events()
     }
+
+    fn send_keepalive(&mut self) -> Result<(), BackendError> {
+        self.inner.send_keepalive()
+    }
 }
 
 #[cfg(test)]

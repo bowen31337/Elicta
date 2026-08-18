@@ -35,10 +35,11 @@ value types it operates on:
 pub use backend::{
     AudioEncoding, AudioFramer, AudioSegmentRef, BackendError, CaptureStartBackend,
     ConnectionEvent, EndpointResolutionError, EngagementId, EngagementRegionRegistry,
-    FinalUtterance, FrameDurationError, FramedBackend, InterimHypothesis, Keyterm, LanguageTag,
-    LINEAR16_16KHZ_MONO, MAX_FRAME_MS, MIN_FRAME_MS, Region, RegionPinError, RegionPinnedBackend,
-    RegionalConnectError, RegionalEndpointResolver, SpeakerTag, StreamId, Token,
-    TranscriptionBackend, TranscriptionEvent, UtteranceId, VendorRegionEndpoints,
+    FinalUtterance, FrameDurationError, FramedBackend, InterimHypothesis, KeepaliveBackend,
+    KEEPALIVE_INTERVAL, Keyterm, LanguageTag, LINEAR16_16KHZ_MONO, MAX_FRAME_MS, MIN_FRAME_MS,
+    Region, RegionPinError, RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver,
+    SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
+    VendorRegionEndpoints,
 };
 ```
 
@@ -132,15 +133,39 @@ pub use backend::{
   `stream_id` so two streams' remainders never bleed into each other's
   frames. Constructing with a duration outside `[MIN_FRAME_MS,
   MAX_FRAME_MS]` fails immediately rather than silently clamping.
+- `keepalive.rs` — holds the connection open for the duration of the
+  meeting via fixed-interval keepalive frames (architecture §14.2, "held
+  with keepalives rather than reopened per utterance"). Adds
+  `TranscriptionBackend::send_keepalive` to the trait itself — what a
+  keepalive frame looks like on the wire is vendor-defined, the same reason
+  `start_stream`/`send_audio` are trait methods rather than something a
+  wrapper could synthesize generically — defaulted to a no-op so a
+  scripted/non-networked implementation (this module's own fakes, or
+  `stream::fake::PrematureEndpointFakeBackend`, which implements this trait
+  but lives outside this directory) isn't forced to implement a method it
+  has no real connection to exercise; a real vendor backend overrides it.
+  `KeepaliveBackend<B>` supplies the vendor-agnostic scheduling half:
+  `tick(elapsed)` advances an idle clock and calls `send_keepalive` once per
+  full `interval` (a `tick` spanning several intervals sends one keepalive
+  per interval, never fewer). `KEEPALIVE_INTERVAL` (5s) is the fixed cadence
+  architecture §14.2 calls for; `KeepaliveBackend::with_default_interval`
+  uses it directly. Any `start_stream` or `send_audio` call resets the idle
+  clock, since real traffic on the connection already keeps it alive
+  without help. Driven by
+  an explicit `tick` call rather than a background timer, matching every
+  other wrapper in this module — this crate is std-only and
+  non-networked, so whatever drives real wall time (a timer thread, an
+  event loop tick) lives outside this crate.
 
 ## Deliberately out of scope here
 
-Everything about how a *real* vendor connection is driven once open —
-keepalive frames, reconnect-on-drop — is separately scoped work against
-this same `backend/` directory (see the adjacent features in the
+Everything about how a *real* vendor connection is driven once open beyond
+keepalives — reconnect-on-drop chief among it — is separately scoped work
+against this same `backend/` directory (see the adjacent features in the
 "Streaming Transcription" category). This handoff covers the trait, event
-shape, the keyterm handshake, region pinning, audio framing, and the
-capture-start `Ready` signal; a real `DeepgramBackend` /
+shape, the keyterm handshake, region pinning, audio framing, the
+capture-start `Ready` signal, and fixed-interval keepalives; a real
+`DeepgramBackend` /
 `AssemblyAiBackend` implements `TranscriptionBackend` the same way the
 fakes here do, translating its own wire format into `TranscriptionEvent`
 inside `poll_events` and sending `start_stream`'s keyterms as that
@@ -151,14 +176,13 @@ both happen at capture start) so its actual websocket connect target is
 the resolved regional endpoint rather than a hardcoded default host, then
 wrapped in `FramedBackend` so every `send_audio` call it receives already
 carries a vendor-sized 20-50ms frame regardless of how the capture
-pipeline chunked the audio upstream.
+pipeline chunked the audio upstream, and finally wrapped in
+`KeepaliveBackend` so it receives a `send_keepalive` call every
+`KEEPALIVE_INTERVAL` of silence — whoever wires the real event loop still
+needs to call `KeepaliveBackend::tick` on some periodic cadence (a timer
+thread, an event loop's own tick), since that's the one piece of real wall
+time this std-only crate can't produce itself.
 
-- Sending actual keepalive frames on an idle connection to hold it open
-  between utterances is not attempted in `connection.rs`: that's a
-  per-vendor wire concern (what frame shape counts as a keepalive) this
-  crate's std-only, non-networked scope can't exercise yet — `Ready` only
-  covers the "opened, not yet spoken to" moment, not what keeps the
-  connection alive afterwards.
 - `CaptureStartBackend` does not itself enforce that a caller drains
   `poll_connection_events` before calling `start_stream` — like
   `FramedBackend`'s per-stream framer state, it makes the correct ordering

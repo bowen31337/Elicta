@@ -73,6 +73,7 @@ pub struct ImmutablePartialFakeBackend {
     frames_per_turn: u64,
     frame_count: u64,
     handshakes: HashMap<StreamId, Vec<Keyterm>>,
+    keepalives_sent: u64,
 }
 
 impl ImmutablePartialFakeBackend {
@@ -84,6 +85,7 @@ impl ImmutablePartialFakeBackend {
             frames_per_turn: 2,
             frame_count: 0,
             handshakes: HashMap::new(),
+            keepalives_sent: 0,
         }
     }
 
@@ -92,6 +94,13 @@ impl ImmutablePartialFakeBackend {
     /// injected rather than just that the call didn't error.
     pub fn keyterms_sent(&self, stream_id: &StreamId) -> Option<&[Keyterm]> {
         self.handshakes.get(stream_id).map(Vec::as_slice)
+    }
+
+    /// How many times `send_keepalive` has been called on this fake — lets a
+    /// test assert a keepalive actually reached the wrapped backend, not
+    /// just that the call didn't error.
+    pub fn keepalives_sent(&self) -> u64 {
+        self.keepalives_sent
     }
 }
 
@@ -151,6 +160,11 @@ impl TranscriptionBackend for ImmutablePartialFakeBackend {
     fn poll_events(&mut self) -> Vec<TranscriptionEvent> {
         self.pending.drain(..).collect()
     }
+
+    fn send_keepalive(&mut self) -> Result<(), BackendError> {
+        self.keepalives_sent += 1;
+        Ok(())
+    }
 }
 
 /// Mimics a vendor whose streaming output revises in place: every frame of
@@ -167,6 +181,7 @@ pub struct RevisablePartialFakeBackend {
     frames_per_turn: u64,
     frame_count: u64,
     handshakes: HashMap<StreamId, Vec<Keyterm>>,
+    keepalives_sent: u64,
 }
 
 impl RevisablePartialFakeBackend {
@@ -178,6 +193,7 @@ impl RevisablePartialFakeBackend {
             frames_per_turn: 2,
             frame_count: 0,
             handshakes: HashMap::new(),
+            keepalives_sent: 0,
         }
     }
 
@@ -186,6 +202,13 @@ impl RevisablePartialFakeBackend {
     /// injected rather than just that the call didn't error.
     pub fn keyterms_sent(&self, stream_id: &StreamId) -> Option<&[Keyterm]> {
         self.handshakes.get(stream_id).map(Vec::as_slice)
+    }
+
+    /// How many times `send_keepalive` has been called on this fake — lets a
+    /// test assert a keepalive actually reached the wrapped backend, not
+    /// just that the call didn't error.
+    pub fn keepalives_sent(&self) -> u64 {
+        self.keepalives_sent
     }
 }
 
@@ -250,6 +273,11 @@ impl TranscriptionBackend for RevisablePartialFakeBackend {
 
     fn poll_events(&mut self) -> Vec<TranscriptionEvent> {
         self.pending.drain(..).collect()
+    }
+
+    fn send_keepalive(&mut self) -> Result<(), BackendError> {
+        self.keepalives_sent += 1;
+        Ok(())
     }
 }
 

@@ -14,6 +14,7 @@ mod encoding;
 mod event;
 mod fake;
 mod framing;
+mod keepalive;
 mod region;
 mod transcription_backend;
 
@@ -25,6 +26,7 @@ pub use event::{
 };
 pub use fake::{ImmutablePartialFakeBackend, RevisablePartialFakeBackend};
 pub use framing::{AudioFramer, FrameDurationError, FramedBackend, MAX_FRAME_MS, MIN_FRAME_MS};
+pub use keepalive::{KeepaliveBackend, KEEPALIVE_INTERVAL};
 pub use region::{
     EndpointResolutionError, EngagementId, EngagementRegionRegistry, Region, RegionPinError,
     RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver, VendorRegionEndpoints,

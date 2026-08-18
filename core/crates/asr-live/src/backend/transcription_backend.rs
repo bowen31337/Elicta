@@ -56,4 +56,28 @@ pub trait TranscriptionBackend {
     /// the trait, since this is the last place vendor-specific shape is
     /// allowed to exist.
     fn poll_events(&mut self) -> Vec<TranscriptionEvent>;
+
+    /// Sends one keepalive frame on the vendor connection, independent of
+    /// any `stream_id` — the connection this holds open is opened once per
+    /// engagement (architecture §14.2), not per stream, so a keepalive has
+    /// no stream to address.
+    ///
+    /// What a "keepalive frame" actually is on the wire (a websocket ping, a
+    /// vendor-specific JSON control message, ...) is vendor-defined, which
+    /// is why this exists as a trait method rather than something a wrapper
+    /// could synthesize generically: only the vendor implementation behind
+    /// this method knows the shape that keeps *its* connection from timing
+    /// out. [`super::keepalive::KeepaliveBackend`] is the vendor-agnostic
+    /// half — it decides *when* to call this on a fixed interval so every
+    /// implementation gets that scheduling for free.
+    ///
+    /// Defaulted to a no-op rather than required: a scripted or
+    /// non-networked implementation (this crate's own fakes, or a test
+    /// fixture elsewhere) has no real connection to hold open and no reason
+    /// to fail here, so it shouldn't be forced to implement a method it has
+    /// nothing to do. A real vendor backend overrides this to actually send
+    /// its wire-level keepalive.
+    fn send_keepalive(&mut self) -> Result<(), BackendError> {
+        Ok(())
+    }
 }
