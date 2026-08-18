@@ -72,6 +72,27 @@ required for it specifically.
   dependency-free, the same reasoning `fake.rs` and `first_partial_delay.rs`
   already follow for this directory — see "Deliberately out of scope"
   below for what unifying the two would take.
+- `turn_silence.rs` — `TurnSilenceParameters` and `TuningReport`
+  (architecture §14.2, T2). AssemblyAI's confidence/punctuation-based
+  engines split what `EndpointingThresholds` treats as one FR-2.2 knob into
+  two: `min_turn_silence`, which trades against latency the way a silence
+  timer does, and `max_turn_silence`, the forced-end ceiling that governs
+  the tail instead. `TurnSilenceParameters::universal_streaming_defaults`/
+  `universal_3_5_pro_defaults` hold the documented per-engine defaults
+  (400/1280ms; 400/1536ms, or 400/768ms with `speaker_labels`).
+  `TuningReport::from_samples` is a tuning run: given a candidate
+  `TurnSilenceParameters` and a batch of end-to-end speech-end-to-
+  nudge-visible samples, it reports p50 and p95 as two independent
+  `LatencyMeasurement`s against NFR-1's targets (`P50_LATENCY_TARGET`
+  2000ms, `P95_LATENCY_TARGET` 3500ms) — "report both," never blended into
+  one verdict, since a different knob governs each.
+  `suggest_next_min_turn_silence` closes the loop for `min_turn_silence`
+  only: step it down on a p50 miss, step it back up when there's a full
+  step of headroom (fewer premature endpoints for the trigger gate to
+  re-evaluate without giving back the budget), hold at the edge.
+  `max_turn_silence` is never adjusted by tuning — it is the ceiling this
+  run measures p95 against, not a parameter this run searches over; picking
+  it is the vendor bake-off itself (see "Deliberately out of scope").
 
 ## Suggested integration point
 
@@ -99,6 +120,15 @@ connection's silence-timer / turn-silence parameter (architecture §14.2's
 table — which vendor field that is depends on the engine, same as the
 `FirstPartialDelay` wiring above).
 
+Whoever runs a real T2 bake-off against AssemblyAI should collect NFR-1's
+speech-end-to-nudge-visible samples for a candidate `TurnSilenceParameters`
+(`core/shared/telemetry`'s `TotalLatencyTracker` already records exactly
+that distribution at runtime, independently of this crate) and feed them to
+`TuningReport::from_samples` per candidate, iterating
+`min_turn_silence` via `suggest_next_min_turn_silence` while holding
+`max_turn_silence` at whichever documented ceiling the engine variant in
+use provides.
+
 ## Deliberately out of scope here
 
 - Threading `FirstPartialDelay` through `TranscriptionBackend::start_stream`
@@ -118,11 +148,12 @@ table — which vendor field that is depends on the engine, same as the
   not expose comparable knobs," so there is no single valid range to check
   against yet — that split is T2's bake-off, not FR-2.2's configuration
   surface.
-- Splitting the single FR-2.2 threshold into AssemblyAI's separate
-  `min_turn_silence` (p50) / `max_turn_silence` (p95) knobs is explicitly
-  T2 scope (architecture §14.2: "FR-2.2's single threshold
-  under-specifies both"); `EndpointingThresholds` models the one threshold
-  FR-2.2 actually asks for, per capture mode, not per vendor knob.
+- ~~Splitting the single FR-2.2 threshold into AssemblyAI's separate
+  `min_turn_silence` (p50) / `max_turn_silence` (p95) knobs~~ — done, in
+  `turn_silence.rs` (see below). `EndpointingThresholds` itself is
+  unchanged: Deepgram's silence timer still only exposes the one FR-2.2
+  threshold, so it models exactly that, per capture mode, not per vendor
+  knob.
 - Unifying this module's `CaptureMode` with `capture::device::kind::AudioSourceKind`
   into one shared type: that would need a shared crate dependency, which
   is a `Cargo.toml`/`lib.rs` change outside this directory (see the
@@ -140,8 +171,23 @@ table — which vendor field that is depends on the engine, same as the
   it should be treated as a genuinely new utterance regardless of gap —
   that's a policy decision for whoever tunes `continuation_window`, not a
   structural limitation of `UtteranceReevaluator`.
+- Wiring `turn_silence.rs` to `core/shared/telemetry`'s
+  `TotalLatencyTracker`/`LatencyHistogram` is not attempted: that crate
+  already computes p50/p95 for the live end-to-end path (and already
+  documents the same min-governs-p50/max-governs-p95 split in
+  `total_latency.rs`), but depending on it from here is a `Cargo.toml`
+  change outside this directory, the same reasoning that keeps
+  `CaptureMode` undependent on `capture::device::kind`. `turn_silence.rs`
+  therefore computes its own exact nearest-rank percentile over a batch
+  passed in by value, appropriate for an offline tuning run, rather than
+  sharing the histogram's bucketed runtime estimator.
+- Choosing a numeric valid range for `min_turn_silence` to reject
+  out-of-range overrides against, the way `FirstPartialDelay::new` does
+  for `interruption_delay`: architecture §14.2 documents defaults for this
+  knob, not a vendor-published valid range, so `TUNING_STEP` is a starting
+  increment for the bake-off to refine, not a validated bound.
 
-Verified with `cargo test` and `cargo clippy` (24 passing tests, no
+Verified with `cargo test` and `cargo clippy` (67 passing tests, no
 warnings) in a scratch crate mirroring this module tree plus the existing
 `backend` module, since the crate-level `Cargo.toml`/`lib.rs` in this
 worktree only registers `backend` and `tokens` as of this writing. That

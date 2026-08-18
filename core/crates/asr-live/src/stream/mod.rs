@@ -19,6 +19,12 @@
 //! default and tuned independently per [`CaptureMode`] rather than shared
 //! across every capture path.
 //!
+//! And [`TurnSilenceParameters`]/[`TuningReport`] (architecture §14.2, T2):
+//! the confidence/punctuation-based engines' `min_turn_silence`/
+//! `max_turn_silence` split that `EndpointingThresholds`' single knob
+//! under-specifies, plus the tuning run that reports p50 and p95 as
+//! independent measurements rather than one blended verdict.
+//!
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
@@ -27,6 +33,7 @@ mod event;
 mod fake;
 mod first_partial_delay;
 mod reevaluate;
+mod turn_silence;
 
 pub use endpointing_threshold::{CaptureMode, EndpointingThresholds, DEFAULT_ENDPOINTING_THRESHOLD};
 pub use event::StreamEvent;
@@ -36,3 +43,8 @@ pub use first_partial_delay::{
     MIN_FIRST_PARTIAL_DELAY,
 };
 pub use reevaluate::{UtteranceReevaluator, DEFAULT_CONTINUATION_WINDOW};
+pub use turn_silence::{
+    LatencyMeasurement, TuningReport, TurnSilenceParameters, DEFAULT_MAX_TURN_SILENCE,
+    DEFAULT_MIN_TURN_SILENCE, P50_LATENCY_TARGET, P95_LATENCY_TARGET, PRO_MAX_TURN_SILENCE,
+    PRO_MAX_TURN_SILENCE_WITH_SPEAKER_LABELS, TUNING_STEP,
+};
