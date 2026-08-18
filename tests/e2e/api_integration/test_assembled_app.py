@@ -2,11 +2,12 @@
 
 Several modules mount routers under the same prefix (`/api/meetings`:
 consent, debrief/session, debrief/api, debrief/artifacts, asr-record,
-compiler/bank; `/api/sessions`: asr-record, debrief/pipeline,
-debrief/artifacts). Nothing
-guarantees that stays collision-free as modules are added independently —
-this is the one place that mounts all of them together and checks, by
-reading the same OpenAPI schema a real client would see.
+compiler/bank, engagement/meetings; `/api/sessions`: asr-record,
+debrief/pipeline, debrief/artifacts; `/api/engagements`: engagement/api,
+engagement/documents, debrief/artifacts). Nothing guarantees that stays
+collision-free as modules are added independently — this is the one place
+that mounts all of them together and checks, by reading the same OpenAPI
+schema a real client would see.
 """
 
 from __future__ import annotations
@@ -19,6 +20,10 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/audit/egress", "get"),
     ("/api/engagements", "post"),
     ("/api/engagements/{engagement_id}", "patch"),
+    ("/api/engagements/{engagement_id}/documents", "get"),
+    ("/api/engagements/{engagement_id}/documents", "post"),
+    ("/api/meetings", "post"),
+    ("/api/meetings/{meeting_id}", "patch"),
     ("/api/sessions/{session_id}/record-path-transcript", "get"),
     ("/api/sessions/{session_id}/record-path-transcript", "post"),
     ("/api/sessions/{session_id}/record-path-alignment", "get"),

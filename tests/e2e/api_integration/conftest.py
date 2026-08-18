@@ -66,6 +66,21 @@ from app.modules.engagement.api.schemas import (  # noqa: E402
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
+from app.modules.engagement.documents.errors import (  # noqa: E402
+    EngagementNotFoundError as DocumentEngagementNotFoundError,
+)
+from app.modules.engagement.documents.models import (  # noqa: E402
+    DocumentUploadRequest,
+    EngagementDocument,
+)
+from app.modules.engagement.documents.router import build_engagement_documents_router  # noqa: E402
+from app.modules.engagement.meetings.models import (  # noqa: E402
+    EngagementContext,
+    MeetingCreateRequest,
+    MeetingUpdateRequest,
+    MeetingUpdateResponse,
+)
+from app.modules.engagement.meetings.router import build_meeting_router  # noqa: E402
 from app.modules.replay.api.errors import ReplayRunNotFoundError  # noqa: E402
 from app.modules.replay.api.models import ReplayRunStatusResponse, SuggestionRatingRequest  # noqa: E402
 from app.modules.replay.api.router import (  # noqa: E402
@@ -111,6 +126,14 @@ class Backend:
     engagement_ids: dict[int, str] = field(default_factory=dict)
     next_engagement_id: int = 0
     engagement_updates: dict[str, EngagementUpdateResponse] = field(default_factory=dict)
+    engagements: dict[str, EngagementCreateRequest] = field(default_factory=dict)
+
+    engagement_documents: dict[str, list[EngagementDocument]] = field(default_factory=dict)
+    next_document_id: int = 0
+
+    meeting_engagement_ids: dict[str, str] = field(default_factory=dict)
+    next_meeting_id: int = 0
+    meeting_updates: dict[str, MeetingUpdateResponse] = field(default_factory=dict)
 
     record_path_transcripts: dict[str, list[Any]] = field(default_factory=dict)
     session_alignments: dict[str, Any] = field(default_factory=dict)
@@ -174,6 +197,7 @@ def build_app(backend: Backend) -> FastAPI:
         engagement_id = f"eng-{backend.next_engagement_id}"
         backend.engagement_ids[backend.next_engagement_id] = engagement_id
         backend.engagement_updates[engagement_id] = EngagementUpdateResponse(engagement_id=engagement_id)
+        backend.engagements[engagement_id] = payload
         return engagement_id
 
     async def update_engagement(
@@ -196,6 +220,62 @@ def build_app(backend: Backend) -> FastAPI:
         return updated
 
     app.include_router(build_engagement_router(create_engagement, update_engagement))
+
+    async def list_documents(engagement_id: str) -> list[EngagementDocument]:
+        if engagement_id not in backend.engagements:
+            raise DocumentEngagementNotFoundError(f"no engagement: {engagement_id}")
+        return backend.engagement_documents.get(engagement_id, [])
+
+    async def upload_document(
+        engagement_id: str, payload: DocumentUploadRequest
+    ) -> EngagementDocument:
+        if engagement_id not in backend.engagements:
+            raise DocumentEngagementNotFoundError(f"no engagement: {engagement_id}")
+        backend.next_document_id += 1
+        document = EngagementDocument(
+            document_id=f"doc-{backend.next_document_id}",
+            name=payload.name,
+            status=payload.status,
+        )
+        backend.engagement_documents.setdefault(engagement_id, []).append(document)
+        return document
+
+    app.include_router(build_engagement_documents_router(list_documents, upload_document))
+
+    async def get_engagement_context(engagement_id: str) -> EngagementContext | None:
+        engagement = backend.engagements.get(engagement_id)
+        if engagement is None:
+            return None
+        update = backend.engagement_updates.get(engagement_id)
+        return EngagementContext(
+            client_organisation=engagement.client_organisation,
+            sector=engagement.sector,
+            commercial_context=engagement.commercial_context,
+            purpose=update.purpose if update else None,
+            scope_boundary=update.scope_boundary if update else None,
+            target_requirements_template=update.target_requirements_template if update else None,
+        )
+
+    async def create_meeting(payload: MeetingCreateRequest) -> str:
+        backend.next_meeting_id += 1
+        meeting_id = f"meeting-{backend.next_meeting_id}"
+        backend.meeting_engagement_ids[meeting_id] = payload.engagement_id
+        return meeting_id
+
+    async def update_meeting(
+        meeting_id: str, payload: MeetingUpdateRequest
+    ) -> MeetingUpdateResponse | None:
+        if meeting_id not in backend.meeting_engagement_ids:
+            return None
+        updated = MeetingUpdateResponse(
+            meeting_id=meeting_id,
+            session_purpose=payload.session_purpose,
+            target_template_sections=payload.target_template_sections,
+        )
+        backend.meeting_updates[meeting_id] = updated
+        return updated
+
+    app.include_router(build_meeting_router(create_meeting, get_engagement_context, update_meeting))
 
     engines = [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
 
