@@ -1,0 +1,137 @@
+name: Sign Windows Installer (EV)
+
+# Takes the Windows installers produced by build.yml — signed there with the
+# CI self-signed cert, or with a plain Authenticode secrets.WINDOWS_CERTIFICATE
+# if one is configured — and re-signs them with the organisation's
+# Authenticode Extended Validation (EV) certificate (PRD NFR-3.4). EV private
+# keys must live on a FIPS-compliant HSM per CA/Browser Forum baseline
+# requirements and cannot be exported as a .pfx, so this goes through the
+# CA's cloud signing service (DigiCert KeyLocker) rather than a certificate
+# file + password. Without SmartScreen reputation from an EV cert, every
+# early install shows a "Windows protected your PC" warning.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: sign-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows artifacts
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  sign-windows:
+    name: EV-sign ${{ matrix.arch }} installer
+    needs: build
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: elicta-windows-${{ matrix.arch }}-${{ github.sha }}
+          path: dist
+
+      - name: Install DigiCert KeyLocker signing tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Invoke-WebRequest -Uri "https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download" `
+            -OutFile "$env:RUNNER_TEMP\smtools.msi"
+          Start-Process msiexec.exe -ArgumentList "/i `"$env:RUNNER_TEMP\smtools.msi`" /quiet /qn" -Wait
+          $toolsDir = "${env:ProgramFiles}\DigiCert\DigiCert One Signing Manager Tools"
+          echo "$toolsDir" >> $env:GITHUB_PATH
+
+      - name: Sync EV certificate into the Windows certificate store
+        env:
+          SM_HOST: ${{ secrets.WINDOWS_EV_SIGNING_API_HOST }}
+          SM_API_KEY: ${{ secrets.WINDOWS_EV_SIGNING_API_KEY }}
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.WINDOWS_EV_CLIENT_CERT_P12_BASE64 }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.WINDOWS_EV_CLIENT_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $clientCertPath = Join-Path $env:RUNNER_TEMP "keylocker-client-cert.p12"
+          [IO.File]::WriteAllBytes($clientCertPath, [Convert]::FromBase64String($env:SM_CLIENT_CERT_FILE_B64))
+          echo "SM_CLIENT_CERT_FILE=$clientCertPath" >> $env:GITHUB_ENV
+
+          # Registers the cloud-backed CNG key storage provider and pulls the
+          # EV certificate (public part only — the private key never leaves
+          # DigiCert's HSM) into the local machine certificate store.
+          smksp_registrar.exe list
+          smctl.exe keypair ls
+          smksp_cert_sync.exe
+
+      - name: Sign installer with the EV certificate
+        env:
+          EV_CERT_FINGERPRINT: ${{ secrets.WINDOWS_EV_CERT_FINGERPRINT }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match "\\x64\\" } | Select-Object -First 1 -ExpandProperty FullName
+          $targets = Get-ChildItem -Path dist -Recurse -Include *.exe, *.msi
+          if (-not $targets) {
+            throw "no Windows installer artifacts found in downloaded artifact"
+          }
+          foreach ($file in $targets) {
+            # Overwrites the CI-only signature from build.yml with the real
+            # EV signature so the shipped installer only ever carries one,
+            # unambiguous Authenticode signature.
+            & $signtool sign /sha1 "$env:EV_CERT_FINGERPRINT" /fd SHA256 `
+              /tr http://timestamp.digicert.com /td SHA256 "$($file.FullName)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool failed to EV-sign $($file.FullName)"
+            }
+          }
+
+      - name: Verify the Authenticode EV signature
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # CA/Browser Forum EV Guidelines policy OID — present in the
+          # Certificate Policies extension of every EV certificate,
+          # regardless of issuing CA. Its absence means this is a
+          # domain-validated or organisation-validated cert, not EV.
+          $evPolicyOid = "2.23.140.1.1"
+          $targets = Get-ChildItem -Path dist -Recurse -Include *.exe, *.msi
+          foreach ($file in $targets) {
+            $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+            Write-Host "$($file.FullName): $($signature.Status) — $($signature.SignerCertificate.Subject)"
+            if ($signature.Status -ne "Valid") {
+              throw "$($file.FullName) is not validly signed: $($signature.Status)"
+            }
+            $hasEvPolicy = $signature.SignerCertificate.Extensions |
+              Where-Object { $_.Oid.FriendlyName -eq "Certificate Policies" } |
+              ForEach-Object { $_.Format($false) } |
+              Select-String -Pattern $evPolicyOid -Quiet
+            if (-not $hasEvPolicy) {
+              throw "$($file.FullName) was not signed with an EV (Extended Validation) certificate"
+            }
+          }
+
+      - name: Upload EV-signed Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: elicta-windows-${{ matrix.arch }}-ev-signed-${{ github.sha }}
+          path: |
+            dist/**/*.msi
+            dist/**/*.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove temporary client certificate
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Path "$env:SM_CLIENT_CERT_FILE" -ErrorAction SilentlyContinue
