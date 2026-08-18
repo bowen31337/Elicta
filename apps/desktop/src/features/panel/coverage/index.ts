@@ -1,4 +1,10 @@
-export type { CoverageSlot, CoverageSummary, SessionStreamEvent, SessionStreamNudge } from './types';
+export type {
+  CoverageSlot,
+  CoverageSummary,
+  SessionStopResult,
+  SessionStreamEvent,
+  SessionStreamNudge,
+} from './types';
 
 export { parseSessionStreamEvent } from './sessionStreamEvents';
 export { countFilledSlots, formatTimeRemaining } from './coverageProgress';
@@ -13,3 +19,9 @@ export type {
   UseSessionStreamOptions,
   UseSessionStreamResult,
 } from './useSessionStream';
+
+export { stopSession } from './stopSession';
+export type { StopSessionFetch, StopSessionOptions } from './stopSession';
+
+export { useStopSession } from './useStopSession';
+export type { StopSessionStatus, UseStopSessionResult } from './useStopSession';

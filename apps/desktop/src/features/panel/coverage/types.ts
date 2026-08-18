@@ -45,3 +45,16 @@ export interface SessionStreamNudge {
 export type SessionStreamEvent =
   | { readonly type: 'coverage'; readonly coverage: CoverageSummary }
   | { readonly type: 'nudge'; readonly nudge: SessionStreamNudge };
+
+/**
+ * Confirmation that `POST /api/meetings/{id}/session/stop` closed the
+ * session and flushed its final coverage summary to the service tier.
+ * `stoppedAt` travels as the ISO timestamp the service assigned when it
+ * closed the session, mirroring how `session/start` hands back
+ * `started_at` -- the panel does not stamp its own clock for either edge.
+ */
+export interface SessionStopResult {
+  readonly sessionId: string;
+  readonly meetingId: string;
+  readonly stoppedAt: string;
+}
