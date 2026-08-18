@@ -1,0 +1,220 @@
+name: Cross-Platform Replay Parity
+
+# Demonstrates NFR-3.8 rather than assuming it: builds the shared Rust core
+# (core/crates/*, core/shared/app) once per platform, runs the replay
+# harness (apps/service/src/app/modules/replay/harness) against the
+# compiled binary on both macOS and Windows for the same fixed golden
+# transcript and seed, and fails the build unless the two platforms'
+# suggestion logs are byte-for-byte identical once parsed. This is the CI
+# gate the architecture doc (§9) calls for — "wire it into CI" — applied
+# specifically to cross-platform parity rather than to ranking regressions.
+#
+# The comparison itself reuses
+# app.modules.replay.harness.comparison.assert_identical_suggestion_logs,
+# the same code any other caller of the harness relies on, so the CI gate
+# and the harness's own guarantee can't drift apart.
+#
+# NOTE: this only has something to compare once the workspace ships a
+# `[[bin]]` target for the shared core (PRD NFR-3.2) — see HANDOFF.md. The
+# "Locate shared core executable" step fails loudly, naming that gap,
+# rather than silently skipping the parity check until one exists.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: parity-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Fixed run_id/seed/input: NFR-3.8 requires identical output for a fixed
+  # input to be demonstrated, not coverage of the full replay corpus.
+  GOLDEN_SEED: "1337"
+  GOLDEN_TRANSCRIPT: "parity-ci-golden-transcript-v1"
+
+jobs:
+  replay:
+    name: Replay harness (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-14
+          - platform: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+
+      - name: Build shared core workspace
+        shell: bash
+        run: cargo build --workspace --release --locked --message-format=json > "$RUNNER_TEMP/cargo-build.json"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install service dependencies
+        working-directory: apps/service
+        run: uv sync --locked
+
+      - name: Locate shared core executable
+        id: core
+        shell: bash
+        env:
+          CARGO_BUILD_LOG: ${{ runner.temp }}/cargo-build.json
+          CORE_BINARY_NAME: ${{ vars.CORE_BINARY_NAME }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/locate_core.py" <<'PY'
+          import json
+          import os
+          import sys
+
+          artifacts = set()
+          with open(os.environ["CARGO_BUILD_LOG"], encoding="utf-8") as f:
+              for line in f:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  message = json.loads(line)
+                  executable = message.get("executable")
+                  if message.get("reason") == "compiler-artifact" and executable:
+                      artifacts.add(executable)
+
+          override = os.environ.get("CORE_BINARY_NAME")
+          candidates = sorted(artifacts)
+          if override:
+              candidates = [a for a in candidates if os.path.basename(a).startswith(override)]
+
+          if not candidates:
+              print(
+                  "no compiled binary found in the Cargo workspace (core/crates/*, "
+                  "core/shared/app) — the shared Rust core has no [[bin]] target yet "
+                  "(PRD NFR-3.2), so the replay harness has nothing to run against. "
+                  "See HANDOFF.md for the current state of the core build.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          if len(candidates) > 1:
+              print(
+                  "multiple workspace binaries found; set the CORE_BINARY_NAME "
+                  "repository variable to pick one: " + ", ".join(candidates),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"path={candidates[0]}\n")
+          PY
+          uv run --project apps/service python "$RUNNER_TEMP/locate_core.py"
+
+      - name: Run replay harness against the shared core
+        shell: bash
+        working-directory: apps/service
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/run_replay.py" <<'PY'
+          import os
+          import time
+
+          from app.modules.replay.driver.models import ReplayRequest, ReplayRunRow
+          from app.modules.replay.harness import SubprocessCoreEngine, run_against_core
+
+
+          class SystemClock:
+              def now_ms(self) -> int:
+                  return int(time.time() * 1000)
+
+
+          class NullSink:
+              def record(self, row: ReplayRunRow) -> None:
+                  pass
+
+
+          request = ReplayRequest(
+              run_id="parity-ci",
+              seed=int(os.environ["GOLDEN_SEED"]),
+              input_bytes=os.environ["GOLDEN_TRANSCRIPT"].encode("utf-8"),
+          )
+          engine = SubprocessCoreEngine(os.environ["CORE_BINARY"])
+
+          result = run_against_core(request, engine=engine, clock=SystemClock(), sink=NullSink())
+
+          with open(os.environ["SUGGESTION_LOG_PATH"], "wb") as f:
+              f.write(result.output_bytes)
+          PY
+          uv run python "$RUNNER_TEMP/run_replay.py"
+        env:
+          CORE_BINARY: ${{ steps.core.outputs.path }}
+          SUGGESTION_LOG_PATH: ${{ runner.temp }}/suggestion-log.ndjson
+
+      - name: Upload suggestion log
+        uses: actions/upload-artifact@v4
+        with:
+          name: suggestion-log-${{ matrix.platform }}
+          path: ${{ runner.temp }}/suggestion-log.ndjson
+          if-no-files-found: error
+          retention-days: 14
+
+  compare-suggestion-logs:
+    name: Compare suggestion logs across platforms
+    needs: [replay]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install service dependencies
+        working-directory: apps/service
+        run: uv sync --locked
+
+      - name: Download suggestion logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suggestion-log-*
+          path: ${{ runner.temp }}/logs
+
+      - name: Assert identical suggestion logs
+        working-directory: apps/service
+        shell: bash
+        env:
+          LOGS_DIR: ${{ runner.temp }}/logs
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/compare_logs.py" <<'PY'
+          import os
+          from pathlib import Path
+
+          from app.modules.replay.harness import assert_identical_suggestion_logs
+
+          logs_dir = Path(os.environ["LOGS_DIR"])
+          logs_by_platform = {
+              directory.name.removeprefix("suggestion-log-"): (directory / "suggestion-log.ndjson").read_bytes()
+              for directory in sorted(logs_dir.iterdir())
+          }
+
+          assert_identical_suggestion_logs(logs_by_platform)
+          print(f"identical suggestion log confirmed across: {', '.join(sorted(logs_by_platform))}")
+          PY
+          uv run python "$RUNNER_TEMP/compare_logs.py"
