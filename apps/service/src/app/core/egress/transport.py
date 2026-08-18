@@ -14,6 +14,7 @@ from typing import Protocol, runtime_checkable
 from app.core.egress.errors import EgressTransportError
 from app.core.egress.models import ProcessorRequest, ProcessorSuccess
 from app.core.egress.pinning import ProcessorPinRegistry
+from app.core.egress.retention import ProcessorRetentionRegistry
 
 
 @runtime_checkable
@@ -56,3 +57,37 @@ class PinningEgressTransport:
             )
 
         return success
+
+
+class RetentionEnforcingEgressTransport:
+    """Wraps another `EgressTransport` and forces vendor-side retention to
+    zero on every request to a processor that exposes it as a parameter
+    (PRD NFR-2.3).
+
+    The zero-retention value is set unconditionally on the outgoing
+    request's ``vendor_params`` — overwriting whatever the caller supplied
+    for that key — so "every request to a processor that supports this
+    carries the zero-retention parameter" is a guarantee this wrapper
+    enforces structurally, rather than something each call site has to
+    remember to set. A processor with no registered entry in
+    `ProcessorRetentionRegistry` passes through unchanged, since there is
+    no vendor parameter to set.
+    """
+
+    def __init__(self, inner: EgressTransport, retention: ProcessorRetentionRegistry) -> None:
+        self._inner = inner
+        self._retention = retention
+
+    def execute(self, request: ProcessorRequest) -> ProcessorSuccess:
+        parameter = self._retention.parameter_for(request.processor_name)
+        if parameter is not None:
+            request = request.model_copy(
+                update={
+                    "vendor_params": {
+                        **request.vendor_params,
+                        parameter.name: parameter.zero_value,
+                    }
+                }
+            )
+
+        return self._inner.execute(request)

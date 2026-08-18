@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -23,12 +25,19 @@ class ProcessorRequest(BaseModel):
     ``destination`` is restricted to ``https://`` so that "every request
     sends over TLS only" is a guarantee this type enforces on construction,
     rather than something every caller has to remember to check.
+
+    ``vendor_params`` carries the vendor-specific request parameters (e.g.
+    Deepgram's ``mip_opt_out``) that ride alongside the request body.
+    `RetentionEnforcingEgressTransport` reads and overwrites entries here
+    to force vendor-side retention to zero (PRD NFR-2.3); callers may also
+    populate it directly for parameters unrelated to retention.
     """
 
     processor_name: str
     engagement_id: str
     destination: str
     body_bytes: int = Field(ge=0)
+    vendor_params: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("destination")
     @classmethod
