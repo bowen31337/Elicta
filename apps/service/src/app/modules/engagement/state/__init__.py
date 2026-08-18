@@ -15,6 +15,10 @@ before a session starts (PRD FR-3.14).
 `select_fallback_bank` falls back to a generic, sector- and
 project-type-keyed elicitation bank for an engagement with no reference
 documents to compile a bank from (PRD FR-3.13).
+
+`build_engagement_state_router` exposes `GET /api/engagements/{id}/state`
+(PRD FR-4.8, FR-8.9): the inherited open-questions list from an engagement's
+most recent meeting plus its standing `RequirementsState`.
 """
 
 from __future__ import annotations
@@ -34,11 +38,20 @@ from app.modules.engagement.state.generic_elicitation_bank import (
     build_generic_elicitation_bank,
     select_fallback_bank,
 )
-from app.modules.engagement.state.models import ReferenceClaim
+from app.modules.engagement.state.models import (
+    EngagementStateResponse,
+    InheritedOpenQuestion,
+    ReferenceClaim,
+)
 from app.modules.engagement.state.reference_claims import (
     LoadReferenceClaim,
     SaveReferenceClaim,
     set_verify_with_client,
+)
+from app.modules.engagement.state.router import (
+    GetInheritedOpenQuestions,
+    GetRequirementsState,
+    build_engagement_state_router,
 )
 
 __all__ = [
@@ -48,11 +61,16 @@ __all__ = [
     "CompletenessLevel",
     "ContextCompleteness",
     "ContextPackSignals",
+    "EngagementStateResponse",
     "GenericBankCandidate",
     "GenericElicitationBank",
+    "GetInheritedOpenQuestions",
+    "GetRequirementsState",
+    "InheritedOpenQuestion",
     "LoadReferenceClaim",
     "ReferenceClaim",
     "SaveReferenceClaim",
+    "build_engagement_state_router",
     "build_generic_elicitation_bank",
     "compute_context_completeness",
     "select_fallback_bank",
