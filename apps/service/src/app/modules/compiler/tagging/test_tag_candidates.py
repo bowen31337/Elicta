@@ -17,7 +17,9 @@ from app.modules.compiler.tagging.tag_candidates import (
 )
 
 
-def make_tagging(candidate_id: str, **overrides) -> CandidateTagging:
+def make_tagging(
+    candidate_id: str, phrasing: str = "Can you clarify the scope?", **overrides
+) -> CandidateTagging:
     defaults = {
         "template_section": "scope",
         "trigger_types": ["unquantified_adjective"],
@@ -25,7 +27,9 @@ def make_tagging(candidate_id: str, **overrides) -> CandidateTagging:
         "requires": [],
     }
     defaults.update(overrides)
-    return CandidateTagging(id=candidate_id, tags=CandidateTags(**defaults))
+    return CandidateTagging(
+        id=candidate_id, phrasing=phrasing, tags=CandidateTags(**defaults)
+    )
 
 
 def test_tag_candidates_preserves_each_candidates_tag_fields():
@@ -43,6 +47,7 @@ def test_tag_candidates_preserves_each_candidates_tag_fields():
 
     assert tagged[0] == TaggedCandidate(
         id="candidate-1",
+        phrasing="Can you clarify the scope?",
         template_section="scope",
         trigger_types=["a", "b"],
         priority=2,
@@ -50,6 +55,56 @@ def test_tag_candidates_preserves_each_candidates_tag_fields():
     )
     assert tagged[1].id == "candidate-2"
     assert tagged[1].requires == ["candidate-1"]
+
+
+def test_tag_candidates_persists_slot_placeholders_in_phrasing_unchanged():
+    taggings = [
+        make_tagging(
+            "candidate-1",
+            phrasing="What's the slowest {term} the {function} team would still accept?",
+        )
+    ]
+
+    tagged = tag_candidates(taggings)
+
+    assert (
+        tagged[0].phrasing
+        == "What's the slowest {term} the {function} team would still accept?"
+    )
+
+
+def test_phrasing_with_no_slots_is_accepted():
+    taggings = [make_tagging("candidate-1", phrasing="Can you clarify the scope?")]
+
+    tagged = tag_candidates(taggings)
+
+    assert tagged[0].phrasing == "Can you clarify the scope?"
+
+
+def test_phrasing_with_an_unclosed_placeholder_brace_is_rejected():
+    taggings = [make_tagging("candidate-1", phrasing="What about {term")]
+
+    with pytest.raises(ValueError, match="candidate-1"):
+        tag_candidates(taggings)
+
+
+def test_phrasing_with_a_stray_closing_brace_is_rejected():
+    taggings = [make_tagging("candidate-1", phrasing="What about term}")]
+
+    with pytest.raises(ValueError, match="candidate-1"):
+        tag_candidates(taggings)
+
+
+def test_phrasing_with_an_anonymous_placeholder_is_rejected():
+    taggings = [make_tagging("candidate-1", phrasing="What about {}?")]
+
+    with pytest.raises(ValueError, match="candidate-1"):
+        tag_candidates(taggings)
+
+
+def test_a_candidate_with_empty_phrasing_is_rejected():
+    with pytest.raises(ValueError):
+        make_tagging("candidate-1", phrasing="")
 
 
 def test_a_requires_id_naming_another_batch_member_is_accepted():
