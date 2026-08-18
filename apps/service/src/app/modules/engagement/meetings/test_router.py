@@ -1,4 +1,4 @@
-"""Tests for the meeting attendees HTTP surface (PRD FR-3.9, FR-3.10)."""
+"""Tests for the meeting attendees and meeting update HTTP surfaces (PRD FR-3.8, FR-3.9, FR-3.10)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,16 @@ import uuid
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.modules.engagement.meetings.models import Attendee, AttendeeCreateRequest
-from app.modules.engagement.meetings.router import build_meeting_attendees_router
+from app.modules.engagement.meetings.models import (
+    Attendee,
+    AttendeeCreateRequest,
+    MeetingUpdateRequest,
+    MeetingUpdateResponse,
+)
+from app.modules.engagement.meetings.router import (
+    build_meeting_attendees_router,
+    build_meeting_router,
+)
 
 
 def make_client() -> tuple[TestClient, list[tuple[str, AttendeeCreateRequest]]]:
@@ -231,6 +239,133 @@ def test_an_invitee_without_an_email_is_rejected():
     response = client.post(
         "/api/meetings/meeting-1/attendees/from-calendar-invite",
         json={"invitees": [{"display_name": "Jamie Rivera"}]},
+    )
+
+    assert response.status_code == 422
+
+
+def make_update_client(
+    meeting_id: str = "meeting-1",
+    existing_meetings: set[str] | None = None,
+) -> tuple[TestClient, list[tuple[str, MeetingUpdateRequest]]]:
+    received_updates: list[tuple[str, MeetingUpdateRequest]] = []
+    known_ids = existing_meetings if existing_meetings is not None else {meeting_id}
+
+    async def update_meeting(
+        target_id: str, payload: MeetingUpdateRequest
+    ) -> MeetingUpdateResponse | None:
+        received_updates.append((target_id, payload))
+        if target_id not in known_ids:
+            return None
+        return MeetingUpdateResponse(
+            meeting_id=target_id,
+            session_purpose=payload.session_purpose,
+            target_template_sections=payload.target_template_sections,
+        )
+
+    app = FastAPI()
+    app.include_router(build_meeting_router(update_meeting))
+    return TestClient(app), received_updates
+
+
+def test_updating_a_meeting_returns_200_with_updated_fields():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch(
+        "/api/meetings/meeting-1",
+        json={
+            "session_purpose": "Validate scope boundary for phase 2",
+            "target_template_sections": ["Functional Requirements", "Non-Functional Requirements"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "meeting_id": "meeting-1",
+        "session_purpose": "Validate scope boundary for phase 2",
+        "target_template_sections": ["Functional Requirements", "Non-Functional Requirements"],
+    }
+
+
+def test_updating_a_meeting_passes_fields_through():
+    client, received_updates = make_update_client(meeting_id="meeting-1")
+
+    client.patch(
+        "/api/meetings/meeting-1",
+        json={
+            "session_purpose": "Validate scope boundary for phase 2",
+            "target_template_sections": ["Functional Requirements"],
+        },
+    )
+
+    assert len(received_updates) == 1
+    target_id, payload = received_updates[0]
+    assert target_id == "meeting-1"
+    assert payload.session_purpose == "Validate scope boundary for phase 2"
+    assert payload.target_template_sections == ["Functional Requirements"]
+
+
+def test_updating_a_meeting_with_a_single_field_is_allowed():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch(
+        "/api/meetings/meeting-1",
+        json={"session_purpose": "Validate scope boundary for phase 2"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_purpose"] == "Validate scope boundary for phase 2"
+    assert body["target_template_sections"] is None
+
+
+def test_updating_an_unknown_meeting_returns_404():
+    client, _ = make_update_client(meeting_id="meeting-1", existing_meetings=set())
+
+    response = client.patch(
+        "/api/meetings/does-not-exist",
+        json={"session_purpose": "Validate scope boundary for phase 2"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_updating_a_meeting_with_no_fields_is_rejected():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch("/api/meetings/meeting-1", json={})
+
+    assert response.status_code == 422
+
+
+def test_updating_a_meeting_with_a_blank_purpose_is_rejected():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch(
+        "/api/meetings/meeting-1",
+        json={"session_purpose": ""},
+    )
+
+    assert response.status_code == 422
+
+
+def test_updating_a_meeting_with_an_empty_template_section_list_is_rejected():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch(
+        "/api/meetings/meeting-1",
+        json={"target_template_sections": []},
+    )
+
+    assert response.status_code == 422
+
+
+def test_updating_a_meeting_with_an_unknown_field_is_rejected():
+    client, _ = make_update_client(meeting_id="meeting-1")
+
+    response = client.patch(
+        "/api/meetings/meeting-1",
+        json={"session_purpose": "Validate scope boundary", "notes": "irrelevant"},
     )
 
     assert response.status_code == 422

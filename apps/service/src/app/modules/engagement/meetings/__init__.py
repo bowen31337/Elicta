@@ -3,10 +3,14 @@ from app.modules.engagement.meetings.models import (
     AttendeeCreateRequest,
     CalendarInvite,
     CalendarInvitee,
+    MeetingUpdateRequest,
+    MeetingUpdateResponse,
 )
 from app.modules.engagement.meetings.router import (
     AddAttendee,
+    UpdateMeeting,
     build_meeting_attendees_router,
+    build_meeting_router,
 )
 
 __all__ = [
@@ -15,5 +19,9 @@ __all__ = [
     "AttendeeCreateRequest",
     "CalendarInvite",
     "CalendarInvitee",
+    "MeetingUpdateRequest",
+    "MeetingUpdateResponse",
+    "UpdateMeeting",
     "build_meeting_attendees_router",
+    "build_meeting_router",
 ]

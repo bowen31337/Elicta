@@ -1,4 +1,4 @@
-"""Request/response DTOs for the meeting attendees API (PRD FR-3.9, FR-3.10).
+"""Request/response DTOs for the meeting attendees and meeting update APIs (PRD FR-3.8, FR-3.9, FR-3.10).
 
 `AttendeeCreateRequest` mirrors the `attendees` table's structured columns:
 `role`, `business_function`, `decision_authority`, `domain_expertise`, plus
@@ -20,11 +20,18 @@ persisted into.
 `CalendarInvitee` and `CalendarInvite` model the calendar invite itself,
 where one is available for a meeting (FR-3.9): a list of invited people,
 each identified by `email` and an optional friendlier `display_name`.
+
+`MeetingUpdateRequest`/`MeetingUpdateResponse` cover FR-3.8: per-meeting
+setup that keeps to a "confirm rather than re-enter" workflow (FR-3.7) is
+supposed to take under two minutes, so `session_purpose` and
+`target_template_sections` are both optional -- a caller updates whichever
+subset changed -- but at least one must be supplied, since a PATCH with
+nothing to change has no meaningful effect to report as a 200.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AttendeeCreateRequest(BaseModel):
@@ -74,3 +81,33 @@ class CalendarInvite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     invitees: list[CalendarInvitee] = Field(default_factory=list)
+
+
+class MeetingUpdateRequest(BaseModel):
+    """This session's purpose and target template sections (PRD FR-3.8).
+
+    Both fields are optional so a caller can update either one alone; at
+    least one must be supplied, since a PATCH with nothing to change has no
+    meaningful effect to report as a 200.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_purpose: str | None = Field(default=None, min_length=1)
+    target_template_sections: list[str] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> MeetingUpdateRequest:
+        if self.session_purpose is None and self.target_template_sections is None:
+            raise ValueError(
+                "at least one of session_purpose, target_template_sections must be provided"
+            )
+        return self
+
+
+class MeetingUpdateResponse(BaseModel):
+    """A meeting's session purpose and target template sections after a PATCH (PRD FR-3.8)."""
+
+    meeting_id: str
+    session_purpose: str | None = None
+    target_template_sections: list[str] | None = None
