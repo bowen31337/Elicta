@@ -6,5 +6,5 @@ mod chokepoint;
 pub use chokepoint::{
     EgressChokepoint, EgressClock, EgressError, EgressLogError, EgressLogRow, EgressLogSink,
     EgressOutcome, EgressPurpose, EgressRequest, EgressSuccess, EgressTransport,
-    EgressTransportError, SystemClock,
+    EgressTransportError, NoRedaction, PiiRedactor, SystemClock,
 };

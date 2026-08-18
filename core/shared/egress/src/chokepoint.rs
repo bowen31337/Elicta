@@ -83,6 +83,35 @@ pub struct EgressLogRow {
     pub destination: String,
     pub method: String,
     pub outcome: EgressOutcome,
+    /// Whether a [`PiiRedactor`] ran against this request before it left the
+    /// device (PRD NFR-2.6). Recorded unconditionally — even when no
+    /// redactor is configured — so the audit trail can tell "redaction ran
+    /// and found nothing to change" apart from "no redaction was even
+    /// wired up," rather than both looking identical after the fact.
+    pub redaction_applied: bool,
+}
+
+/// Redacts PII from a request before it reaches [`EgressTransport`]. Left as
+/// an optional, swappable trait — like [`EgressTransport`] and
+/// [`EgressLogSink`] — so the chokepoint stays the one place this decision
+/// is made rather than each call site deciding for itself whether to scrub
+/// its own payload (PRD NFR-2.6).
+pub trait PiiRedactor {
+    /// Returns the (possibly rewritten) request and whether anything was
+    /// actually changed. A redactor that runs but finds no PII should
+    /// return `applied: false` — the flag reflects effect, not attempt.
+    fn redact(&self, request: EgressRequest) -> (EgressRequest, bool);
+}
+
+/// The chokepoint's default when no [`PiiRedactor`] is supplied: passes the
+/// request through untouched and reports no redaction, so `send` doesn't
+/// need a separate code path for "redaction is off."
+pub struct NoRedaction;
+
+impl PiiRedactor for NoRedaction {
+    fn redact(&self, request: EgressRequest) -> (EgressRequest, bool) {
+        (request, false)
+    }
 }
 
 /// A failure to persist the audit row itself.
@@ -127,27 +156,46 @@ pub enum EgressError {
 /// routed through (PRD NFR-2.7). Holding this as the only way to reach
 /// [`EgressTransport`] is what makes "every egress is logged" a structural
 /// guarantee instead of a call-site convention.
-pub struct EgressChokepoint<C, T, S> {
+pub struct EgressChokepoint<C, T, S, R = NoRedaction> {
     clock: C,
     transport: T,
     sink: S,
+    redactor: R,
 }
 
-impl<C: EgressClock, T: EgressTransport, S: EgressLogSink> EgressChokepoint<C, T, S> {
+impl<C: EgressClock, T: EgressTransport, S: EgressLogSink> EgressChokepoint<C, T, S, NoRedaction> {
+    /// Builds a chokepoint with PII redaction switched off (PRD NFR-2.6
+    /// calls it optional). Every row it writes still carries
+    /// `redaction_applied: false`, so "off" is a recorded state, not a
+    /// silent one.
     pub fn new(clock: C, transport: T, sink: S) -> Self {
+        Self::with_redactor(clock, transport, sink, NoRedaction)
+    }
+}
+
+impl<C: EgressClock, T: EgressTransport, S: EgressLogSink, R: PiiRedactor>
+    EgressChokepoint<C, T, S, R>
+{
+    /// Builds a chokepoint that runs every request through `redactor`
+    /// before it reaches `transport` (PRD NFR-2.6).
+    pub fn with_redactor(clock: C, transport: T, sink: S, redactor: R) -> Self {
         Self {
             clock,
             transport,
             sink,
+            redactor,
         }
     }
 
-    /// Executes `request` and unconditionally persists an `egress_log` row
-    /// for it before returning. The row is written whether the request
-    /// succeeded or failed, and a failure to persist it is surfaced as
+    /// Runs `request` through the configured [`PiiRedactor`], executes it,
+    /// and unconditionally persists an `egress_log` row for it before
+    /// returning. The row is written whether the request succeeded or
+    /// failed, and a failure to persist it is surfaced as
     /// [`EgressError::Logging`] rather than swallowed — an egress that
     /// can't be audited is the failure this chokepoint exists to prevent.
     pub fn send(&self, request: EgressRequest) -> Result<EgressSuccess, EgressError> {
+        let (request, redaction_applied) = self.redactor.redact(request);
+
         let outcome = self.transport.execute(&request);
 
         let row = EgressLogRow {
@@ -164,6 +212,7 @@ impl<C: EgressClock, T: EgressTransport, S: EgressLogSink> EgressChokepoint<C, T
                     error: err.0.clone(),
                 },
             },
+            redaction_applied,
         };
 
         self.sink.record(&row).map_err(EgressError::Logging)?;
@@ -224,6 +273,23 @@ mod tests {
         }
     }
 
+    /// A [`PiiRedactor`] whose behavior is fixed by the test, rather than
+    /// one that inspects request content, so tests can assert on the
+    /// chokepoint's wiring without depending on real redaction logic.
+    struct StubRedactor {
+        applied: bool,
+        rewritten_destination: Option<String>,
+    }
+
+    impl PiiRedactor for StubRedactor {
+        fn redact(&self, mut request: EgressRequest) -> (EgressRequest, bool) {
+            if let Some(destination) = &self.rewritten_destination {
+                request.destination = destination.clone();
+            }
+            (request, self.applied)
+        }
+    }
+
     fn sample_request() -> EgressRequest {
         EgressRequest {
             purpose: EgressPurpose::SlowLaneSync,
@@ -259,6 +325,7 @@ mod tests {
                 response_bytes: 64
             }
         );
+        assert!(!rows[0].redaction_applied);
     }
 
     #[test]
@@ -335,5 +402,109 @@ mod tests {
 
         assert_eq!(success_chokepoint.sink.rows.borrow().len(), 3);
         assert_eq!(failure_chokepoint.sink.rows.borrow().len(), 2);
+    }
+
+    #[test]
+    fn a_request_that_the_redactor_actually_changes_marks_the_row_as_redacted() {
+        let chokepoint = EgressChokepoint::with_redactor(
+            FixedClock(5_000),
+            StubTransport(Ok(EgressSuccess {
+                status_code: 200,
+                response_bytes: 64,
+            })),
+            SpySink::new(),
+            StubRedactor {
+                applied: true,
+                rewritten_destination: Some("https://slow-lane.example/redacted".to_string()),
+            },
+        );
+
+        let result = chokepoint.send(sample_request());
+
+        assert!(result.is_ok());
+        let rows = chokepoint.sink.rows.borrow();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].redaction_applied);
+        assert_eq!(rows[0].destination, "https://slow-lane.example/redacted");
+    }
+
+    #[test]
+    fn a_redactor_that_finds_nothing_to_change_records_redaction_applied_as_false() {
+        let chokepoint = EgressChokepoint::with_redactor(
+            FixedClock(6_000),
+            StubTransport(Ok(EgressSuccess {
+                status_code: 200,
+                response_bytes: 64,
+            })),
+            SpySink::new(),
+            StubRedactor {
+                applied: false,
+                rewritten_destination: None,
+            },
+        );
+
+        let _ = chokepoint.send(sample_request());
+
+        let rows = chokepoint.sink.rows.borrow();
+        assert!(!rows[0].redaction_applied);
+    }
+
+    #[test]
+    fn the_transport_receives_the_redacted_request_not_the_original() {
+        struct CapturingTransport {
+            seen_destination: RefCell<Option<String>>,
+        }
+
+        impl EgressTransport for CapturingTransport {
+            fn execute(
+                &self,
+                request: &EgressRequest,
+            ) -> Result<EgressSuccess, EgressTransportError> {
+                *self.seen_destination.borrow_mut() = Some(request.destination.clone());
+                Ok(EgressSuccess {
+                    status_code: 200,
+                    response_bytes: 0,
+                })
+            }
+        }
+
+        let chokepoint = EgressChokepoint::with_redactor(
+            FixedClock(7_000),
+            CapturingTransport {
+                seen_destination: RefCell::new(None),
+            },
+            SpySink::new(),
+            StubRedactor {
+                applied: true,
+                rewritten_destination: Some("https://slow-lane.example/redacted".to_string()),
+            },
+        );
+
+        let _ = chokepoint.send(sample_request());
+
+        assert_eq!(
+            chokepoint.transport.seen_destination.borrow().as_deref(),
+            Some("https://slow-lane.example/redacted")
+        );
+    }
+
+    #[test]
+    fn a_failing_redaction_row_still_persists_when_the_transport_fails() {
+        let chokepoint = EgressChokepoint::with_redactor(
+            FixedClock(8_000),
+            StubTransport(Err(EgressTransportError("timeout".to_string()))),
+            SpySink::new(),
+            StubRedactor {
+                applied: true,
+                rewritten_destination: None,
+            },
+        );
+
+        let result = chokepoint.send(sample_request());
+
+        assert!(result.is_err());
+        let rows = chokepoint.sink.rows.borrow();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].redaction_applied);
     }
 }
