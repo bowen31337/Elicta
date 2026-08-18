@@ -1,9 +1,10 @@
 """Debrief pipeline package: the batch stages that run once a meeting's record-path transcript exists.
 
-Exposes no router — this package is consumed by whichever part of the
-`debrief` module (e.g. an API or session layer) drives the pipeline end to
-end. This stage runs full diarization over the retained audio and persists a
-speaker_tag per utterance (PRD FR-7.2); later stages (transcript cleaning,
+Exposes one router, `build_citation_row_router` (PRD FR-8.7, FR-2.7), for
+writing a single citation row directly; every other stage here is consumed by
+whichever part of the `debrief` module (e.g. an API or session layer) drives
+the pipeline end to end. This stage runs full diarization over the retained
+audio and persists a speaker_tag per utterance (PRD FR-7.2); later stages (transcript cleaning,
 section classification, the BMAD analyst chain) build on the `Utterance`
 this one produces. Once both record-path transcription and diarization have
 completed for a session, `destroy_retained_audio` discards the raw audio and
@@ -21,7 +22,12 @@ draft follow-up email — every claim grounded in a citation back to the
 classified utterances (PRD FR-4.1, FR-8). Once the chain completes,
 `persist_citation_table` binds every one of those claims to a citations-table
 row of utterance_id, timestamp, and speaker, failing the run rather than
-persisting a claim with no row for it (PRD FR-8.7).
+persisting a claim with no row for it (PRD FR-8.7). `build_citation_row_router`
+exposes that same row shape as a direct write: since `CitationRow.utterance_id`
+is a required `str`, a write whose body carries a null `utterance_id` is
+rejected with 422 by the schema itself, not by any check this package writes —
+citation integrity is structural rather than dependent on the caller (the BMAD
+chain's prompt, or any other writer) behaving well.
 """
 
 from __future__ import annotations
@@ -96,6 +102,7 @@ from app.modules.debrief.pipeline.retention import (
     destroy_retained_audio,
     is_ready_for_audio_destruction,
 )
+from app.modules.debrief.pipeline.router import SaveCitationRow, build_citation_row_router
 from app.modules.debrief.pipeline.service import DiarizeAudio, SaveSessionDiarization, run_diarization
 
 __all__ = [
@@ -131,6 +138,7 @@ __all__ = [
     "OpenQuestion",
     "ProjectBriefDraft",
     "RunBmadAnalystChain",
+    "SaveCitationRow",
     "SaveSessionBmadAnalystChain",
     "SaveSessionCitationTable",
     "SaveSessionDiarization",
@@ -147,6 +155,7 @@ __all__ = [
     "TranscriptCleaningStatus",
     "TranscriptSpan",
     "Utterance",
+    "build_citation_row_router",
     "build_citation_rows",
     "compute_slot_fill_states",
     "destroy_retained_audio",
