@@ -21,31 +21,34 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use crate::state::Utterance;
+use crate::state::Command;
 
-/// Durable storage a [`crate::task::SessionTask`] persists every utterance
-/// through before applying it to in-memory state. Implementations must not
-/// return `Ok` from [`SessionStore::append`] until the write is durable
-/// (synced to disk) — that is the boundary NFR-4.3's crash guarantee
-/// depends on.
+/// Durable storage a [`crate::task::SessionTask`] persists every command
+/// through before applying it to in-memory state — not only
+/// [`Command::AppendUtterance`], since a crash must not silently drop a
+/// recorded decision or contradiction any more than it may drop an
+/// utterance. Implementations must not return `Ok` from
+/// [`SessionStore::append`] until the write is durable (synced to disk) —
+/// that is the boundary NFR-4.3's crash guarantee depends on.
 pub trait SessionStore: Send {
-    /// Every utterance previously persisted, oldest first, plus whether the
+    /// Every command previously persisted, oldest first, plus whether the
     /// log's tail was cut off mid-write (see [`LoadOutcome`]).
     fn load_all(&mut self) -> Result<LoadOutcome, StoreError>;
 
-    /// Durably appends one utterance. Must not return `Ok` until the write
-    /// is synced to disk.
-    fn append(&mut self, utterance: &Utterance) -> Result<(), StoreError>;
+    /// Durably appends one command. Must not return `Ok` until the write is
+    /// synced to disk.
+    fn append(&mut self, command: &Command) -> Result<(), StoreError>;
 }
 
 /// The result of replaying a session store at startup.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct LoadOutcome {
-    /// Every utterance that was fully durable before this process started,
-    /// in the order they were originally appended.
-    pub utterances: Vec<Utterance>,
+    /// Every command that was fully durable before this process started,
+    /// in the order they were originally applied — replaying them through
+    /// [`crate::state::SessionState::restore`] reproduces state exactly.
+    pub commands: Vec<Command>,
     /// `true` when the log's last record was left incomplete — the store
-    /// was in the middle of durably writing one more utterance when the
+    /// was in the middle of durably writing one more command when the
     /// previous process stopped. Set so a caller can surface this rather
     /// than resume silently (architecture §10: "fail loudly").
     pub truncated_tail: bool,
@@ -94,16 +97,16 @@ impl SessionStore for FileSessionStore {
             &lines[..]
         };
 
-        let mut utterances = Vec::with_capacity(complete.len());
+        let mut commands = Vec::with_capacity(complete.len());
         for line in complete {
-            utterances.push(serde_json::from_str(line)?);
+            commands.push(serde_json::from_str(line)?);
         }
-        Ok(LoadOutcome { utterances, truncated_tail })
+        Ok(LoadOutcome { commands, truncated_tail })
     }
 
-    fn append(&mut self, utterance: &Utterance) -> Result<(), StoreError> {
+    fn append(&mut self, command: &Command) -> Result<(), StoreError> {
         let mut file = OpenOptions::new().create(true).append(true).open(&self.path)?;
-        let mut record = serde_json::to_vec(utterance)?;
+        let mut record = serde_json::to_vec(command)?;
         record.push(b'\n');
         file.write_all(&record)?;
         file.sync_all()?;
@@ -147,13 +150,13 @@ impl From<serde_json::Error> for StoreError {
 /// exports for that.
 #[cfg(test)]
 pub(crate) struct InMemorySessionStore {
-    utterances: Vec<Utterance>,
+    commands: Vec<Command>,
 }
 
 #[cfg(test)]
 impl InMemorySessionStore {
     pub(crate) fn new() -> Self {
-        Self { utterances: Vec::new() }
+        Self { commands: Vec::new() }
     }
 }
 
@@ -161,13 +164,13 @@ impl InMemorySessionStore {
 impl SessionStore for InMemorySessionStore {
     fn load_all(&mut self) -> Result<LoadOutcome, StoreError> {
         Ok(LoadOutcome {
-            utterances: self.utterances.clone(),
+            commands: self.commands.clone(),
             truncated_tail: false,
         })
     }
 
-    fn append(&mut self, utterance: &Utterance) -> Result<(), StoreError> {
-        self.utterances.push(utterance.clone());
+    fn append(&mut self, command: &Command) -> Result<(), StoreError> {
+        self.commands.push(command.clone());
         Ok(())
     }
 }
@@ -175,6 +178,7 @@ impl SessionStore for InMemorySessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Utterance;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     fn temp_path(name: &str) -> PathBuf {
@@ -195,6 +199,10 @@ mod tests {
         }
     }
 
+    fn append_utterance(id: &str) -> Command {
+        Command::AppendUtterance(utterance(id))
+    }
+
     #[test]
     fn loading_a_store_that_has_never_been_written_to_is_empty_and_not_truncated() {
         let path = temp_path("never-written");
@@ -206,35 +214,51 @@ mod tests {
     }
 
     #[test]
-    fn appended_utterances_round_trip_in_order() {
+    fn appended_commands_round_trip_in_order() {
         let path = temp_path("round-trip");
         let mut store = FileSessionStore::new(&path);
 
-        store.append(&utterance("utt-a")).unwrap();
-        store.append(&utterance("utt-b")).unwrap();
+        store.append(&append_utterance("utt-a")).unwrap();
+        store.append(&append_utterance("utt-b")).unwrap();
 
         let outcome = store.load_all().unwrap();
 
-        assert_eq!(outcome.utterances, vec![utterance("utt-a"), utterance("utt-b")]);
+        assert_eq!(outcome.commands, vec![append_utterance("utt-a"), append_utterance("utt-b")]);
+        assert!(!outcome.truncated_tail);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_non_utterance_command_round_trips_too() {
+        let path = temp_path("non-utterance-round-trip");
+        let mut store = FileSessionStore::new(&path);
+        let command = Command::MarkSectionCovered("budget".to_string());
+
+        store.append(&command).unwrap();
+
+        let outcome = store.load_all().unwrap();
+
+        assert_eq!(outcome.commands, vec![command]);
         assert!(!outcome.truncated_tail);
 
         let _ = std::fs::remove_file(&path);
     }
 
     /// The crash NFR-4.3 is about: a process dies partway through durably
-    /// writing one more utterance. What's on disk is every earlier,
+    /// writing one more command. What's on disk is every earlier,
     /// complete record plus a partial line for the one in flight —
     /// simulated here by writing raw bytes rather than going through
     /// `append`, since `append` itself always writes a complete record.
     #[test]
-    fn a_crash_mid_write_loses_only_the_utterance_being_written() {
+    fn a_crash_mid_write_loses_only_the_command_being_written() {
         let path = temp_path("crash-mid-write");
         let mut store = FileSessionStore::new(&path);
 
-        store.append(&utterance("utt-a")).unwrap();
-        store.append(&utterance("utt-b")).unwrap();
+        store.append(&append_utterance("utt-a")).unwrap();
+        store.append(&append_utterance("utt-b")).unwrap();
 
-        let mut partial = serde_json::to_vec(&utterance("utt-c")).unwrap();
+        let mut partial = serde_json::to_vec(&append_utterance("utt-c")).unwrap();
         partial.truncate(partial.len() / 2);
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(&partial).unwrap();
@@ -242,7 +266,7 @@ mod tests {
 
         let outcome = store.load_all().unwrap();
 
-        assert_eq!(outcome.utterances, vec![utterance("utt-a"), utterance("utt-b")]);
+        assert_eq!(outcome.commands, vec![append_utterance("utt-a"), append_utterance("utt-b")]);
         assert!(outcome.truncated_tail);
 
         let _ = std::fs::remove_file(&path);

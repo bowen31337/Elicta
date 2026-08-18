@@ -18,11 +18,53 @@ pub struct Utterance {
     pub end_ms: u64,
 }
 
+/// A decision the meeting reached, anchored to the utterance it was
+/// recorded from. One of the four facets of the [`StateSummary`]
+/// (architecture §3.4).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Decision {
+    pub id: String,
+    pub summary: String,
+    pub utterance_id: String,
+}
+
+/// A conflict between two utterances — the contradiction trigger's (PRD
+/// FR-5.4) finding, once it has landed in session state. One of the four
+/// facets of the [`StateSummary`] (architecture §3.4).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Contradiction {
+    pub id: String,
+    pub summary: String,
+    pub utterance_id: String,
+    pub conflicts_with_utterance_id: String,
+}
+
+/// A topic raised but not yet resolved. Stays in
+/// [`StateSummary::open_threads`] from the [`Command::OpenThread`] that
+/// created it until a matching [`Command::CloseThread`] removes it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OpenThread {
+    pub id: String,
+    pub summary: String,
+    pub opened_at_utterance_id: String,
+}
+
 /// A request to mutate session state. Sent to a [`crate::task::SessionTask`]
 /// over its command channel; never applied directly by a caller.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     AppendUtterance(Utterance),
+    /// Marks a template section as covered. Idempotent — marking an
+    /// already-covered section again does not duplicate it in
+    /// [`StateSummary::covered_sections`].
+    MarkSectionCovered(String),
+    OpenThread(OpenThread),
+    /// Removes the open thread with this id from
+    /// [`StateSummary::open_threads`]. A no-op if no thread with that id is
+    /// currently open (already closed, or never opened).
+    CloseThread { id: String },
+    RecordDecision(Decision),
+    RecordContradiction(Contradiction),
 }
 
 /// The record of one command having been applied, carrying the position it
@@ -34,6 +76,11 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mutation {
     UtteranceAppended { utterance: Utterance, sequence: u64 },
+    SectionCovered { section: String, sequence: u64 },
+    ThreadOpened { thread: OpenThread, sequence: u64 },
+    ThreadClosed { id: String, sequence: u64 },
+    DecisionRecorded { decision: Decision, sequence: u64 },
+    ContradictionRecorded { contradiction: Contradiction, sequence: u64 },
 }
 
 impl Mutation {
@@ -44,9 +91,29 @@ impl Mutation {
     /// operationally, and it is asserted directly in `task.rs`'s tests.
     pub fn sequence(&self) -> u64 {
         match self {
-            Mutation::UtteranceAppended { sequence, .. } => *sequence,
+            Mutation::UtteranceAppended { sequence, .. }
+            | Mutation::SectionCovered { sequence, .. }
+            | Mutation::ThreadOpened { sequence, .. }
+            | Mutation::ThreadClosed { sequence, .. }
+            | Mutation::DecisionRecorded { sequence, .. }
+            | Mutation::ContradictionRecorded { sequence, .. } => *sequence,
         }
     }
+}
+
+/// A materialised, structured view of session state — covered sections,
+/// open threads, decisions and contradictions (architecture §3.4) — far
+/// smaller than the utterance log and what actually carries context
+/// forward to the slow lane orchestrator between ticks (§3.8). Built fresh
+/// by [`SessionState::summary`] on every call rather than kept up to date
+/// incrementally, so it always reflects every command applied so far and
+/// nothing is stale by construction.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StateSummary {
+    pub covered_sections: Vec<String>,
+    pub open_threads: Vec<OpenThread>,
+    pub decisions: Vec<Decision>,
+    pub contradictions: Vec<Contradiction>,
 }
 
 /// Session state itself: an append-only utterance log plus the counter that
@@ -58,18 +125,26 @@ impl Mutation {
 pub struct SessionState {
     utterances: Vec<Utterance>,
     mutations_applied: u64,
+    covered_sections: Vec<String>,
+    open_threads: Vec<OpenThread>,
+    decisions: Vec<Decision>,
+    contradictions: Vec<Contradiction>,
 }
 
 impl SessionState {
-    /// Rebuilds state from utterances a [`crate::store::SessionStore`]
+    /// Rebuilds state from commands a [`crate::store::SessionStore`]
     /// already had durably on disk before this process started (PRD
-    /// NFR-4.3: "restart resumes"). Sequence numbers are re-derived from
-    /// position, which lands them exactly where [`SessionState::apply`]
-    /// originally assigned them, since a store always replays utterances in
-    /// the order they were durably appended.
-    pub fn restore(utterances: Vec<Utterance>) -> Self {
-        let mutations_applied = utterances.len() as u64;
-        Self { utterances, mutations_applied }
+    /// NFR-4.3: "restart resumes"), by replaying them through
+    /// [`SessionState::apply`] in the order they were durably persisted —
+    /// the same function and the same order a live task uses, so restored
+    /// state (including sequence numbers and every summary facet) is
+    /// indistinguishable from state that was never restarted at all.
+    pub fn restore(commands: Vec<Command>) -> Self {
+        let mut state = Self::default();
+        for command in commands {
+            state.apply(command);
+        }
+        state
     }
 
     /// Every utterance appended so far, oldest first.
@@ -83,6 +158,19 @@ impl SessionState {
         self.mutations_applied
     }
 
+    /// Materialises the current [`StateSummary`] — covered sections, open
+    /// threads, decisions and contradictions — on request (architecture
+    /// §3.4). Cheap to call repeatedly: it is a clone of whatever this
+    /// state already holds, not a recomputation over the utterance log.
+    pub fn summary(&self) -> StateSummary {
+        StateSummary {
+            covered_sections: self.covered_sections.clone(),
+            open_threads: self.open_threads.clone(),
+            decisions: self.decisions.clone(),
+            contradictions: self.contradictions.clone(),
+        }
+    }
+
     /// Applies one command, mutating state and returning the mutation that
     /// resulted. Not `pub(crate)` by accident of visibility but by design:
     /// this is the one place state changes, and it is only ever called
@@ -94,6 +182,28 @@ impl SessionState {
             Command::AppendUtterance(utterance) => {
                 self.utterances.push(utterance.clone());
                 Mutation::UtteranceAppended { utterance, sequence }
+            }
+            Command::MarkSectionCovered(section) => {
+                if !self.covered_sections.contains(&section) {
+                    self.covered_sections.push(section.clone());
+                }
+                Mutation::SectionCovered { section, sequence }
+            }
+            Command::OpenThread(thread) => {
+                self.open_threads.push(thread.clone());
+                Mutation::ThreadOpened { thread, sequence }
+            }
+            Command::CloseThread { id } => {
+                self.open_threads.retain(|thread| thread.id != id);
+                Mutation::ThreadClosed { id, sequence }
+            }
+            Command::RecordDecision(decision) => {
+                self.decisions.push(decision.clone());
+                Mutation::DecisionRecorded { decision, sequence }
+            }
+            Command::RecordContradiction(contradiction) => {
+                self.contradictions.push(contradiction.clone());
+                Mutation::ContradictionRecorded { contradiction, sequence }
             }
         }
     }
@@ -145,8 +255,11 @@ mod tests {
     }
 
     #[test]
-    fn restoring_from_prior_utterances_continues_the_sequence_where_they_left_off() {
-        let restored = SessionState::restore(vec![utterance("utt-0"), utterance("utt-1")]);
+    fn restoring_from_prior_commands_continues_the_sequence_where_they_left_off() {
+        let restored = SessionState::restore(vec![
+            Command::AppendUtterance(utterance("utt-0")),
+            Command::AppendUtterance(utterance("utt-1")),
+        ]);
         assert_eq!(restored.utterances(), &[utterance("utt-0"), utterance("utt-1")]);
         assert_eq!(restored.mutations_applied(), 2);
     }
@@ -160,5 +273,116 @@ mod tests {
 
         let ids: Vec<&str> = state.utterances().iter().map(|u| u.id.as_str()).collect();
         assert_eq!(ids, vec!["utt-a", "utt-b"]);
+    }
+
+    #[test]
+    fn a_fresh_state_summarises_to_all_empty_facets() {
+        let state = SessionState::default();
+        assert_eq!(state.summary(), StateSummary::default());
+    }
+
+    #[test]
+    fn marking_a_section_covered_adds_it_to_the_summary() {
+        let mut state = SessionState::default();
+
+        state.apply(Command::MarkSectionCovered("budget".to_string()));
+
+        assert_eq!(state.summary().covered_sections, vec!["budget".to_string()]);
+    }
+
+    #[test]
+    fn marking_the_same_section_covered_twice_does_not_duplicate_it() {
+        let mut state = SessionState::default();
+
+        state.apply(Command::MarkSectionCovered("budget".to_string()));
+        state.apply(Command::MarkSectionCovered("budget".to_string()));
+
+        assert_eq!(state.summary().covered_sections, vec!["budget".to_string()]);
+    }
+
+    #[test]
+    fn opening_a_thread_adds_it_to_the_summary_and_closing_it_removes_it() {
+        let mut state = SessionState::default();
+        let thread = OpenThread {
+            id: "thread-0".to_string(),
+            summary: "who owns the migration".to_string(),
+            opened_at_utterance_id: "utt-0".to_string(),
+        };
+
+        state.apply(Command::OpenThread(thread.clone()));
+        assert_eq!(state.summary().open_threads, vec![thread]);
+
+        state.apply(Command::CloseThread { id: "thread-0".to_string() });
+        assert!(state.summary().open_threads.is_empty());
+    }
+
+    #[test]
+    fn closing_a_thread_that_was_never_opened_is_a_harmless_no_op() {
+        let mut state = SessionState::default();
+
+        let mutation = state.apply(Command::CloseThread { id: "no-such-thread".to_string() });
+
+        assert_eq!(mutation.sequence(), 0);
+        assert!(state.summary().open_threads.is_empty());
+    }
+
+    #[test]
+    fn recording_a_decision_adds_it_to_the_summary() {
+        let mut state = SessionState::default();
+        let decision = Decision {
+            id: "dec-0".to_string(),
+            summary: "ship in Q3".to_string(),
+            utterance_id: "utt-0".to_string(),
+        };
+
+        state.apply(Command::RecordDecision(decision.clone()));
+
+        assert_eq!(state.summary().decisions, vec![decision]);
+    }
+
+    #[test]
+    fn recording_a_contradiction_adds_it_to_the_summary() {
+        let mut state = SessionState::default();
+        let contradiction = Contradiction {
+            id: "con-0".to_string(),
+            summary: "budget figure conflicts with an earlier utterance".to_string(),
+            utterance_id: "utt-5".to_string(),
+            conflicts_with_utterance_id: "utt-1".to_string(),
+        };
+
+        state.apply(Command::RecordContradiction(contradiction.clone()));
+
+        assert_eq!(state.summary().contradictions, vec![contradiction]);
+    }
+
+    #[test]
+    fn restoring_replays_every_command_kind_into_the_summary() {
+        let restored = SessionState::restore(vec![
+            Command::AppendUtterance(utterance("utt-0")),
+            Command::MarkSectionCovered("budget".to_string()),
+            Command::OpenThread(OpenThread {
+                id: "thread-0".to_string(),
+                summary: "still open".to_string(),
+                opened_at_utterance_id: "utt-0".to_string(),
+            }),
+            Command::RecordDecision(Decision {
+                id: "dec-0".to_string(),
+                summary: "ship in Q3".to_string(),
+                utterance_id: "utt-0".to_string(),
+            }),
+            Command::RecordContradiction(Contradiction {
+                id: "con-0".to_string(),
+                summary: "conflicts with an earlier utterance".to_string(),
+                utterance_id: "utt-0".to_string(),
+                conflicts_with_utterance_id: "utt-0".to_string(),
+            }),
+        ]);
+
+        let summary = restored.summary();
+        assert_eq!(summary.covered_sections, vec!["budget".to_string()]);
+        assert_eq!(summary.open_threads.len(), 1);
+        assert_eq!(summary.decisions.len(), 1);
+        assert_eq!(summary.contradictions.len(), 1);
+        assert_eq!(restored.mutations_applied(), 5);
     }
 }

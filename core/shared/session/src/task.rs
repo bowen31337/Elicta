@@ -23,8 +23,19 @@
 use std::sync::mpsc::{self, Receiver, RecvError, SendError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 
-use crate::state::{Command, Mutation, SessionState};
+use crate::state::{Command, Mutation, SessionState, StateSummary};
 use crate::store::{LoadOutcome, SessionStore, StoreError};
+
+/// What crosses the command channel to the owning task: either a mutation
+/// to apply, or a request to materialise the current [`StateSummary`] and
+/// hand it back. Kept as one channel rather than two so the summary a
+/// caller receives always reflects every command sent before it — a
+/// second, independent channel could let a summary request race ahead of
+/// or behind commands sent moments earlier on the first.
+enum WorkerMessage {
+    Apply(Command),
+    Summarise(Sender<StateSummary>),
+}
 
 /// A cloneable capability to send commands to the one task that owns a
 /// [`SessionState`]. Cheap to clone (it is just an `mpsc::Sender`), so every
@@ -32,7 +43,7 @@ use crate::store::{LoadOutcome, SessionStore, StoreError};
 /// own handle rather than sharing one behind a lock.
 #[derive(Debug, Clone)]
 pub struct SessionHandle {
-    commands: Sender<Command>,
+    messages: Sender<WorkerMessage>,
 }
 
 impl SessionHandle {
@@ -41,7 +52,25 @@ impl SessionHandle {
     /// [`SessionHandle`] and the owning [`SessionTask`] dropped their ends)
     /// rather than panicking a caller that raced a shutdown.
     pub fn send(&self, command: Command) -> Result<(), SendError<Command>> {
-        self.commands.send(command)
+        self.messages.send(WorkerMessage::Apply(command)).map_err(|SendError(message)| match message {
+            WorkerMessage::Apply(command) => SendError(command),
+            WorkerMessage::Summarise(_) => unreachable!("send() only ever enqueues WorkerMessage::Apply"),
+        })
+    }
+
+    /// Asks the owning task to materialise its [`StateSummary`] — covered
+    /// sections, open threads, decisions and contradictions (architecture
+    /// §3.4) — as of every command sent before this call, and blocks until
+    /// it answers. This is the "on request" half of that materialisation:
+    /// nothing pushes a summary to a caller unprompted, and calling this
+    /// twice in a row asks the owning task to build it fresh both times.
+    pub fn summary(&self) -> Result<StateSummary, RecvError> {
+        let (respond_to, response) = mpsc::channel();
+        if self.messages.send(WorkerMessage::Summarise(respond_to)).is_err() {
+            // The owning task is gone; there is no response coming.
+            return Err(RecvError);
+        }
+        response.recv()
     }
 }
 
@@ -76,30 +105,39 @@ impl SessionTask {
         S: SessionStore + 'static,
     {
         let restored = store.load_all()?;
-        let initial_state = SessionState::restore(restored.utterances.clone());
+        let initial_state = SessionState::restore(restored.commands.clone());
 
-        let (command_tx, command_rx) = mpsc::channel::<Command>();
+        let (message_tx, message_rx) = mpsc::channel::<WorkerMessage>();
         let (mutation_tx, mutation_rx) = mpsc::channel::<Mutation>();
 
         let worker = thread::spawn(move || -> Result<(), StoreError> {
             let mut state = initial_state;
-            while let Ok(command) = command_rx.recv() {
-                let Command::AppendUtterance(utterance) = &command;
-                store.append(utterance)?;
+            while let Ok(message) = message_rx.recv() {
+                match message {
+                    WorkerMessage::Apply(command) => {
+                        store.append(&command)?;
 
-                let mutation = state.apply(command);
-                if mutation_tx.send(mutation).is_err() {
-                    // Every mutation receiver is gone; nobody can observe
-                    // further mutations, so stop rather than keep applying
-                    // commands into the void.
-                    break;
+                        let mutation = state.apply(command);
+                        if mutation_tx.send(mutation).is_err() {
+                            // Every mutation receiver is gone; nobody can
+                            // observe further mutations, so stop rather than
+                            // keep applying commands into the void.
+                            break;
+                        }
+                    }
+                    WorkerMessage::Summarise(respond_to) => {
+                        // A dropped receiver just means the asking
+                        // `SessionHandle::summary` call already gave up
+                        // waiting; nothing else to do about that here.
+                        let _ = respond_to.send(state.summary());
+                    }
                 }
             }
             Ok(())
         });
 
         let task = Self {
-            handle: SessionHandle { commands: command_tx },
+            handle: SessionHandle { messages: message_tx },
             mutations: mutation_rx,
             worker,
         };
@@ -127,7 +165,7 @@ impl SessionTask {
     /// Waits for the owning thread to exit, returning the [`StoreError`]
     /// that stopped it, if persisting a command is what stopped it. Every
     /// [`SessionHandle`] clone — including the one this task itself holds —
-    /// must be dropped first, since `command_rx.recv()` only returns `Err`
+    /// must be dropped first, since `message_rx.recv()` only returns `Err`
     /// once every sender is gone; this method drops its own handle before
     /// joining so the caller only has to account for handles it created
     /// itself.
@@ -178,6 +216,7 @@ mod tests {
         for _ in 0..3 {
             match task.recv_mutation().unwrap() {
                 Mutation::UtteranceAppended { utterance, .. } => ids.push(utterance.id),
+                other => panic!("expected UtteranceAppended, got {other:?}"),
             }
         }
 
@@ -227,7 +266,10 @@ mod tests {
         first_run.join().unwrap();
 
         let (second_run, restored) = SessionTask::spawn(FileSessionStore::new(&path)).unwrap();
-        assert_eq!(restored.utterances, vec![utterance("utt-a"), utterance("utt-b")]);
+        assert_eq!(
+            restored.commands,
+            vec![Command::AppendUtterance(utterance("utt-a")), Command::AppendUtterance(utterance("utt-b"))]
+        );
         assert!(!restored.truncated_tail);
 
         let handle = second_run.handle();
@@ -239,6 +281,7 @@ mod tests {
                 // utterances already applied), rather than restarting at 0.
                 assert_eq!(sequence, 2);
             }
+            other => panic!("expected UtteranceAppended, got {other:?}"),
         }
         drop(handle);
         second_run.join().unwrap();
@@ -264,7 +307,7 @@ mod tests {
         // Simulate a crash partway through durably writing "utt-b": bytes
         // reached disk, but not the full record `append` would have
         // written.
-        let mut partial = serde_json::to_vec(&utterance("utt-b")).unwrap();
+        let mut partial = serde_json::to_vec(&Command::AppendUtterance(utterance("utt-b"))).unwrap();
         partial.truncate(partial.len() / 2);
         {
             use std::io::Write;
@@ -274,7 +317,7 @@ mod tests {
         }
 
         let (second_run, restored) = SessionTask::spawn(FileSessionStore::new(&path)).unwrap();
-        assert_eq!(restored.utterances, vec![utterance("utt-a")]);
+        assert_eq!(restored.commands, vec![Command::AppendUtterance(utterance("utt-a"))]);
         assert!(restored.truncated_tail);
         drop(second_run.handle());
         second_run.join().unwrap();
@@ -318,10 +361,13 @@ mod tests {
         let mut sequences = HashSet::with_capacity(TOTAL);
         let mut ids = HashSet::with_capacity(TOTAL);
         for _ in 0..TOTAL {
-            let mutation = task.recv_mutation().unwrap();
-            let Mutation::UtteranceAppended { utterance, sequence } = mutation;
-            sequences.insert(sequence);
-            ids.insert(utterance.id);
+            match task.recv_mutation().unwrap() {
+                Mutation::UtteranceAppended { utterance, sequence } => {
+                    sequences.insert(sequence);
+                    ids.insert(utterance.id);
+                }
+                other => panic!("expected UtteranceAppended, got {other:?}"),
+            }
         }
 
         assert_eq!(sequences.len(), TOTAL, "every sequence number must be unique");
@@ -331,6 +377,50 @@ mod tests {
             "sequence numbers must run gaplessly from 0..TOTAL"
         );
         assert_eq!(ids.len(), TOTAL, "every command must be applied exactly once");
+        task.join().unwrap();
+    }
+
+    #[test]
+    fn a_fresh_task_summarises_to_all_empty_facets() {
+        let (task, _restored) = SessionTask::spawn(InMemorySessionStore::new()).unwrap();
+        let handle = task.handle();
+
+        assert_eq!(handle.summary().unwrap(), StateSummary::default());
+
+        drop(handle);
+        task.join().unwrap();
+    }
+
+    /// The summary reflects commands sent before it was asked for, not
+    /// whatever happened to already be applied when the task was spawned —
+    /// asking twice in a row after more commands land must see the new
+    /// ones each time.
+    #[test]
+    fn summary_reflects_commands_sent_before_it_was_requested() {
+        let (task, _restored) = SessionTask::spawn(InMemorySessionStore::new()).unwrap();
+        let handle = task.handle();
+
+        handle.send(Command::AppendUtterance(utterance("utt-a"))).unwrap();
+        handle.send(Command::MarkSectionCovered("budget".to_string())).unwrap();
+        task.recv_mutation().unwrap();
+        task.recv_mutation().unwrap();
+
+        let summary = handle.summary().unwrap();
+        assert_eq!(summary.covered_sections, vec!["budget".to_string()]);
+
+        handle
+            .send(Command::RecordDecision(crate::state::Decision {
+                id: "dec-0".to_string(),
+                summary: "ship in Q3".to_string(),
+                utterance_id: "utt-a".to_string(),
+            }))
+            .unwrap();
+        task.recv_mutation().unwrap();
+
+        let summary = handle.summary().unwrap();
+        assert_eq!(summary.decisions.len(), 1);
+
+        drop(handle);
         task.join().unwrap();
     }
 }

@@ -3,6 +3,13 @@ name = "session"
 version = "0.1.0"
 edition = "2021"
 
+# Not yet mounted into the root workspace (only core/shared/app,
+# core/shared/health and core/crates/* are members) — this table makes the
+# crate its own workspace root so it can be built and tested standalone in
+# the meantime, rather than erroring on the ambient root Cargo.toml it isn't
+# a declared member of.
+[workspace]
+
 [lib]
 name = "session"
 path = "src/lib.rs"
