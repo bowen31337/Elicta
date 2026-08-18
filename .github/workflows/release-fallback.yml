@@ -1,10 +1,12 @@
 name: Fallback Release (dmg + MSI)
 
 # Publishes the notarised macOS .dmg and signed Windows .msi as downloadable
-# GitHub Release assets (PRD NFR-3.6). MDM push (NFR-3.5, Jamf/Intune) is the
-# preferred install path where an org has it configured; this workflow is
-# what makes the direct-download fallback actually available rather than
-# leaving the installers stranded as 14-day CI build artifacts.
+# GitHub Release assets (PRD NFR-3.6), alongside an EDR-WHITELIST.txt record
+# of the binary hashes IT needs to whitelist before pilot (PRD NFR-3.7). MDM
+# push (NFR-3.5, Jamf/Intune) is the preferred install path where an org has
+# it configured; this workflow is what makes the direct-download fallback
+# actually available rather than leaving the installers stranded as 14-day
+# CI build artifacts.
 #
 # Triggered by the completion of "Sign & Notarize macOS Build" (sign-macos.yml),
 # which itself calls build.yml as a reusable workflow — so a single run
@@ -73,7 +75,11 @@ jobs:
             (PRD NFR-3.5, Jamf/Intune) is the preferred install path where
             your organization has it configured — use these installers when
             it isn't.
+
+            `EDR-WHITELIST.txt` records the binary hashes IT needs to
+            whitelist in EDR/antivirus tooling before pilot (PRD NFR-3.7).
           files: |
             dist/*.dmg
             dist/*.msi
             dist/SHA256SUMS.txt
+            dist/EDR-WHITELIST.txt
