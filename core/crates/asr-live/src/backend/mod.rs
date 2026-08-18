@@ -11,6 +11,7 @@
 
 mod event;
 mod fake;
+mod framing;
 mod region;
 mod transcription_backend;
 
@@ -19,6 +20,7 @@ pub use event::{
     StreamId, Token, TranscriptionEvent, UtteranceId,
 };
 pub use fake::{ImmutablePartialFakeBackend, RevisablePartialFakeBackend};
+pub use framing::{AudioFramer, FrameDurationError, FramedBackend, MAX_FRAME_MS, MIN_FRAME_MS};
 pub use region::{
     EndpointResolutionError, EngagementId, EngagementRegionRegistry, Region, RegionPinError,
     RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver, VendorRegionEndpoints,

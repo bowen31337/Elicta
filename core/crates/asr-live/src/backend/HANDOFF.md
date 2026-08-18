@@ -33,11 +33,11 @@ value types it operates on:
 
 ```rust
 pub use backend::{
-    AudioSegmentRef, BackendError, EndpointResolutionError, EngagementId,
-    EngagementRegionRegistry, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag, Region,
-    RegionPinError, RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver,
-    SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
-    VendorRegionEndpoints,
+    AudioFramer, AudioSegmentRef, BackendError, EndpointResolutionError, EngagementId,
+    EngagementRegionRegistry, FinalUtterance, FrameDurationError, FramedBackend,
+    InterimHypothesis, Keyterm, LanguageTag, MAX_FRAME_MS, MIN_FRAME_MS, Region, RegionPinError,
+    RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver, SpeakerTag, StreamId,
+    Token, TranscriptionBackend, TranscriptionEvent, UtteranceId, VendorRegionEndpoints,
 };
 ```
 
@@ -84,22 +84,36 @@ pub use backend::{
   all if the engagement has no region pinned or the pinned region has no
   known vendor endpoint, so a connection is never opened against the wrong
   (or no) endpoint.
+- `framing.rs` — re-chunks outgoing audio into fixed-size vendor frames of
+  between `MIN_FRAME_MS` (20ms) and `MAX_FRAME_MS` (50ms) at 16kHz mono
+  (architecture §14.2: balances quantisation delay against per-message
+  overhead). `AudioFramer` buffers arbitrary-sized pushes and drains
+  full-length frames in arrival order, leaving any short remainder
+  buffered until `flush` (or the next `push`) completes it — a frame is
+  never sent undersized. `FramedBackend<B>` wraps any `TranscriptionBackend`
+  and applies this transparently: every `send_audio` call reaching the
+  wrapped `inner` backend carries exactly `duration_ms` of audio, keyed per
+  `stream_id` so two streams' remainders never bleed into each other's
+  frames. Constructing with a duration outside `[MIN_FRAME_MS,
+  MAX_FRAME_MS]` fails immediately rather than silently clamping.
 
 ## Deliberately out of scope here
 
 Everything about how a *real* vendor connection is opened and driven —
-pre-opened websocket at capture start, keepalive frames, linear16 PCM
-framing at 20-50ms — is separately scoped work against this same
-`backend/` directory (see the adjacent features in the "Streaming
-Transcription" category). This handoff covers the trait, event shape, the
-keyterm handshake, and region pinning; a real `DeepgramBackend` /
+pre-opened websocket at capture start, keepalive frames — is separately
+scoped work against this same `backend/` directory (see the adjacent
+features in the "Streaming Transcription" category). This handoff covers
+the trait, event shape, the keyterm handshake, region pinning, and audio
+framing; a real `DeepgramBackend` /
 `AssemblyAiBackend` implements `TranscriptionBackend` the same way the
 fakes here do, translating its own wire format into `TranscriptionEvent`
 inside `poll_events` and sending `start_stream`'s keyterms as that
 vendor's own keyterm-prompting mechanism on connection open — and is
 opened via `RegionPinnedBackend::open` so its actual websocket connect
 target is the resolved regional endpoint rather than a hardcoded default
-host.
+host, then wrapped in `FramedBackend` so every `send_audio` call it
+receives already carries a vendor-sized 20-50ms frame regardless of how
+the capture pipeline chunked the audio upstream.
 
 `capture::enrol::SpeakerIdentity` and this module's `SpeakerTag` currently
 have the same shape (`Operator` / `Participant(String)` / `Unknown`) but are
@@ -109,5 +123,5 @@ be reconsidered against `capture::enrol::SpeakerIdentity` directly rather
 than keeping a parallel local type.
 
 Verified with `cargo test -p asr-live` and `cargo clippy -p asr-live
---all-targets` against the real crate (23 passing tests in this module, no
+--all-targets` against the real crate (37 passing tests in this module, no
 warnings).
