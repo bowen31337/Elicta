@@ -1,9 +1,11 @@
 # tags module — handoff (detected_languages)
 
 Implements PRD FR-2.20 ("Display detected language(s) live in the panel",
-rationale at architecture §8.2 "silent misdetection failure") and FR-2.21
+rationale at architecture §8.2 "silent misdetection failure"), FR-2.21
 ("User can override the detected language with a single tap", done when the
-override persists for the rest of the meeting). Self-contained under this
+override persists for the rest of the meeting), and FR-2.19 ("Retain the
+original-language utterance alongside any translation, permanently and
+inseparably" — see the dedicated section below). Self-contained under this
 directory, same as `numerals/` and `segment/`; deliberately does not touch
 `core/crates/language/Cargo.toml` or `core/crates/language/src/lib.rs`. Those
 now exist in this worktree (created by the FR-2.18 segmentation feature,
@@ -13,6 +15,60 @@ files already flag as pending. Verified locally by temporarily adding
 `pub mod tags;` to `lib.rs`, running `cargo test`/`cargo clippy`, then
 reverting `lib.rs` to its committed state (`git checkout -- src/lib.rs`) so
 this change stays scoped to `tags/`.
+
+## FR-2.19: retain the original-language utterance alongside any translation (this update)
+
+New file, `retention.rs`, rather than extending an existing one — FR-2.19
+answers a different question than every other file in this directory. The
+others all decide *which language* is in play (detected, per-participant,
+tiered, overridden); this one guards what happens to the *text* of an
+utterance once a language decision has already been made and a translation
+gets produced from it. Nothing else here models an utterance's text at all.
+
+- `RetainedUtterance::new(original_language, original_text)` — the only way
+  to construct one, and the only place `original_language`/`original_text`
+  are ever written. No method anywhere on the type mutates or clears them
+  afterward; there is no setter, and no way to build one without an
+  original. This mirrors the architecture doc's framing of the sibling
+  citation-integrity and inference-marking invariants (§4): the guarantee is
+  structural (an invalid state is impossible to construct/reach), not a rule
+  callers must remember to follow.
+- `set_translation(language, text)` — purely additive: adds a new
+  language's translation or updates that language's existing translation
+  text (e.g. a corrected re-translation), matched on BCP-47 primary subtag
+  same as every sibling in this directory. Never reads or writes
+  `original_language`/`original_text`, and never touches a different
+  language's translation. There is deliberately no method to remove a
+  translation or to remove/replace the original — "permanently and
+  inseparably" means both stay reachable together for the life of the value.
+- `translation_for` / `translations()` / `has_translation` /
+  `translation_count` — read-only accessors, first-translated order for the
+  list (matches `DetectedLanguagePanel::languages()`'s ordering convention).
+- `paired_with(language)` — returns `(original_text, &Translation)` together
+  when a translation exists, `None` otherwise. This is the FR-8.7a
+  rendering shape ("a citation across a language boundary renders both") —
+  the accessor makes it structurally impossible to hand a caller a
+  translation without also handing them the original it came from.
+
+Tests added: 11 (original retained at construction; adding a translation
+leaves the original untouched; multiple translations coexist alongside one
+original; re-translating the same language updates its text without
+touching the original or any other language's translation; missing
+translation returns `None`; first-translated ordering, including that a
+re-translation doesn't reorder; BCP-47 subtag collapsing for both the
+original language and translation languages; `paired_with` returns both
+texts together or `None`; an untranslated utterance still reports its
+original).
+
+Deliberately out of scope here (belongs to other, already-planned work):
+persisting a `RetainedUtterance` to storage is the DB-migration task that
+adds `original_utterance_id`/`translated_text` columns to the `citations`
+table (PRD FR-2.19, FR-8.7a; `app_spec.txt` feature 20) — this crate has no
+storage layer and shouldn't grow one. This type is the in-process shape that
+migration's persistence needs to preserve; wiring live ASR output and
+translation calls into `RetainedUtterance::new`/`set_translation` belongs to
+whichever crate owns the live pipeline loop, same caveat as
+`DetectedLanguagePanel::observe` below.
 
 ## FR-2.21: override the detected language (this update)
 
@@ -71,8 +127,13 @@ collapsing, and auto-detection continuing to update the list post-override).
   - `active_language()` / `override_language()` / `is_overridden()` (FR-2.21,
     see above) — the single "what language is active right now" signal for
     the panel, defaulting to auto-detection until the user taps an override.
-- `mod.rs` — declares `pub mod detected_languages;` and re-exports
-  `DetectedLanguage`, `DetectedLanguagePanel`.
+- `retention.rs` — `RetainedUtterance` and `Translation` (FR-2.19, see
+  above): pairs an utterance's original-language text with every
+  translation produced from it, structurally preventing the original from
+  ever being replaced or discarded once set.
+- `mod.rs` — declares `pub mod detected_languages;` and `pub mod retention;`,
+  and re-exports `DetectedLanguage`, `DetectedLanguagePanel`,
+  `RetainedUtterance`, `Translation`.
 
 ## Wiring needed
 
@@ -86,7 +147,8 @@ pub mod tags;
 ```
 
 No other integration required here — `detected_languages` only depends on
-`tags::tier` (already in this directory).
+`tags::tier` (already in this directory), and `retention` has no
+dependencies on any other file in this directory at all.
 
 ## What's not done here
 
@@ -100,10 +162,17 @@ No other integration required here — `detected_languages` only depends on
 - The actual panel UI rendering (`apps/desktop`) — out of this crate's
   footprint; `languages()`/`active_language()` return plain data for that
   layer to render.
+- Constructing `RetainedUtterance` from live ASR output and feeding
+  translation results into `set_translation` — belongs to whichever crate
+  owns the live pipeline loop, same as the `observe()` wiring above.
+- Persisting `RetainedUtterance` to the `citations` table
+  (`original_utterance_id`/`translated_text` columns) — a separate,
+  already-planned DB-migration task (`app_spec.txt` feature 20); out of this
+  crate's footprint entirely.
 
 Verified locally (temporarily wiring `pub mod tags;` into `lib.rs`, then
-reverting it — see top of this file): `cargo test` — 104/104 pass (9 new for
-FR-2.21); `cargo clippy --all-targets -- -D warnings` — clean; pre-existing
-rustfmt drift across sibling `tags` files (struct-literal wrapping) predates
-this feature and was left untouched, matching `numerals/HANDOFF.md`'s prior
-note.
+reverting it — see top of this file): `cargo test` — 115/115 pass (11 new
+for FR-2.19); `cargo clippy --all-targets -- -D warnings` — clean;
+pre-existing rustfmt drift across sibling `tags` files (struct-literal
+wrapping) predates this feature and was left untouched, matching
+`numerals/HANDOFF.md`'s prior note.
