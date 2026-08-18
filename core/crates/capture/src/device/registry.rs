@@ -5,7 +5,7 @@
 //! acoustic fallback, or a managed per-participant vendor when configured.
 //! [`AudioSourceRegistry`] is where that choice is resolved.
 
-use super::kind::AudioSourceKind;
+use super::kind::{AudioSourceKind, DegradedCaptureWarning};
 use super::source::AudioSource;
 
 /// The set of capture backends a platform build has probed as available,
@@ -35,6 +35,19 @@ impl AudioSourceRegistry {
             .iter()
             .position(|source| source.kind() == kind)?;
         Some(self.available.remove(index))
+    }
+
+    /// Selects the backend for one kind exactly like [`select`](Self::select),
+    /// additionally returning the warning an operator-facing UI should show
+    /// as a banner when the chosen kind is the degraded acoustic fallback
+    /// (PRD FR-1.2). Returns `None` if this build never had that kind
+    /// available or it has already been selected — same as `select`.
+    pub fn select_with_warning(
+        &mut self,
+        kind: AudioSourceKind,
+    ) -> Option<(Box<dyn AudioSource>, Option<DegradedCaptureWarning>)> {
+        let source = self.select(kind)?;
+        Some((source, DegradedCaptureWarning::for_kind(kind)))
     }
 }
 
@@ -172,5 +185,45 @@ mod tests {
             frames.push(frame);
         }
         frames
+    }
+
+    #[test]
+    fn selecting_acoustic_fallback_returns_a_warning_for_the_ui_banner() {
+        let mut registry = registry_with_every_kind();
+
+        let (source, warning) = registry
+            .select_with_warning(AudioSourceKind::AcousticFallback)
+            .expect("acoustic fallback was registered");
+
+        assert_eq!(source.kind(), AudioSourceKind::AcousticFallback);
+        assert_eq!(
+            warning.expect("acoustic fallback is degraded").kind(),
+            AudioSourceKind::AcousticFallback
+        );
+    }
+
+    #[test]
+    fn selecting_a_non_degraded_kind_returns_no_warning() {
+        let mut registry = registry_with_every_kind();
+
+        let (source, warning) = registry
+            .select_with_warning(AudioSourceKind::LineIn)
+            .expect("line-in was registered");
+
+        assert_eq!(source.kind(), AudioSourceKind::LineIn);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn selecting_an_unregistered_kind_with_warning_returns_none() {
+        let mut registry = AudioSourceRegistry::new(vec![Box::new(MockSource {
+            kind: AudioSourceKind::LineIn,
+            format: AudioFormat::new(48_000, 1),
+            frame: None,
+        })]);
+
+        assert!(registry
+            .select_with_warning(AudioSourceKind::AcousticFallback)
+            .is_none());
     }
 }

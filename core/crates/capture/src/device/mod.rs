@@ -20,6 +20,6 @@ mod kind;
 mod registry;
 mod source;
 
-pub use kind::AudioSourceKind;
+pub use kind::{AudioSourceKind, DegradedCaptureWarning};
 pub use registry::AudioSourceRegistry;
 pub use source::{AudioSource, AudioSourceError};
