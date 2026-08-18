@@ -21,6 +21,7 @@
 pub mod cache_lifetime;
 pub mod model;
 pub mod orchestrator;
+pub mod prewarm;
 pub mod prompt;
 pub mod replay;
 pub mod request;
@@ -29,6 +30,7 @@ pub mod ticker;
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
 pub use model::{MeetingModel, ModelId};
 pub use orchestrator::{SlowLaneOrchestrator, TickCancelled, TickDecision};
+pub use prewarm::{PreWarmRequest, UnwarmedMeeting, WarmedMeeting};
 pub use prompt::{MeetingPromptContext, PromptBlock, SlowLanePrompt};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
@@ -264,6 +266,54 @@ mod orchestrator_ticks_end_to_end {
             "a configured cache lifetime must persist in settings across every tick, never drifting back to the \
              five-minute default: {lifetimes_sent:?}"
         );
+
+        ticker.stop();
+    }
+
+    /// This crate's version of §14.3's pre-warm guidance end to end: issue
+    /// the meeting's one pre-warm request before ever touching the
+    /// ticker's channel, then run tick 1 through the exact same
+    /// [`ReplayRun`]/[`telemetry::CacheTickUsage`] machinery the other
+    /// end-to-end tests use, reporting a cache *read* (not a write) --
+    /// because the pre-warm already paid for the write. If the pre-warm's
+    /// prefix ever drifted from what tick 1 sends, `ReplayRun::run_tick`
+    /// would have nothing to compare against on the very first call and
+    /// this would need a first, cache-writing tick the way the other tests
+    /// do; that it does not is the proof the pre-warm is doing its job.
+    #[test]
+    fn a_meetings_prewarm_is_issued_before_the_first_tick_so_that_tick_reads_the_cache_instead_of_writing_it() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+
+        // Nothing has been sent yet, and no tick has fired -- this mirrors
+        // "at meeting start," strictly before the first scheduled tick.
+        assert!(ticks.try_recv().is_err(), "the pre-warm must issue before any tick has fired");
+
+        let context = MeetingPromptContext::pin(
+            "you are the slow-lane extractor",
+            "engagement digest: acme renewal, q3",
+            "extraction template v4",
+            "attendees: alice, bob, carol",
+        );
+        let meeting = UnwarmedMeeting::new(context, MeetingModel::pin(ModelId::new("claude-opus-5")));
+        let (prewarm, warmed) = meeting.issue();
+        assert_eq!(prewarm.max_tokens(), 0);
+
+        let mut run = ReplayRun::new();
+        let first_tick = ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let prompt = warmed.for_tick(format!("tick {} fired at {:?}", first_tick.sequence, first_tick.fired_at));
+
+        let boundary = prompt.cache_boundary_index();
+        assert_eq!(
+            prewarm.blocks(),
+            &prompt.blocks()[..=boundary],
+            "the pre-warm's prefix must be exactly what tick 1 sends"
+        );
+
+        // Tick 1 reports a cache *read*, not a write, because the pre-warm
+        // already wrote this exact prefix before the tick fired.
+        let usage = telemetry::CacheTickUsage { input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 1800 };
+        run.run_tick(first_tick, &prompt, usage);
 
         ticker.stop();
     }
