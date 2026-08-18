@@ -24,3 +24,21 @@ class SuggestionRatingRequest(BaseModel):
 
 class SuggestionRatingResponse(BaseModel):
     rating_id: str
+
+
+class ReplayRunStatus(str, Enum):
+    """Lifecycle state of a replay run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ReplayRunStatusResponse(BaseModel):
+    """Progress snapshot for one replay run."""
+
+    run_id: str = Field(min_length=1)
+    status: ReplayRunStatus
+    progress: float = Field(ge=0.0, le=1.0)
+    suggestion_count: int = Field(ge=0)

@@ -1,24 +1,27 @@
-"""HTTP surface for rating a replay run's suggestions (feature 26).
+"""HTTP surface for replay run ratings and status.
 
-`build_replay_ratings_router` takes a `save_rating` callback rather than
-importing a ratings persistence model directly, since that layer does not
-live in this package (`app/modules/replay/api`). Whoever wires the app
-factory (out of this feature's footprint) supplies the real,
-persistence-backed implementation and mounts the returned router.
+Each `build_*_router` takes a callback rather than importing a persistence
+model directly, since that layer does not live in this package
+(`app/modules/replay/api`). Whoever wires the app factory (out of this
+feature's footprint) supplies the real, persistence-backed implementation
+and mounts the returned router.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from app.modules.replay.api.errors import ReplayRunNotFoundError
 from app.modules.replay.api.models import (
+    ReplayRunStatusResponse,
     SuggestionRatingRequest,
     SuggestionRatingResponse,
 )
 
 SaveSuggestionRating = Callable[[str, SuggestionRatingRequest], Awaitable[str]]
+GetReplayRunStatus = Callable[[str], Awaitable[ReplayRunStatusResponse]]
 
 
 def build_replay_ratings_router(save_rating: SaveSuggestionRating) -> APIRouter:
@@ -34,5 +37,22 @@ def build_replay_ratings_router(save_rating: SaveSuggestionRating) -> APIRouter:
     ) -> SuggestionRatingResponse:
         rating_id = await save_rating(run_id, payload)
         return SuggestionRatingResponse(rating_id=rating_id)
+
+    return router
+
+
+def build_replay_status_router(get_status: GetReplayRunStatus) -> APIRouter:
+    router = APIRouter(prefix="/api/replay/runs", tags=["replay-status"])
+
+    @router.get(
+        "/{run_id}",
+        response_model=ReplayRunStatusResponse,
+        status_code=200,
+    )
+    async def get_run_status(run_id: str) -> ReplayRunStatusResponse:
+        try:
+            return await get_status(run_id)
+        except ReplayRunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return router
