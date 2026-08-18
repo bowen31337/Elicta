@@ -85,6 +85,7 @@ class EgressChokepoint:
         byte_count = sent_bytes + (success.response_bytes if success else 0)
         row = EgressLogRow(
             timestamp_ms=self._clock.now_ms(),
+            engagement_id=request.engagement_id,
             processor_name=request.processor_name,
             region=region,
             byte_count=byte_count,

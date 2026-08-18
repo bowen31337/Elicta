@@ -67,6 +67,12 @@ class ProcessorSuccess(BaseModel):
 class EgressLogRow(BaseModel):
     """One row as written to the `egress_log` table.
 
+    ``engagement_id`` identifies which engagement the call was made on
+    behalf of. It is always present — even for the regionless row of a call
+    the chokepoint refused outright — since the request carries it before
+    the region lookup happens, and it is what the audit log at
+    `GET /api/audit/egress` filters rows by.
+
     ``region`` is the processing region pinned for the call's engagement
     (PRD NFR-2.2), recorded on every row so residency can be audited after
     the fact rather than only enforced at call time. It is ``None`` only
@@ -80,6 +86,7 @@ class EgressLogRow(BaseModel):
     """
 
     timestamp_ms: int
+    engagement_id: str
     processor_name: str
     region: str | None = None
     byte_count: int = Field(ge=0)
