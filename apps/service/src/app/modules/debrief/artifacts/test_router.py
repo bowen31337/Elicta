@@ -15,6 +15,7 @@ from app.modules.debrief.artifacts.models import (
 )
 from app.modules.debrief.artifacts.router import (
     build_decision_log_router,
+    build_follow_up_email_router,
     build_full_prd_router,
     build_open_questions_router,
     build_project_brief_router,
@@ -368,3 +369,44 @@ def test_getting_the_open_questions_list_for_a_session_whose_chain_run_failed_re
 
     assert response.status_code == 404
     assert response.json()["detail"] == "open questions list not found"
+
+
+def make_follow_up_email_client(chains: dict[str, SessionBmadAnalystChain]) -> TestClient:
+    async def get_chain(session_id: str) -> SessionBmadAnalystChain | None:
+        return chains.get(session_id)
+
+    app = FastAPI()
+    app.include_router(build_follow_up_email_router(get_chain))
+    return TestClient(app)
+
+
+def test_getting_a_sessions_draft_follow_up_email_returns_its_subject_body_and_provenance():
+    client = make_follow_up_email_client({"session-1": make_bmad_chain("session-1")})
+
+    response = client.get("/api/sessions/session-1/follow-up-email")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["subject"] == "Follow up"
+    assert body["body"] == "draft email"
+    assert body["provenance"] == "stated"
+
+
+def test_getting_the_draft_follow_up_email_for_a_session_with_no_chain_record_returns_404():
+    client = make_follow_up_email_client({})
+
+    response = client.get("/api/sessions/unknown-session/follow-up-email")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "draft follow-up email not found"
+
+
+def test_getting_the_draft_follow_up_email_for_a_session_whose_chain_run_failed_returns_404():
+    client = make_follow_up_email_client(
+        {"session-1": make_bmad_chain("session-1", status=BmadAnalystChainStatus.FAILED)}
+    )
+
+    response = client.get("/api/sessions/session-1/follow-up-email")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "draft follow-up email not found"

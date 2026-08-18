@@ -45,6 +45,13 @@ same way, but ordered: the analyst chain assigns each question its
 order, so this route sorts by `impact_rank` ascending before responding —
 callers always see the list ranked by impact on the build, never in
 whatever order the chain happened to produce them.
+
+`build_follow_up_email_router` exposes the same chain's `follow_up_email`
+the same way: a plain session-scoped `GET` of the `FollowUpEmailDraft`
+`run_bmad_analyst_chain` already built — covering what the meeting heard
+(via its grounding citations) plus what the client still needs to answer
+before the next one — not a recomputation of the email from the transcript
+(PRD FR-8.6).
 """
 
 from __future__ import annotations
@@ -56,6 +63,7 @@ from fastapi import APIRouter, HTTPException
 from app.modules.debrief.pipeline.models import (
     BmadArtifactSet,
     DecisionLogEntry,
+    FollowUpEmailDraft,
     OpenQuestion,
     ProjectBriefDraft,
     SessionBmadAnalystChain,
@@ -189,5 +197,31 @@ def build_open_questions_router(get_chain: GetSessionBmadAnalystChain) -> APIRou
         if chain is None or chain.artifacts is None:
             raise HTTPException(status_code=404, detail="open questions list not found")
         return sorted(chain.artifacts.open_questions, key=lambda question: question.impact_rank)
+
+    return router
+
+
+def build_follow_up_email_router(get_chain: GetSessionBmadAnalystChain) -> APIRouter:
+    """Build the per-meeting draft follow-up email read router (PRD FR-8.6).
+
+    `get_chain` looks up the same session's `SessionBmadAnalystChain` the
+    draft project brief, decision log, and open-questions routes read. This
+    is a plain read of the `FollowUpEmailDraft` `run_bmad_analyst_chain`
+    already persisted — its `body` covers what the meeting heard, grounded in
+    `citations`, plus what still needs to be asked, not a route-level
+    recomputation. A session with no chain record yet, or one whose run
+    `FAILED` (`artifacts` is `None`), has no draft follow-up email to return,
+    so both cases 404 rather than one looking like a real draft and the other
+    an error.
+    """
+
+    router = APIRouter(prefix="/api/sessions", tags=["debrief-follow-up-email"])
+
+    @router.get("/{session_id}/follow-up-email", response_model=FollowUpEmailDraft)
+    async def get_session_follow_up_email(session_id: str) -> FollowUpEmailDraft:
+        chain = await get_chain(session_id)
+        if chain is None or chain.artifacts is None:
+            raise HTTPException(status_code=404, detail="draft follow-up email not found")
+        return chain.artifacts.follow_up_email
 
     return router
