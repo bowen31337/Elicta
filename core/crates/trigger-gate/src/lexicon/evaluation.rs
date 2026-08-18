@@ -103,7 +103,7 @@ pub fn evaluate_utterance(
         .run(&utterance.tokens, min_tag_confidence)
         .into_iter()
         .map(|matched| {
-            let span = token_span(&utterance.tokens, matched.token_index);
+            let span = token_span(&utterance.tokens, matched.token_index, &matched.span);
             let confidence = utterance.tokens[matched.token_index].confidence;
             gate_span_confidence(
                 utterance.id.clone(),
@@ -120,8 +120,11 @@ pub fn evaluate_utterance(
     })
 }
 
-/// The byte range `tokens[token_index]`'s own text would occupy within
-/// `tokens` reconstructed as one string, joined by a single ASCII space.
+/// The byte range `match_span` (a [`super::terms::LexiconMatch::span`],
+/// already scoped to `tokens[token_index]`'s own text) would occupy within
+/// `tokens` reconstructed as one string, joined by a single ASCII space —
+/// i.e. the offending phrase's own position, not the whole token's (FR-5.2:
+/// "returning the matched span").
 ///
 /// Neither `TaggedToken` nor `asr-live`'s own `Token` carry a byte offset
 /// into the source utterance text — `parse::HANDOFF.md` flags turning a
@@ -132,12 +135,16 @@ pub fn evaluate_utterance(
 /// downstream of `TriggerEvent.span` in this crate interprets it against
 /// the literal utterance text today, only against this crate's own
 /// reconstruction.
-fn token_span(tokens: &[TaggedToken], token_index: usize) -> Range<usize> {
-    let start: usize = tokens[..token_index]
+fn token_span(
+    tokens: &[TaggedToken],
+    token_index: usize,
+    match_span: &Range<usize>,
+) -> Range<usize> {
+    let token_start: usize = tokens[..token_index]
         .iter()
         .map(|token| token.text.len() + 1)
         .sum();
-    start..(start + tokens[token_index].text.len())
+    (token_start + match_span.start)..(token_start + match_span.end)
 }
 
 #[cfg(test)]
@@ -302,6 +309,30 @@ mod tests {
         // "we need several" joined by single spaces: "we"(0..2) " "(2)
         // "need"(3..7) " "(7) "several"(8..15).
         assert_eq!(decision.events[0].span, Some(8..15));
+    }
+
+    #[test]
+    fn event_span_narrows_to_the_matched_phrase_not_the_whole_token() {
+        // A single ASR token can carry more than one word (e.g. "we need
+        // several" as one hypothesis, as `hold.rs`'s own tests construct).
+        // The offending span (FR-5.2) must cover only "several", not the
+        // token's full text.
+        let router = router_with_en_and_zh_lexicons();
+        let utterance = FinalisedUtterance {
+            id: "utt-10".to_string(),
+            speaker: SpeakerTag::Participant("client-1".to_string()),
+            tokens: vec![
+                token("preface", "en", 0.9),
+                token("we need several", "en", 0.9),
+            ],
+        };
+
+        let decision = evaluate_utterance(&utterance, &router, 0.6, 0.6).unwrap();
+
+        // "preface"(0..7) " "(7) "we need several"(8..23), and "several"
+        // itself sits at 8+8..8+15 = 16..23 within the joined string.
+        assert_eq!(decision.events.len(), 1);
+        assert_eq!(decision.events[0].span, Some(16..23));
     }
 
     #[test]

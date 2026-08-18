@@ -6,12 +6,15 @@
 //! has already grouped as this lexicon's own language — it has no way to see
 //! any other token, which is what makes "a token emits matches only from its
 //! own language lexicon" true by construction rather than by convention.
-//! Matching itself is a plain case-insensitive substring scan; the
-//! Aho-Corasick engine (FR-5.2) is a separate feature's performance
-//! optimisation over the same contract and can replace this scan without
-//! changing [`LexiconMatch`]'s shape.
+//! Matching itself runs on an [`super::ahocorasick::AhoCorasick`] automaton
+//! built once per lexicon (PRD FR-5.2): every curated term is found in one
+//! left-to-right pass over a token's text, and each occurrence carries its
+//! own byte [`LexiconMatch::span`] — "the matched span" FR-5.2 requires the
+//! gate to emit on the trigger event, not just which token or which term.
 
+use super::ahocorasick::AhoCorasick;
 use super::grouping::PositionedToken;
+use std::ops::Range;
 
 /// One matched lexicon entry against one token.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,8 +30,20 @@ pub struct LexiconMatch {
     pub language: String,
     /// The curated lexicon entry that matched, lower-cased.
     pub term: String,
-    /// The token text the match was found in, verbatim.
+    /// The exact text the match covers, sliced from the lower-cased token
+    /// text at `span` — always a valid slice, since `span` was computed
+    /// against that exact lower-cased string. Slicing the token's original,
+    /// not-yet-lowered text at the same byte offsets instead would risk a
+    /// byte-boundary panic for the rare Unicode code point whose lower-cased
+    /// form is a different byte length, so this trades exact original-case
+    /// rendering for a guarantee that it never panics on real ASR output.
     pub matched_text: String,
+    /// Byte range of the match within the token's own (lower-cased) text —
+    /// FR-5.2's "the matched span". Scoped to the token, not the utterance:
+    /// `Lexicon`/`AhoCorasick` have no visibility beyond the token slice
+    /// they were handed, so turning this into an utterance-wide offset is
+    /// the caller's job (see `evaluation::token_span`).
+    pub span: Range<usize>,
 }
 
 /// A curated set of ambiguity terms for one language (unquantified
@@ -37,6 +52,7 @@ pub struct LexiconMatch {
 pub struct Lexicon {
     pub language: String,
     terms: Vec<String>,
+    automaton: AhoCorasick,
 }
 
 impl Lexicon {
@@ -47,29 +63,34 @@ impl Lexicon {
         language: impl Into<String>,
         terms: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
+        let terms: Vec<String> = terms.into_iter().map(|t| t.into().to_lowercase()).collect();
+        let automaton = AhoCorasick::new(&terms);
         Lexicon {
             language: language.into(),
-            terms: terms.into_iter().map(|t| t.into().to_lowercase()).collect(),
+            terms,
+            automaton,
         }
     }
 
-    /// Scans every token in `tokens` for every curated term, tagging each
-    /// match with this lexicon's own `language` — never the token's, though
-    /// by the time a token reaches here (via
-    /// [`super::router::LexiconRouter::run`]) the two always agree.
+    /// Scans every token in `tokens` for every curated term in one
+    /// Aho-Corasick pass per token (FR-5.2), tagging each match with this
+    /// lexicon's own `language` — never the token's, though by the time a
+    /// token reaches here (via [`super::router::LexiconRouter::run`]) the
+    /// two always agree. A term appearing more than once in a single token
+    /// produces one `LexiconMatch` per occurrence, each with its own span,
+    /// not one match for the token as a whole.
     pub fn scan(&self, tokens: &[PositionedToken]) -> Vec<LexiconMatch> {
         let mut matches = Vec::new();
         for positioned in tokens {
             let haystack = positioned.token.text.to_lowercase();
-            for term in &self.terms {
-                if haystack.contains(term.as_str()) {
-                    matches.push(LexiconMatch {
-                        token_index: positioned.index,
-                        language: self.language.clone(),
-                        term: term.clone(),
-                        matched_text: positioned.token.text.clone(),
-                    });
-                }
+            for (term_index, span) in self.automaton.find_all(&haystack) {
+                matches.push(LexiconMatch {
+                    token_index: positioned.index,
+                    language: self.language.clone(),
+                    term: self.terms[term_index].clone(),
+                    matched_text: haystack[span.clone()].to_string(),
+                    span,
+                });
             }
         }
         matches
@@ -142,5 +163,44 @@ mod tests {
         // in `router.rs`, not this type's.
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].language, "en");
+    }
+
+    #[test]
+    fn scan_reports_the_matched_terms_own_span_within_the_token() {
+        let lexicon = Lexicon::new("en", ["several"]);
+        let tokens = vec![positioned(0, "we need several", "en")];
+
+        let matches = lexicon.scan(&tokens);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].span, 8..15);
+        assert_eq!(matches[0].matched_text, "several");
+    }
+
+    #[test]
+    fn scan_finds_every_occurrence_of_a_term_repeated_in_one_token() {
+        let lexicon = Lexicon::new("en", ["some"]);
+        let tokens = vec![positioned(0, "some issues, and then some more", "en")];
+
+        let matches = lexicon.scan(&tokens);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].span, 0..4);
+        assert_eq!(matches[1].span, 22..26);
+    }
+
+    #[test]
+    fn scan_finds_every_distinct_curated_term_in_one_pass_over_a_token() {
+        let lexicon = Lexicon::new("en", ["several", "a lot", "some"]);
+        let tokens = vec![positioned(
+            0,
+            "there were several, a lot, and some issues",
+            "en",
+        )];
+
+        let matches = lexicon.scan(&tokens);
+
+        let terms: Vec<&str> = matches.iter().map(|m| m.term.as_str()).collect();
+        assert_eq!(terms, vec!["several", "a lot", "some"]);
     }
 }

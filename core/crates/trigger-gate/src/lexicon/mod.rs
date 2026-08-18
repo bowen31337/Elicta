@@ -34,6 +34,7 @@
 //! types once crate wiring lands — the field sets are deliberately
 //! identical.
 
+mod ahocorasick;
 pub mod evaluation;
 pub mod grouping;
 pub mod hold;

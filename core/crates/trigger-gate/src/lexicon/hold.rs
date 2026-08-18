@@ -212,7 +212,8 @@ mod tests {
                     token_index: 0,
                     language: "en".to_string(),
                     term: "several".to_string(),
-                    matched_text: "we need several".to_string(),
+                    matched_text: "several".to_string(),
+                    span: 8..15,
                 },
                 reason: DiscardReason::NoLongerMatched,
             }

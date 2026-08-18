@@ -1,5 +1,126 @@
 # lexicon module — handoff
 
+## Update: Aho-Corasick lexicon matching, returning the matched span (PRD FR-5.2)
+
+Implements "System detects unquantified adjectives and vague quantifiers by
+Aho-Corasick match over a curated lexicon, returning the matched span (PRD
+FR-5.2). Done when a match emits the offending span on the trigger event."
+Both `terms.rs`'s and the crate-root `HANDOFF.md`'s own prior "what's not
+done" sections named this explicitly: `Lexicon::scan` was "a correct but not
+performance-optimised substring scan; it exists to prove and test the
+routing/isolation contract, not to be the final matching algorithm," with
+"the Aho-Corasick engine (FR-5.2)... a drop-in performance replacement over
+the same `scan` contract and `LexiconMatch` shape." This change is that
+replacement — plus the part neither prior "what's not done" note called out:
+`LexiconMatch` never actually carried a matched span at all, only a whole
+token's `matched_text`, so "returning the matched span" needed a real new
+field, not just a faster scan.
+
+### What's here
+
+- `ahocorasick.rs` — a small `AhoCorasick` automaton: a byte-level trie with
+  Aho-Corasick failure links, built once per `Lexicon` (in `Lexicon::new`)
+  from its curated term list and reused across every token it scans.
+  `AhoCorasick::find_all` walks a haystack once and returns every occurrence
+  of every pattern — including overlapping patterns and repeat occurrences of
+  the same term — as `(pattern_index, byte_range)`. No new Cargo dependency:
+  this is a from-scratch implementation kept inside `lexicon/`, the same
+  choice `grouping.rs` made for `TaggedToken` and the crate-root `HANDOFF.md`
+  made for not creating `Cargo.toml`/`lib.rs` — adding a real `aho-corasick`
+  crate dependency would mean editing `core/crates/trigger-gate/Cargo.toml`,
+  outside this change's own `lexicon/**` footprint and, per this crate's own
+  established pattern, "crate scaffold, owned by whoever wires up the
+  crate." (Confirmed `cargo add aho-corasick --dry-run` resolves fine if a
+  future change decides to swap this for the published crate instead —
+  network access to crates.io was available when this change was made — but
+  swapping is a Cargo.toml-touching change this one deliberately did not
+  make.)
+- `terms.rs` — `Lexicon` now holds a built `AhoCorasick` automaton alongside
+  its term list, and `Lexicon::scan` calls `automaton.find_all` once per
+  token instead of looping `str::contains` once per curated term. `Lexicon`
+  and `LexiconRouter`'s public contracts are otherwise unchanged — this really
+  is the "drop-in" replacement the prior HANDOFF predicted. `LexiconMatch`
+  gained one new field, `span: Range<usize>` — the matched phrase's own byte
+  range within the token's (lower-cased) text, exactly what FR-5.2 asks the
+  gate to return. `matched_text` changed meaning to match: it used to be the
+  *whole* token's original-case text regardless of how much of it actually
+  matched; it is now the exact matched substring, sliced from the same
+  lower-cased haystack `span` was computed against (never the original-case
+  text at the same offsets — lower-casing can change a character's byte
+  length for a handful of Unicode code points, so slicing the original text
+  at a lower-cased haystack's offsets risks a byte-boundary panic; slicing
+  the same string the span came from cannot).
+- `evaluation.rs` — `token_span` (private) now takes the match's own `span`
+  and adds it to the token's start offset in the space-joined utterance
+  string, instead of returning the whole token's span. This is the other
+  half of "a match emits the offending span on the trigger event": before
+  this change, `TriggerEvent.span` covered the entire token a match was
+  found in, even when the curated term was only part of that token's text
+  (e.g. `hold.rs`'s own tests already use tokens like `"we need several"`).
+  After this change it covers exactly the offending phrase.
+- `hold.rs` — one existing test's hand-built `LexiconMatch` literal
+  (`endpoint_revising_the_matched_text_away_discards_the_held_candidate`)
+  updated for the new `span` field and narrowed `matched_text` — the token
+  text used there, `"we need several"`, matches against the term
+  `"several"`, so the real value coming out of `scan` is now `"several"`
+  at `8..15`, not the whole token text FR-5.9's tests never actually
+  asserted on for its own sake.
+
+### Why this satisfies "a match emits the offending span on the trigger
+event"
+
+`LexiconMatch::span` is populated directly from `AhoCorasick::find_all`'s own
+return value — there is no path through `Lexicon::scan` that fabricates a
+placeholder span or falls back to the whole token. `terms.rs`'s
+`scan_reports_the_matched_terms_own_span_within_the_token` proves the span is
+exactly the matched substring's own range, not the token's.
+`scan_finds_every_occurrence_of_a_term_repeated_in_one_token` and
+`scan_finds_every_distinct_curated_term_in_one_pass_over_a_token` prove the
+Aho-Corasick property this scan is actually named for: one left-to-right
+pass finds every occurrence of every curated term, rather than one
+`str::contains` call per term (a repeat occurrence of the same term is two
+matches with two distinct spans, not one). `ahocorasick.rs`'s own
+`overlapping_patterns_sharing_a_prefix_are_both_reported` test is the
+textbook Aho-Corasick correctness case (`"he"`/`"she"`/`"his"`/`"hers"`),
+proving the failure-link construction doesn't drop a shorter, overlapping
+match the way a naive trie walk without failure links would.
+`evaluation.rs`'s new
+`event_span_narrows_to_the_matched_phrase_not_the_whole_token` proves the
+final `TriggerEvent.span` a caller actually receives reflects the same
+narrowing, not just `LexiconMatch.span` in isolation — a token carrying extra
+words around the matched term produces an event span that covers only the
+term.
+
+### What's not done here
+
+- Swapping this hand-rolled automaton for the published `aho-corasick` crate
+  — as noted above, that requires editing `Cargo.toml`, outside this
+  change's `lexicon/**` footprint. The two have the same asymptotic behavior
+  over a fixed curated lexicon; the published crate would add SIMD-accelerated
+  scanning and Unicode-aware options this change's byte-level trie does not
+  attempt, which matters for feature 143's <20ms latency budget under a much
+  larger lexicon than this crate's tests exercise — worth revisiting if that
+  budget is ever measured against this scan and found wanting.
+- Deduplicating an occurrence that both an exact node and a fail-link suffix
+  would otherwise double-report — this cannot actually happen with the
+  current curated lexicons (no two curated terms are one a suffix of the
+  other in the test lexicons), but a future lexicon that curated, say, both
+  `"a lot"` and `"lot"` would get two separate `LexiconMatch`es for one
+  occurrence of `"a lot"`, each with its own correct-but-overlapping span.
+  Nothing here decides whether that's the right behavior (arguably it is —
+  both are independently curated ambiguity terms) or something a caller
+  should collapse.
+
+Verified with `cargo test -p trigger-gate` (72/72 pass — 60 prior tests
+untouched except the one `hold.rs` literal above, 12 new tests across
+`ahocorasick.rs`, `terms.rs`, and `evaluation.rs`), `cargo clippy -p
+trigger-gate --all-targets -- -D warnings` (clean), `cargo fmt -p
+trigger-gate -- --check` (clean for every file this change touched;
+`ratelimit/regulation.rs` and `ratelimit/storm.rs` still carry the same
+pre-existing, unrelated formatting diffs every prior update in this file has
+already noted and left alone), and `cargo build --workspace` (still
+succeeds).
+
 ## Update: the gate evaluation loop (PRD FR-5.1)
 
 Implements "System evaluates every finalised utterance whose speaker tag is
