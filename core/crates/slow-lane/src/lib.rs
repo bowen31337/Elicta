@@ -13,16 +13,21 @@
 //! ticks be in flight at once, since a hung pass plus the next scheduled
 //! tick would otherwise pay full (uncached) price on both requests.
 //!
-//! Assembling the actual partitioned prompt, calling the Messages API,
-//! and writing coverage updates/candidates back into the bank (§3.8) are
-//! separate features that consume the events and decisions this crate
-//! produces — this crate owns the tick and the overlap invariant, plus
-//! (per architecture §3.11) the coverage-gap-plus-drift decision rule
-//! (PRD FR-5.6) that turns a per-tick topic-focus judgment and the bank's
-//! coverage state into a [`coverage_gap_drift::CoverageGapDriftTrigger`],
-//! since that decision is model-assisted-tier and lands on the same tick
-//! this crate already owns.
+//! Assembling the actual partitioned prompt, calling the Messages API, and
+//! writing coverage updates back into the bank are separate features that
+//! consume the events and decisions this crate produces — this crate owns
+//! the tick and the overlap invariant, plus (per architecture §3.11) the
+//! coverage-gap-plus-drift decision rule (PRD FR-5.6) that turns a per-tick
+//! topic-focus judgment and the bank's coverage state into a
+//! [`coverage_gap_drift::CoverageGapDriftTrigger`], since that decision is
+//! model-assisted-tier and lands on the same tick this crate already owns.
+//! Writing a slow-lane pass's novel *candidates* back into the on-device
+//! bank mid-meeting (§3.8) is, however, this crate's own
+//! [`bank_write_back::BankWriteBackStore`] — landing them durably for later
+//! ranking to read is a small enough, tick-scoped concern to own alongside
+//! the tick itself, unlike the coverage/prompt/request concerns above.
 
+pub mod bank_write_back;
 pub mod cache_lifetime;
 pub mod coverage_gap_drift;
 pub mod model;
@@ -33,6 +38,7 @@ pub mod replay;
 pub mod request;
 pub mod ticker;
 
+pub use bank_write_back::{BankWriteBackStore, NovelCandidate, WriteBackError};
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
 pub use coverage_gap_drift::{CoverageGapDriftDetector, CoverageGapDriftTrigger, TopicFocus};
 pub use model::{MeetingModel, ModelId};
@@ -382,6 +388,60 @@ mod orchestrator_ticks_end_to_end {
         ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
         let repeat_trigger = detector.on_tick(TopicFocus::on("timeline"), &slots);
         assert_eq!(repeat_trigger, None, "a trigger already reported for this drift must not fire again");
+
+        ticker.stop();
+    }
+
+    /// End to end, driven by real [`TickEvent`]s from the same ticker every
+    /// other test in this module uses: a coverage-gap-plus-drift trigger on
+    /// one tick and a plain novel finding on a later tick each write a
+    /// [`bank_write_back::NovelCandidate`] into the on-device
+    /// [`bank_write_back::BankWriteBackStore`] mid-meeting, before the
+    /// meeting ends and with no ranking pass involved. Ties this crate's
+    /// "done when the on-device bank persists each novel candidate"
+    /// criterion to the same tick machinery the rest of this module already
+    /// proves against, rather than to a standalone unit test of the store
+    /// alone.
+    #[test]
+    fn every_novel_candidate_a_tick_discovers_persists_into_the_on_device_bank_mid_meeting() {
+        let interval = Duration::from_millis(15);
+        let (ticker, ticks) = SlowLaneTicker::spawn(interval);
+        let store = BankWriteBackStore::open_in_memory().unwrap();
+        let meeting_id = "meeting-1";
+
+        // Tick 1: a coverage-gap-plus-drift finding raises a novel
+        // candidate for the section the conversation just drifted away
+        // from, before it's been asked at all.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let from_drift = NovelCandidate {
+            id: "novel-candidate-1".to_string(),
+            template_section: "scope".to_string(),
+            topic: "on-call coverage".to_string(),
+            stub: "on-call coverage follow-up".to_string(),
+            lang: "en".to_string(),
+            source_doc: None,
+        };
+        store.write_back(meeting_id, &from_drift).unwrap();
+
+        // Tick 2: a second, unrelated novel candidate from a contradiction
+        // finding -- the bank must accumulate this alongside the first,
+        // never replacing it, since it carries a different id.
+        ticks.recv_timeout(Duration::from_secs(1)).expect("tick did not fire");
+        let from_contradiction = NovelCandidate {
+            id: "novel-candidate-2".to_string(),
+            template_section: "budget".to_string(),
+            topic: "budget contradiction".to_string(),
+            stub: "budget figure follow-up".to_string(),
+            lang: "en".to_string(),
+            source_doc: Some("doc-7".to_string()),
+        };
+        store.write_back(meeting_id, &from_contradiction).unwrap();
+
+        assert_eq!(
+            store.candidates(meeting_id).unwrap(),
+            vec![from_drift, from_contradiction],
+            "every novel candidate a tick discovers over the course of the meeting must persist in the on-device bank"
+        );
 
         ticker.stop();
     }

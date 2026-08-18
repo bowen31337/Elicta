@@ -10,3 +10,4 @@ path = "src/lib.rs"
 [dependencies]
 coverage = { path = "../coverage" }
 telemetry = { path = "../../shared/telemetry" }
+rusqlite = { version = "0.31", features = ["bundled"] }

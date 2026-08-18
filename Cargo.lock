@@ -373,6 +373,7 @@ name = "slow-lane"
 version = "0.1.0"
 dependencies = [
  "coverage",
+ "rusqlite",
  "telemetry",
 ]
 
