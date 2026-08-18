@@ -1,11 +1,17 @@
-//! Pure, OS-agnostic conversion between the bytes WASAPI's loopback capture
-//! endpoint hands back and this crate's [`RawFrame`](crate::ring::RawFrame)
-//! samples.
+//! Pure, OS-agnostic conversion between the bytes a WASAPI capture endpoint
+//! hands back and this crate's [`RawFrame`](crate::ring::RawFrame) samples.
 //!
-//! Kept separate from the COM/FFI glue in `wasapi.rs` (which only compiles
-//! on Windows) so the part of this backend most likely to hide a bug — byte
-//! decoding — has unit test coverage on every platform this workspace builds
-//! on, not just Windows.
+//! Shared by both directions WASAPI capture runs in: the loopback tap on the
+//! default *render* endpoint (`wasapi.rs`, `WasapiLoopbackSource`) and the
+//! default *capture* endpoint for a physical line-in interface
+//! (`wasapi_line_in.rs`, `WasapiLineInSource`) — `IAudioCaptureClient::GetBuffer`
+//! hands back the same packet shape regardless of which endpoint direction
+//! produced it, so decoding it has no dependency on that choice.
+//!
+//! Kept separate from the COM/FFI glue in `wasapi.rs` / `wasapi_line_in.rs`
+//! (which only compile on Windows) so the part of this backend most likely
+//! to hide a bug — byte decoding — has unit test coverage on every platform
+//! this workspace builds on, not just Windows.
 
 use crate::ring::AudioFormat;
 
@@ -167,10 +173,10 @@ mod tests {
         assert_eq!(pcm_format.bytes_per_sample(), 2);
     }
 
-    /// The end-to-end claim this backend exists to satisfy: whatever native
-    /// format the render endpoint's mix format reports, a packet decoded off
-    /// it and pushed through the crate's one normalisation chokepoint comes
-    /// out 16kHz mono.
+    /// The end-to-end claim `WasapiLoopbackSource` exists to satisfy:
+    /// whatever native format the render endpoint's mix format reports, a
+    /// packet decoded off it and pushed through the crate's one
+    /// normalisation chokepoint comes out 16kHz mono.
     #[test]
     fn a_decoded_native_packet_normalizes_to_16k_mono_end_to_end() {
         let format = stereo_float_format();
@@ -178,6 +184,42 @@ mod tests {
         let sample_count = frame_count as usize * format.channels as usize;
         let bytes: Vec<u8> = (0..sample_count)
             .flat_map(|i| ((i as f32 * 0.01).sin()).to_le_bytes())
+            .collect();
+
+        let samples = decode_capture_packet(&bytes, frame_count, format, false);
+        assert_eq!(samples.len(), sample_count);
+
+        let mut pipeline = NormalizingPipeline::new();
+        let normalized = pipeline.process(RawFrame::new(format.audio_format(), samples));
+
+        let expected_len = frame_count as u64 * TARGET_SAMPLE_RATE as u64 / format.sample_rate as u64;
+        assert!(
+            (normalized.samples.len() as i64 - expected_len as i64).abs() <= 2,
+            "expected ~{} 16kHz mono samples, got {}",
+            expected_len,
+            normalized.samples.len()
+        );
+    }
+
+    /// The same end-to-end claim, for `WasapiLineInSource`'s capture-endpoint
+    /// path: a physical line-in interface's mix format is commonly mono
+    /// PCM16 at a rate that isn't 48kHz (44.1kHz here), unlike a render
+    /// endpoint's usual stereo float mix — decoding and normalising it still
+    /// comes out 16kHz mono.
+    #[test]
+    fn a_decoded_line_in_packet_normalizes_to_16k_mono_end_to_end() {
+        let format = WasapiMixFormat {
+            sample_rate: 44_100,
+            channels: 1,
+            sample_format: WasapiSampleFormat::Pcm16,
+        };
+        let frame_count = 4_410u32; // 100ms at 44.1kHz
+        let sample_count = frame_count as usize * format.channels as usize;
+        let bytes: Vec<u8> = (0..sample_count)
+            .flat_map(|i| {
+                let sample = (i as f32 * 0.01).sin() * i16::MAX as f32;
+                (sample as i16).to_le_bytes()
+            })
             .collect();
 
         let samples = decode_capture_packet(&bytes, frame_count, format, false);

@@ -11,15 +11,20 @@
 //! whatever native format a source hands it) can depend on the trait alone
 //! and never branch on which platform backend produced a frame.
 //!
-//! Most concrete backends (macOS CoreAudio / Windows WASAPI line-in, the
-//! managed per-participant vendor, the acoustic fallback mic) are later
-//! features built against this trait, not part of this module. The loopback
-//! backends are the exception — they're implemented here: the Windows WASAPI
-//! loopback backend (`WasapiLoopbackSource`, Windows builds only), split into
-//! `wasapi` (the Windows-only COM/FFI glue) and `wasapi_format` (the
-//! OS-agnostic byte decoding it wraps); and the macOS `ScreenCaptureKit`
-//! loopback backend (`ScreenCaptureLoopbackSource`, macOS builds only), split
-//! the same way into `macos` and `macos_format`.
+//! Most concrete backends (macOS CoreAudio line-in, the managed
+//! per-participant vendor, the acoustic fallback mic) are later features
+//! built against this trait, not part of this module. The loopback backends
+//! and the Windows line-in backend are the exception — they're implemented
+//! here: the Windows WASAPI loopback backend (`WasapiLoopbackSource`,
+//! Windows builds only), split into `wasapi` (the Windows-only COM/FFI glue)
+//! and `wasapi_format` (the OS-agnostic byte decoding it wraps); the Windows
+//! WASAPI line-in backend (`WasapiLineInSource`, Windows builds only, in
+//! `wasapi_line_in`), which opens the default *capture* endpoint instead of
+//! looping back the default *render* endpoint and otherwise reuses
+//! `wasapi_format`'s decoding and `wasapi`'s mix-format parsing rather than
+//! duplicating either; and the macOS `ScreenCaptureKit` loopback backend
+//! (`ScreenCaptureLoopbackSource`, macOS builds only), split the same way
+//! into `macos` and `macos_format`.
 
 mod kind;
 mod profile;
@@ -39,6 +44,8 @@ mod macos;
 mod wasapi_format;
 #[cfg(target_os = "windows")]
 mod wasapi;
+#[cfg(target_os = "windows")]
+mod wasapi_line_in;
 
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
 #[cfg(target_os = "macos")]
@@ -48,3 +55,5 @@ pub use registry::AudioSourceRegistry;
 pub use source::{AudioSource, AudioSourceError};
 #[cfg(target_os = "windows")]
 pub use wasapi::WasapiLoopbackSource;
+#[cfg(target_os = "windows")]
+pub use wasapi_line_in::WasapiLineInSource;

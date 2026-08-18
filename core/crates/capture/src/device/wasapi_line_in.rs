@@ -1,25 +1,25 @@
-//! Windows WASAPI loopback capture backend (PRD FR-1.1) — a first-class
-//! [`AudioSource`] for the default render endpoint's own output, not a
-//! workaround bolted onto the input side of the API.
+//! Windows WASAPI line-in capture backend (PRD FR-1.1) — a first-class
+//! [`AudioSource`] for a physical line-in interface (a USB audio interface
+//! plugged in as the input device), not the render endpoint's own output.
 //!
-//! Loopback capture means opening the *default render* endpoint's
-//! `IAudioClient` with `AUDCLNT_STREAMFLAGS_LOOPBACK` instead of opening a
-//! capture endpoint — WASAPI hands back exactly what that endpoint is
-//! playing, mixed, at its own shared-mode format. This module owns the COM
-//! lifecycle that setup needs; decoding the packets it yields into
-//! [`RawFrame`] samples is pure logic factored out to `wasapi_format` so
-//! that part has unit test coverage on every platform, not just Windows.
+//! Line-in capture means opening the *default capture* endpoint's
+//! `IAudioClient` in plain shared mode — no `AUDCLNT_STREAMFLAGS_LOOPBACK` —
+//! so WASAPI hands back whatever the interface's own input is receiving,
+//! rather than looping back the system's render mix the way
+//! `WasapiLoopbackSource` does. Everything below the endpoint activation
+//! (mix format parsing, packet polling, buffer decoding) is identical in
+//! shape to the loopback backend and shares its byte-decoding logic with it
+//! via `wasapi_format`, which has no dependency on which endpoint direction
+//! produced the bytes.
 
 #![cfg(target_os = "windows")]
 
 use std::ptr;
 use std::time::Duration;
 
-use windows::core::GUID;
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
+    eCapture, eConsole, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
     MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -30,9 +30,10 @@ use crate::ring::{AudioFormat, RawFrame};
 
 use super::kind::AudioSourceKind;
 use super::source::{AudioSource, AudioSourceError};
-use super::wasapi_format::{decode_capture_packet, WasapiMixFormat, WasapiSampleFormat};
+use super::wasapi::parse_wave_format;
+use super::wasapi_format::{decode_capture_packet, WasapiMixFormat};
 
-/// Buffer duration requested from WASAPI for the loopback capture client, in
+/// Buffer duration requested from WASAPI for the line-in capture client, in
 /// 100-nanosecond units (the unit `IAudioClient::Initialize` takes) — 200ms
 /// gives the non-real-time capture worker headroom to drain packets between
 /// polls without the endpoint's shared-mode buffer overrunning.
@@ -43,21 +44,9 @@ const BUFFER_DURATION_100NS: i64 = 200 * 10_000;
 /// shared-mode device period, long enough not to spin the capture thread.
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
-const WAVE_FORMAT_PCM: u16 = 1;
-const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
-const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
-
-// `windows` only generates these GUID constants behind the
-// `Win32_Media_KernelStreaming` / `Win32_Media_Multimedia` features; pulling
-// either in for two well-known, never-changing subtype GUIDs isn't worth the
-// extra feature surface.
-const KSDATAFORMAT_SUBTYPE_PCM: GUID = GUID::from_u128(0x00000001_0000_0010_8000_00aa00389b71);
-const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: GUID =
-    GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71);
-
-/// A running WASAPI loopback capture session against the current default
-/// render endpoint.
-pub struct WasapiLoopbackSource {
+/// A running WASAPI capture session against the current default capture
+/// endpoint (a physical line-in interface).
+pub struct WasapiLineInSource {
     capture_client: IAudioCaptureClient,
     audio_client: IAudioClient,
     format: WasapiMixFormat,
@@ -68,11 +57,10 @@ pub struct WasapiLoopbackSource {
     owns_com_init: bool,
 }
 
-impl WasapiLoopbackSource {
-    /// Opens the default render endpoint in loopback mode and starts
-    /// capture. Fails if no render endpoint exists (no speakers/output
-    /// device configured) or the endpoint refuses shared-mode loopback
-    /// initialization.
+impl WasapiLineInSource {
+    /// Opens the default capture endpoint and starts capture. Fails if no
+    /// capture endpoint exists (no line-in interface configured as the input
+    /// device) or the endpoint refuses shared-mode initialization.
     ///
     /// Must be called on the thread that will subsequently call
     /// [`next_frame`](AudioSource::next_frame) — COM apartment state is
@@ -110,8 +98,10 @@ impl WasapiLoopbackSource {
             })?;
 
         let device: IMMDevice = enumerator
-            .GetDefaultAudioEndpoint(eRender, eConsole)
-            .map_err(|e| AudioSourceError::Disconnected(format!("no default render endpoint: {e}")))?;
+            .GetDefaultAudioEndpoint(eCapture, eConsole)
+            .map_err(|e| {
+                AudioSourceError::Disconnected(format!("no default capture endpoint: {e}"))
+            })?;
 
         let audio_client: IAudioClient = device
             .Activate(CLSCTX_ALL, None)
@@ -124,7 +114,7 @@ impl WasapiLoopbackSource {
 
         let init_result = audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_LOOPBACK,
+            0,
             BUFFER_DURATION_100NS,
             0,
             mix_format_ptr,
@@ -132,7 +122,7 @@ impl WasapiLoopbackSource {
         );
         CoTaskMemFree(Some(mix_format_ptr as *const core::ffi::c_void));
         init_result.map_err(|e| {
-            AudioSourceError::Disconnected(format!("failed to initialize loopback capture: {e}"))
+            AudioSourceError::Disconnected(format!("failed to initialize line-in capture: {e}"))
         })?;
         let format =
             format.map_err(|reason| AudioSourceError::Disconnected(format!("unusable mix format: {reason}")))?;
@@ -154,9 +144,9 @@ impl WasapiLoopbackSource {
     }
 }
 
-impl AudioSource for WasapiLoopbackSource {
+impl AudioSource for WasapiLineInSource {
     fn kind(&self) -> AudioSourceKind {
-        AudioSourceKind::Loopback
+        AudioSourceKind::LineIn
     }
 
     fn format(&self) -> AudioFormat {
@@ -202,7 +192,7 @@ impl AudioSource for WasapiLoopbackSource {
     }
 }
 
-impl Drop for WasapiLoopbackSource {
+impl Drop for WasapiLineInSource {
     fn drop(&mut self) {
         unsafe {
             let _ = self.audio_client.Stop();
@@ -211,52 +201,4 @@ impl Drop for WasapiLoopbackSource {
             }
         }
     }
-}
-
-/// Reads the `WAVEFORMATEX` WASAPI allocated for `GetMixFormat`, following
-/// into its `WAVEFORMATEXTENSIBLE` tail when the format tag says the caller
-/// must. `ptr` must point at a live `WAVEFORMATEX` (or larger
-/// `WAVEFORMATEXTENSIBLE`) as returned by `IAudioClient::GetMixFormat` — the
-/// caller frees it with `CoTaskMemFree` once this has copied out the fields
-/// it needs.
-///
-/// `pub(super)` rather than private: `wasapi_line_in`'s capture endpoint
-/// hands back the exact same `WAVEFORMATEX`/`WAVEFORMATEXTENSIBLE` shape from
-/// its own `GetMixFormat` call, so it reuses this parser instead of
-/// duplicating it.
-pub(super) unsafe fn parse_wave_format(ptr: *mut WAVEFORMATEX) -> Result<WasapiMixFormat, String> {
-    // WAVEFORMATEX/WAVEFORMATEXTENSIBLE are `packed(1)` to match WASAPI's C
-    // layout exactly, so every field is copied to a local before use —
-    // taking `&wfx.field` directly would build a reference the field's own
-    // type may require stricter alignment than the packed struct guarantees.
-    let wfx = *ptr;
-    let channels = wfx.nChannels;
-    let sample_rate = wfx.nSamplesPerSec;
-    let format_tag = wfx.wFormatTag;
-    let bits_per_sample = wfx.wBitsPerSample;
-
-    let sample_format = match format_tag {
-        WAVE_FORMAT_IEEE_FLOAT => WasapiSampleFormat::Float32,
-        WAVE_FORMAT_PCM if bits_per_sample == 16 => WasapiSampleFormat::Pcm16,
-        WAVE_FORMAT_EXTENSIBLE => {
-            let ext = *(ptr as *const WAVEFORMATEXTENSIBLE);
-            let sub_format = ext.SubFormat;
-            if sub_format == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT {
-                WasapiSampleFormat::Float32
-            } else if sub_format == KSDATAFORMAT_SUBTYPE_PCM && bits_per_sample == 16 {
-                WasapiSampleFormat::Pcm16
-            } else {
-                return Err(format!(
-                    "unsupported extensible sub-format (bits/sample={bits_per_sample})"
-                ));
-            }
-        }
-        tag => return Err(format!("unsupported mix format tag {tag:#x}")),
-    };
-
-    Ok(WasapiMixFormat {
-        sample_rate,
-        channels,
-        sample_format,
-    })
 }
