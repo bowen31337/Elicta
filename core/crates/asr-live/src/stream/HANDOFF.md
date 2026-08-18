@@ -49,6 +49,16 @@ required for it specifically.
   unrelated utterance that must never be merged in. Used both to unit-test
   this module and as a fixture whoever wires the trigger gate can develop
   against before a real vendor connection exists.
+- `first_partial_delay.rs` — `FirstPartialDelay` (PRD FR-5.9, architecture
+  §14.2's `interruption_delay` discussion): the delay this system requests
+  when opening a stream, so the engine emits its first partial as early as
+  it allows and speculative drafting gets the widest possible window
+  between first partial and endpoint. `FirstPartialDelay::floor()` /
+  `FIRST_PARTIAL_DELAY` is the engine's documented minimum (architecture
+  §14.2: "0-1000ms") — what this system actually requests by default —
+  and `FirstPartialDelay::new` validates any override stays inside that
+  range rather than silently sending the engine a value it doesn't
+  support.
 
 ## Suggested integration point
 
@@ -61,8 +71,21 @@ managed-capture session) and react to the resulting `StreamEvent`. A
 `supersedes`'s text, retract that reaction — a corrected utterance is a
 replacement, not an addition.
 
+Whoever constructs a real vendor `TranscriptionBackend` (AssemblyAI in
+particular — Deepgram's turn model doesn't expose an equivalent knob,
+architecture §14.2's table) should request `FirstPartialDelay::floor()`'s
+value as that connection's `interruption_delay` when opening the stream.
+`TranscriptionBackend::start_stream` doesn't currently take this
+parameter — extending it is `backend/`'s call, not this module's, since
+`transcription_backend.rs` lives outside this directory.
+
 ## Deliberately out of scope here
 
+- Threading `FirstPartialDelay` through `TranscriptionBackend::start_stream`
+  itself: that trait lives in `backend/`, outside this directory, and
+  changing its signature is whoever owns that module's call. This module
+  only decides and validates the value; wiring it onto a real handshake is
+  the next step.
 - Picking `continuation_window` per vendor/capture-mode is future-scoped
   work (architecture §14.2's T2 experiment); this module exposes it as a
   constructor parameter rather than hard-coding one number, with
@@ -81,7 +104,12 @@ replacement, not an addition.
   that's a policy decision for whoever tunes `continuation_window`, not a
   structural limitation of `UtteranceReevaluator`.
 
-Verified with `cargo test` and `cargo clippy` (13 passing tests, no
+Verified with `cargo test` and `cargo clippy` (24 passing tests, no
 warnings) in a scratch crate mirroring this module tree plus the existing
 `backend` module, since the crate-level `Cargo.toml`/`lib.rs` in this
-worktree only registers `backend` and `tokens` as of this writing.
+worktree only registers `backend` and `tokens` as of this writing. That
+run also turned up `fake.rs`'s `PrematureEndpointFakeBackend` missing a
+`start_stream` impl (a pre-existing gap unrelated to `FirstPartialDelay` —
+the trait requires it and nothing here had exercised the miss yet, since
+the module isn't wired into `lib.rs`); fixed as a no-op alongside this
+change so the module actually compiles.

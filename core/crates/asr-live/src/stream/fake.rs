@@ -95,6 +95,14 @@ impl Default for PrematureEndpointFakeBackend {
 }
 
 impl TranscriptionBackend for PrematureEndpointFakeBackend {
+    fn start_stream(
+        &mut self,
+        _stream_id: &StreamId,
+        _keyterms: &[crate::backend::Keyterm],
+    ) -> Result<(), BackendError> {
+        Ok(())
+    }
+
     fn send_audio(&mut self, stream_id: &StreamId, frame: &[i16]) -> Result<(), BackendError> {
         if frame.is_empty() {
             return Err(BackendError("empty frame".to_string()));
