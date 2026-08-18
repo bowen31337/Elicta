@@ -6,6 +6,7 @@ mod device_route;
 mod language_panel;
 mod preflight;
 mod question_bank;
+mod session_resume;
 
 pub use capture_stream::{
     reconcile_roster, CaptureStreamDropAlert, FallbackAction, ParticipantId, RosterEntry,
@@ -27,3 +28,4 @@ pub use question_bank::{
     validate_question_bank_at_startup, QuestionBankBlockReason, QuestionBankBlockedError,
     QuestionBankStartupStatus, QuestionBankState,
 };
+pub use session_resume::{describe_session_resume, SessionResumeStatus};
