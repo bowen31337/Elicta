@@ -19,9 +19,11 @@
 //! produces — this crate owns the tick and the overlap invariant only.
 
 pub mod orchestrator;
+pub mod replay;
 pub mod ticker;
 
 pub use orchestrator::{SlowLaneOrchestrator, TickDecision};
+pub use replay::ReplayRun;
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
 
 /// End-to-end proof that the two halves of this crate compose into what

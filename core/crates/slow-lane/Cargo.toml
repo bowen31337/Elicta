@@ -6,3 +6,6 @@ edition = "2021"
 [lib]
 name = "slow_lane"
 path = "src/lib.rs"
+
+[dependencies]
+telemetry = { path = "../../shared/telemetry" }
