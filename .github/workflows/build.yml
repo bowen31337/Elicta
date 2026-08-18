@@ -1,0 +1,106 @@
+name: Build macOS Universal
+
+# Builds the Tauri shell over the shared Rust core (core/crates/*) as a single
+# universal macOS binary covering both Apple Silicon (arm64) and Intel
+# (x86_64), per PRD NFR-3.1. Developer ID re-signing and notarisation of the
+# artifact produced here happen downstream in sign-macos.yml (PRD NFR-3.3).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact-name:
+        description: Name of the uploaded universal macOS build artifact
+        value: ${{ jobs.build-macos.outputs.artifact-name }}
+
+concurrency:
+  group: build-macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: macOS universal (arm64 + x86_64)
+    # Apple Silicon runner: builds aarch64-apple-darwin natively and
+    # x86_64-apple-darwin via cross-compilation, then lipo's them together.
+    runs-on: macos-14
+    outputs:
+      artifact-name: ${{ steps.artifact.outputs.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/desktop/src-tauri -> target
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build desktop frontend assets
+        run: pnpm --filter desktop build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build universal macOS bundle
+        working-directory: apps/desktop
+        env:
+          # Real Developer ID identities are injected by sign-macos.yml after
+          # this artifact is downloaded; CI falls back to ad-hoc signing so
+          # every build here is at least a validly signed Mach-O binary.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+        run: cargo tauri build --target universal-apple-darwin --ci
+
+      - name: Verify universal binary covers arm64 and x86_64
+        run: |
+          set -euo pipefail
+          bundle="$(find apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n1)"
+          if [ -z "$bundle" ]; then
+            echo "no .app bundle produced" >&2
+            exit 1
+          fi
+          exe="$bundle/Contents/MacOS/$(basename "$bundle" .app)"
+          archs="$(lipo -archs "$exe")"
+          echo "architectures: $archs"
+          echo "$archs" | grep -qw arm64
+          echo "$archs" | grep -qw x86_64
+          echo "BUNDLE_PATH=$bundle" >> "$GITHUB_ENV"
+
+      - name: Verify the artifact is signed
+        run: codesign --verify --verbose=2 "$BUNDLE_PATH"
+
+      - name: Set artifact name
+        id: artifact
+        run: echo "name=elicta-macos-universal-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload universal macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
