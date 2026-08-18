@@ -1,5 +1,94 @@
 # lexicon module — handoff
 
+## Update: gate latency measurement, no model call on the path (feature 143)
+
+Implements "System completes the deterministic lexicon scan in under 20
+milliseconds with no model call on the path. Done when each utterance emits
+a gate latency measurement." This is feature 143, named and explicitly
+deferred by name in two places already in this file: the per-language-
+isolation "what's not done" section below ("The Aho-Corasick matching engine
+itself (FR-5.2) and the <20ms latency budget (feature 143)") and the
+Aho-Corasick update's own "what's not done" ("which matters for feature
+143's <20ms latency budget under a much larger lexicon than this crate's
+tests exercise").
+
+### What's here
+
+- `evaluation.rs` — `GateDecision` gained a `latency: std::time::Duration`
+  field. `evaluate_utterance` times exactly the deterministic work it does to
+  produce `events` — `LexiconRouter::run`'s per-language Aho-Corasick scan,
+  plus `gate_span_confidence` over every resulting match — with
+  `std::time::Instant`, and carries the elapsed duration on the
+  `GateDecision` it already returns. Every `Some(GateDecision)` this function
+  returns carries a real measurement; there is no path that leaves `latency`
+  at a placeholder value. No new Cargo dependency: `std::time` is part of the
+  standard library, so this needed no `Cargo.toml` change, keeping with this
+  directory's established "no new Cargo dependency without editing
+  `Cargo.toml`, outside `lexicon/**`'s footprint" pattern (see the
+  Aho-Corasick and curated-lexicon updates below, both of which faced the
+  same constraint for their own would-be dependencies).
+
+### Why this satisfies "each utterance emits a gate latency measurement"
+
+`GateDecision::latency` is populated unconditionally on every evaluated
+utterance's `GateDecision` — the same structural guarantee this crate already
+established for `LexiconMatch::span` (FR-5.2) and `LexiconMatch::lexicon_id`
+(section 8.2a): there is no branch of `evaluate_utterance`'s non-`Operator`
+path that returns a `GateDecision` without a real elapsed-time measurement,
+including the zero-match case.
+`a_participant_utterance_with_a_match_carries_a_gate_latency_measurement` and
+`an_utterance_with_no_match_still_carries_a_latency_measurement` prove
+`latency` is present and within the 20ms budget both when the scan fires and
+when it finds nothing.
+`a_realistic_code_switched_utterance_against_the_full_curated_lexicons_clears_the_20ms_budget`
+exercises the actual budget this feature names: every curated lexicon this
+build ships (`LexiconRouter::with_curated_lexicons`, feature 144), scanned
+over a longer, mixed English/Chinese utterance closer to real ASR output
+than this file's other single- or few-token fixtures, still completes well
+inside 20ms.
+
+"No model call on the path" holds structurally rather than by convention:
+`evaluate_utterance`'s only dependencies are `LexiconRouter::run` (a
+byte-level Aho-Corasick automaton over an in-memory curated term list — see
+the Aho-Corasick update below) and `gate_span_confidence` (a float
+comparison) — neither this crate nor its `Cargo.toml` has any model,
+inference, or network dependency for this path to call in the first place.
+This was already true before this change; this change's contribution is
+making the "under 20 milliseconds" half of the feature observable per
+utterance, the same way `lexicon_id` and `span` made their own PRD
+requirements observable per match rather than merely true in practice.
+
+### What's not done here
+
+- Enforcing the 20ms budget at runtime (e.g. failing or logging a warning
+  when `latency` exceeds it) — `GateDecision::latency` is a measurement a
+  caller can inspect and act on; this change does not add an assertion,
+  panic, or log call inside `evaluate_utterance` itself for a slow scan,
+  since nothing in this crate's own scope names what a caller should do
+  about a budget breach (fail the gate open? closed? just alert?). The two
+  budget tests (`_carries_a_gate_latency_measurement`,
+  `_clears_the_20ms_budget`) assert the budget holds for what this crate
+  actually ships today; they are not a runtime guard.
+- Threading `latency` through to `parse::TriggerEvent` or exposing it as a
+  metric/telemetry emission — this module's own crate has no telemetry
+  dependency (confirmed no `Cargo.toml` exists to add one to, same
+  "crate scaffold" boundary every prior update in this file has respected).
+  `GateDecision::latency` is the seam a caller outside `lexicon/**` would
+  read from to export a real metric.
+- A higher-resolution or amortized measurement across a batch of utterances
+  — `Instant::now()`/`elapsed()` measures one utterance's evaluation in
+  isolation, matching "each utterance emits a gate latency measurement"
+  literally (per-utterance, not per-batch or per-process).
+
+Verified with `cargo test -p trigger-gate` (100/100 pass — 97 prior tests
+untouched, 3 new `evaluation` tests), `cargo
+clippy -p trigger-gate --all-targets -- -D warnings` (clean), `cargo fmt -p
+trigger-gate -- --check` (clean for `evaluation.rs`, the only file this
+change touched; `ratelimit/regulation.rs` and `ratelimit/storm.rs` still
+carry the same pre-existing, unrelated formatting diffs every prior update in
+this file has already noted and left alone), and `cargo build --workspace`
+(still succeeds).
+
 ## Update: loading a curated per-language lexicon, stamped with a persisted identifier (PRD section 8.2a, feature 144)
 
 Implements "System loads a separate ambiguity lexicon per language, rebuilt

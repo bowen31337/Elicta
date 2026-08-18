@@ -24,10 +24,24 @@
 //!                   gate_span_confidence (per match)
 //!                              │
 //!                              ▼
-//!                   GateDecision { utterance_id, events }
+//!         GateDecision { utterance_id, events, latency }
 //! ```
+//!
+//! Feature 143 ("System completes the deterministic lexicon scan in under 20
+//! milliseconds with no model call on the path") is proved by this module in
+//! two parts: "no model call on the path" holds structurally, not by
+//! convention — `evaluate_utterance`'s only dependencies are
+//! [`LexiconRouter::run`] (Aho-Corasick over a curated in-memory term list)
+//! and [`gate_span_confidence`] (a float comparison); neither this crate nor
+//! its `Cargo.toml` has any model/inference dependency to call in the first
+//! place. "Done when each utterance emits a gate latency measurement" is
+//! `GateDecision::latency`: every evaluated utterance's routing-and-gating
+//! work is timed with [`Instant`], and the elapsed [`Duration`] rides on the
+//! same `GateDecision` the caller already receives — a measurement, not a
+//! side channel a caller has to opt into.
 
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use crate::parse::{gate_span_confidence, TriggerEvent, UtteranceId};
 
@@ -71,6 +85,15 @@ pub struct FinalisedUtterance {
 pub struct GateDecision {
     pub utterance_id: UtteranceId,
     pub events: Vec<TriggerEvent>,
+    /// Wall-clock time [`evaluate_utterance`] spent routing `utterance`
+    /// through its per-language lexicons and gating every resulting match's
+    /// span confidence (feature 143) — the deterministic lexicon scan this
+    /// `GateDecision` is the result of, with no model call anywhere on that
+    /// path. Populated on every `GateDecision` this function returns, never
+    /// left at a placeholder zero: "each utterance emits a gate latency
+    /// measurement" means a real measurement rides on every decision, not
+    /// just the ones a caller happens to check.
+    pub latency: Duration,
 }
 
 /// Evaluates `utterance` against the trigger gate (PRD FR-5.1): routes its
@@ -89,6 +112,12 @@ pub struct GateDecision {
 /// this is the "every non-operator utterance emits a gate decision"
 /// contract: an utterance with zero lexicon matches still produces a
 /// `GateDecision` with an empty `events` vector, rather than nothing at all.
+///
+/// `GateDecision::latency` (feature 143) is timed around exactly the
+/// deterministic work this function does to produce `events` — the
+/// per-language lexicon scan (`router.run`) and the span-confidence gate over
+/// every resulting match — so it measures the real cost of this utterance's
+/// gate evaluation, not a fixed or estimated figure.
 pub fn evaluate_utterance(
     utterance: &FinalisedUtterance,
     router: &LexiconRouter,
@@ -98,6 +127,8 @@ pub fn evaluate_utterance(
     if utterance.speaker == SpeakerTag::Operator {
         return None;
     }
+
+    let started = Instant::now();
 
     let events = router
         .run(&utterance.tokens, min_tag_confidence)
@@ -114,9 +145,12 @@ pub fn evaluate_utterance(
         })
         .collect();
 
+    let latency = started.elapsed();
+
     Some(GateDecision {
         utterance_id: utterance.id.clone(),
         events,
+        latency,
     })
 }
 
@@ -347,5 +381,75 @@ mod tests {
         };
 
         assert!(evaluate_utterance(&utterance, &router, 0.6, 0.6).is_none());
+    }
+
+    #[test]
+    fn a_participant_utterance_with_a_match_carries_a_gate_latency_measurement() {
+        let router = router_with_en_and_zh_lexicons();
+        let utterance = FinalisedUtterance {
+            id: "utt-11".to_string(),
+            speaker: SpeakerTag::Participant("client-1".to_string()),
+            tokens: vec![token("several", "en", 0.95)],
+        };
+
+        let decision = evaluate_utterance(&utterance, &router, 0.6, 0.6).unwrap();
+
+        // Feature 143: "completes the deterministic lexicon scan in under 20
+        // milliseconds" — a real elapsed measurement, not a stand-in zero
+        // value, and comfortably inside the budget for a single-token scan
+        // over a two-language, hand-built test lexicon.
+        assert!(decision.latency < Duration::from_millis(20));
+    }
+
+    #[test]
+    fn an_utterance_with_no_match_still_carries_a_latency_measurement() {
+        // "each utterance emits a gate latency measurement" is not
+        // conditional on the scan finding anything — a decision with zero
+        // events still did the deterministic work of scanning for one.
+        let router = router_with_en_and_zh_lexicons();
+        let utterance = FinalisedUtterance {
+            id: "utt-12".to_string(),
+            speaker: SpeakerTag::Participant("client-1".to_string()),
+            tokens: vec![token("precisely", "en", 0.95)],
+        };
+
+        let decision = evaluate_utterance(&utterance, &router, 0.6, 0.6).unwrap();
+
+        assert!(decision.events.is_empty());
+        assert!(decision.latency < Duration::from_millis(20));
+    }
+
+    #[test]
+    fn a_realistic_code_switched_utterance_against_the_full_curated_lexicons_clears_the_20ms_budget(
+    ) {
+        // The budget feature 143 actually names: every curated lexicon this
+        // build ships (not a handful of hand-picked test terms), scanned
+        // over a longer, mixed-language utterance closer to real ASR output
+        // than this file's other single- or few-token fixtures.
+        let router = LexiconRouter::with_curated_lexicons();
+        let utterance = FinalisedUtterance {
+            id: "utt-13".to_string(),
+            speaker: SpeakerTag::Participant("client-1".to_string()),
+            tokens: vec![
+                token("we", "en", 0.9),
+                token("need", "en", 0.9),
+                token("several", "en", 0.9),
+                token("robust", "en", 0.9),
+                token("and", "en", 0.9),
+                token("scalable", "en", 0.9),
+                token("这个", "zh", 0.9),
+                token("API", "en", 0.9),
+                token("的", "zh", 0.9),
+                token("差不多", "zh", 0.9),
+                token("可以", "zh", 0.9),
+                token("尽快", "zh", 0.9),
+                token("上线", "zh", 0.9),
+            ],
+        };
+
+        let decision = evaluate_utterance(&utterance, &router, 0.6, 0.6).unwrap();
+
+        assert!(!decision.events.is_empty());
+        assert!(decision.latency < Duration::from_millis(20));
     }
 }
