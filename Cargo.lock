@@ -25,6 +25,10 @@ name = "elicta-app"
 version = "0.1.0"
 
 [[package]]
+name = "health"
+version = "0.1.0"
+
+[[package]]
 name = "language"
 version = "0.1.0"
 

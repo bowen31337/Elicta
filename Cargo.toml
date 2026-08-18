@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core/shared/app",
+    "core/shared/health",
     "core/crates/*",
     "tests/e2e",
 ]
