@@ -9,6 +9,7 @@
 //! See `HANDOFF.md` in this directory for the one-line wiring this module
 //! still needs from the crate scaffold.
 
+mod connection;
 mod encoding;
 mod event;
 mod fake;
@@ -16,6 +17,7 @@ mod framing;
 mod region;
 mod transcription_backend;
 
+pub use connection::{CaptureStartBackend, ConnectionEvent};
 pub use encoding::{AudioEncoding, LINEAR16_16KHZ_MONO};
 pub use event::{
     AudioSegmentRef, FinalUtterance, InterimHypothesis, Keyterm, LanguageTag, SpeakerTag,

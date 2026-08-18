@@ -33,12 +33,12 @@ value types it operates on:
 
 ```rust
 pub use backend::{
-    AudioEncoding, AudioFramer, AudioSegmentRef, BackendError, EndpointResolutionError,
-    EngagementId, EngagementRegionRegistry, FinalUtterance, FrameDurationError, FramedBackend,
-    InterimHypothesis, Keyterm, LanguageTag, LINEAR16_16KHZ_MONO, MAX_FRAME_MS, MIN_FRAME_MS,
-    Region, RegionPinError, RegionPinnedBackend, RegionalConnectError, RegionalEndpointResolver,
-    SpeakerTag, StreamId, Token, TranscriptionBackend, TranscriptionEvent, UtteranceId,
-    VendorRegionEndpoints,
+    AudioEncoding, AudioFramer, AudioSegmentRef, BackendError, CaptureStartBackend,
+    ConnectionEvent, EndpointResolutionError, EngagementId, EngagementRegionRegistry,
+    FinalUtterance, FrameDurationError, FramedBackend, InterimHypothesis, Keyterm, LanguageTag,
+    LINEAR16_16KHZ_MONO, MAX_FRAME_MS, MIN_FRAME_MS, Region, RegionPinError, RegionPinnedBackend,
+    RegionalConnectError, RegionalEndpointResolver, SpeakerTag, StreamId, Token,
+    TranscriptionBackend, TranscriptionEvent, UtteranceId, VendorRegionEndpoints,
 };
 ```
 
@@ -88,6 +88,22 @@ pub use backend::{
   `keyterms_sent`) and reject `send_audio` before that handshake has
   happened. These are exported, not test-only, so whoever wires the trigger
   gate can develop against them before a real vendor connection exists.
+- `connection.rs` — `CaptureStartBackend`/`ConnectionEvent` (architecture
+  §14.2, "open the socket before the meeting, not at first speech").
+  `CaptureStartBackend::open` calls its `connect` closure immediately —
+  meant to be invoked once per capture session, before the first
+  participant has spoken — and queues a `ConnectionEvent::Ready` a caller
+  drains via `poll_connection_events`, separately from
+  `TranscriptionBackend::poll_events`, so a connection-lifecycle signal is
+  never mistaken for transcript content. Because `Ready` is queued at
+  `open` and every `start_stream`/`send_audio` call happens strictly after
+  a caller holds the constructed `CaptureStartBackend`, draining
+  `poll_connection_events` before pushing any audio makes "the connection
+  emitted a ready event before the first utterance" true by construction,
+  not by call-site convention. Generalises the "open eagerly" half of what
+  `RegionPinnedBackend::open` already does (see below) to any backend,
+  region-pinned or not, and adds the `Ready` signal region pinning doesn't
+  need for its own purpose.
 - `region.rs` — per-engagement ASR vendor region pinning (architecture
   §14.2 "Pin the region", PRD NFR-2.2). `EngagementRegionRegistry` pins an
   `EngagementId` to a `Region` once and rejects a mid-engagement repin to a
@@ -119,21 +135,38 @@ pub use backend::{
 
 ## Deliberately out of scope here
 
-Everything about how a *real* vendor connection is opened and driven —
-pre-opened websocket at capture start, keepalive frames — is separately
-scoped work against this same `backend/` directory (see the adjacent
-features in the "Streaming Transcription" category). This handoff covers
-the trait, event shape, the keyterm handshake, region pinning, and audio
-framing; a real `DeepgramBackend` /
+Everything about how a *real* vendor connection is driven once open —
+keepalive frames, reconnect-on-drop — is separately scoped work against
+this same `backend/` directory (see the adjacent features in the
+"Streaming Transcription" category). This handoff covers the trait, event
+shape, the keyterm handshake, region pinning, audio framing, and the
+capture-start `Ready` signal; a real `DeepgramBackend` /
 `AssemblyAiBackend` implements `TranscriptionBackend` the same way the
 fakes here do, translating its own wire format into `TranscriptionEvent`
 inside `poll_events` and sending `start_stream`'s keyterms as that
 vendor's own keyterm-prompting mechanism on connection open — and is
-opened via `RegionPinnedBackend::open` so its actual websocket connect
-target is the resolved regional endpoint rather than a hardcoded default
-host, then wrapped in `FramedBackend` so every `send_audio` call it
-receives already carries a vendor-sized 20-50ms frame regardless of how
-the capture pipeline chunked the audio upstream.
+opened via `RegionPinnedBackend::open` (itself invoked from inside a
+`CaptureStartBackend::open` closure, so the eager-open and `Ready` signal
+both happen at capture start) so its actual websocket connect target is
+the resolved regional endpoint rather than a hardcoded default host, then
+wrapped in `FramedBackend` so every `send_audio` call it receives already
+carries a vendor-sized 20-50ms frame regardless of how the capture
+pipeline chunked the audio upstream.
+
+- Sending actual keepalive frames on an idle connection to hold it open
+  between utterances is not attempted in `connection.rs`: that's a
+  per-vendor wire concern (what frame shape counts as a keepalive) this
+  crate's std-only, non-networked scope can't exercise yet — `Ready` only
+  covers the "opened, not yet spoken to" moment, not what keeps the
+  connection alive afterwards.
+- `CaptureStartBackend` does not itself enforce that a caller drains
+  `poll_connection_events` before calling `start_stream` — like
+  `FramedBackend`'s per-stream framer state, it makes the correct ordering
+  the easy, structural default (there's nothing to observe from
+  `poll_connection_events` if a caller never calls `open` first), but a
+  caller that calls `start_stream` without ever draining `Ready` still
+  gets correct transcription behaviour, just without observing the signal
+  it was offered.
 
 `capture::enrol::SpeakerIdentity` and this module's `SpeakerTag` currently
 have the same shape (`Operator` / `Participant(String)` / `Unknown`) but are
@@ -143,5 +176,5 @@ be reconsidered against `capture::enrol::SpeakerIdentity` directly rather
 than keeping a parallel local type.
 
 Verified with `cargo test -p asr-live` and `cargo clippy -p asr-live
---all-targets` against the real crate (37 passing tests in this module, no
+--all-targets` against the real crate (40 passing tests in this module, no
 warnings).
