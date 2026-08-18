@@ -1,5 +1,127 @@
 # lexicon module — handoff
 
+## Update: loading a curated per-language lexicon, stamped with a persisted identifier (PRD section 8.2a, feature 144)
+
+Implements "System loads a separate ambiguity lexicon per language, rebuilt
+for that language rather than translated from English (PRD section 8.2a).
+Done when each match emits the lexicon identifier that produced it." This is
+feature 144, the gap the per-language-isolation update below (feature 145)
+explicitly left open in its own "what's not done": "Loading lexicons from a
+curated data source per language (feature 144) — `Lexicon::new` takes an
+in-memory term list; nothing here reads lexicon files or assigns a persisted
+lexicon identifier."
+
+### What's here
+
+- `curated.rs` (new) — the actual curated data source: `en_ambiguity_lexicon`
+  and `zh_ambiguity_lexicon` each build a `Lexicon` from a term list authored
+  directly for that language, not a mirror translation of the other
+  (`en_ambiguity_lexicon`'s "a couple"/"a handful" and
+  `zh_ambiguity_lexicon`'s "差不多"/"看情况"/"尽量" each have no clean
+  one-to-one counterpart on the other list — the point of section 8.2a's
+  "rebuilt for that language rather than translated from English").
+  `load_curated_lexicons` returns every curated build this crate ships, one
+  per language, each stamped with its own persisted `lexicon_id`
+  (`"en-ambiguity-v1"`, `"zh-ambiguity-v1"`) — adding a language means adding
+  one more function and one more vector entry, nothing about `Lexicon` or
+  `LexiconRouter` changes. No new Cargo dependency: the curated lists are
+  plain Rust literals in this file, not a lexicon file format needing a
+  parser or a `serde`/`std::fs` dependency, keeping with this directory's
+  established "no new Cargo dependency without editing `Cargo.toml`,
+  outside `lexicon/**`'s footprint" pattern (see the Aho-Corasick update
+  below).
+- `terms.rs` — `Lexicon` gained a `lexicon_id: String` field (a persisted
+  identifier for the specific curated build, distinct from `language`:
+  `language` is the BCP-47 tag a lexicon is scanned over, `lexicon_id` is
+  *which build* did the scanning, so a lexicon that gets rebuilt or revised
+  stays distinguishable from an earlier build registered for the same
+  language). `Lexicon::new` now takes `lexicon_id` as its first argument —
+  every existing call site in this crate (`terms.rs`, `router.rs`,
+  `hold.rs`, `evaluation.rs` tests) was updated to pass one explicitly, none
+  left to default or infer it. `LexiconMatch` gained the matching
+  `lexicon_id: String` field, copied verbatim from the `Lexicon` that ran
+  the scan in `Lexicon::scan` — there is no path that fabricates or omits
+  it, which is what "each match emits the lexicon identifier that produced
+  it" requires structurally rather than by convention.
+- `router.rs` — `LexiconRouter::with_curated_lexicons()` (new): builds a
+  router with every `curated::load_curated_lexicons()` entry already
+  registered, so a caller wanting the real per-language lexicons doesn't
+  have to hand-assemble ad hoc term lists the way every existing test does.
+  `LexiconRouter::new()` (empty, caller populates by hand) is unchanged and
+  still what every existing test in this crate uses.
+- `hold.rs` — `resolve_endpoint`'s "does the endpoint's final vector still
+  carry this match" check now also compares `lexicon_id`, not just token
+  index, language, and term. This matters once a lexicon can genuinely have
+  an identity that changes independent of its language (this update's whole
+  point): if the router's registered lexicon for a language is rebuilt
+  between an interim hold and its endpoint's resolve, the endpoint's match
+  came from a different curated build than the one that raised the original
+  candidate, so committing it as if the original build had confirmed it
+  would overstate what actually happened.
+  `a_rebuilt_lexicon_discards_a_held_candidate_even_with_the_same_term_and_span`
+  proves this directly — same token index, language, term, and span, only
+  `lexicon_id` differs, and the candidate still discards.
+- `mod.rs` — re-exports `curated::{en_ambiguity_lexicon,
+  load_curated_lexicons, zh_ambiguity_lexicon}` alongside the existing
+  exports.
+
+### Why this satisfies "each match emits the lexicon identifier that produced it"
+
+`LexiconMatch::lexicon_id` is populated directly from `Lexicon::lexicon_id`
+inside `Lexicon::scan` — the same structural guarantee this crate already
+established for `LexiconMatch::span` (FR-5.2, below): there is no branch of
+`scan` that returns a match without it.
+`scan_stamps_every_match_with_the_lexicon_that_produced_it` (`terms.rs`) and
+`each_curated_match_carries_its_own_lexicons_persisted_identifier`
+(`curated.rs`) prove this for a hand-built and a curated lexicon
+respectively.
+`a_match_carries_the_lexicon_id_of_the_lexicon_that_produced_it` (`router.rs`)
+proves it survives `LexiconRouter::run`, including the case where a second
+lexicon replaces a first registration for the same language — only the
+replacement's own `lexicon_id` appears on the resulting match, not the one
+it replaced.
+`with_curated_lexicons_registers_a_separately_built_lexicon_per_language`
+(`router.rs`) and `the_chinese_lexicon_is_not_a_translation_of_the_english_one`
+(`curated.rs`) together prove the other half of section 8.2a: the English
+and Chinese lexicons are two independently curated builds, each identifiable
+by its own id, not one lexicon translated into a second language.
+
+### What's not done here
+
+- Reading lexicon content from an actual file or external data store (a JSON
+  file, a database row, etc) — `curated.rs`'s term lists are Rust literals
+  compiled into the binary, "a curated data source" in the sense of "content
+  someone curated," not in the sense of "loaded from disk at runtime."
+  Nothing in this crate has a file-I/O or serialization dependency today
+  (same gap `ahocorasick.rs`'s own HANDOFF section already flags for
+  swapping in the published `aho-corasick` crate), and adding one is a
+  `Cargo.toml` change outside `lexicon/**`'s footprint.
+  `LexiconRouter::with_curated_lexicons()` is the seam a future change would
+  extend into a real loader without touching any other type in this
+  directory.
+- Versioning or migrating a `lexicon_id` over time (e.g. what happens to
+  matches already fired under `"en-ambiguity-v1"` once `"en-ambiguity-v2"`
+  replaces it in a running router) — `lexicon_id` is opaque to every type in
+  this module; deciding what a caller does with two different ids over time
+  is downstream of this change.
+- Threading `lexicon_id` through to `parse::TriggerEvent` — `TriggerEvent`
+  lives outside this directory's `lexicon/**` footprint (`parse/event.rs`);
+  "a match emits the lexicon identifier" is satisfied at the
+  `LexiconMatch` level `evaluate_utterance` already consumes, not by
+  changing the crate's outward-facing event shape.
+
+Verified with `cargo test -p trigger-gate` (92/92 pass — 72 prior tests
+untouched except the call-site/literal updates `Lexicon::new`'s new
+parameter and `LexiconMatch`'s new field required across `router.rs`,
+`hold.rs`, `evaluation.rs`, and `terms.rs`'s own tests; 20 new tests across
+`curated.rs`, `terms.rs`, `router.rs`, and `hold.rs`), `cargo clippy -p
+trigger-gate --all-targets -- -D warnings` (clean), `cargo fmt -p
+trigger-gate -- --check` (clean for every file this change touched;
+`ratelimit/regulation.rs` and `ratelimit/storm.rs` still carry the same
+pre-existing, unrelated formatting diffs every prior update in this file has
+already noted and left alone), and `cargo build --workspace` (still
+succeeds).
+
 ## Update: Aho-Corasick lexicon matching, returning the matched span (PRD FR-5.2)
 
 Implements "System detects unquantified adjectives and vague quantifiers by

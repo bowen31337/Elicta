@@ -35,12 +35,14 @@
 //! identical.
 
 mod ahocorasick;
+pub mod curated;
 pub mod evaluation;
 pub mod grouping;
 pub mod hold;
 pub mod router;
 pub mod terms;
 
+pub use curated::{en_ambiguity_lexicon, load_curated_lexicons, zh_ambiguity_lexicon};
 pub use evaluation::{evaluate_utterance, FinalisedUtterance, GateDecision, SpeakerTag};
 pub use grouping::{group_by_language, LanguageGroup, PositionedToken, TaggedToken};
 pub use hold::{CandidateHold, DiscardReason, HeldCandidate, Resolution};

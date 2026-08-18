@@ -33,13 +33,17 @@ pub struct HeldCandidate {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Resolution {
     /// The endpoint's final token vector still carries this exact match
-    /// (same token index, language, and term) — the interim text held up,
-    /// so the candidate may proceed the same as a frozen-text match would.
+    /// (same token index, language, lexicon id, and term) — the interim
+    /// text held up, so the candidate may proceed the same as a
+    /// frozen-text match would.
     Committed(LexiconMatch),
     /// The endpoint's final token vector no longer carries this match — the
     /// vendor revised or dropped the very token the interim match depended
-    /// on, so the held candidate is discarded rather than surfaced on text
-    /// the client never actually finished saying.
+    /// on, or the router's registered lexicon for that language was
+    /// rebuilt between the interim and the endpoint, so the held candidate
+    /// is discarded rather than surfaced on text the client never actually
+    /// finished saying (or on a curated term the endpoint's own scan no
+    /// longer stands behind).
     Discarded {
         held: LexiconMatch,
         reason: DiscardReason,
@@ -129,6 +133,7 @@ impl CandidateHold {
                 let still_matches = final_matches.iter().any(|m| {
                     m.token_index == candidate.interim_match.token_index
                         && m.language == candidate.interim_match.language
+                        && m.lexicon_id == candidate.interim_match.lexicon_id
                         && m.term == candidate.interim_match.term
                 });
 
@@ -161,7 +166,7 @@ mod tests {
 
     fn router_with_en_lexicon() -> LexiconRouter {
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["several", "a lot"]));
+        router.register(Lexicon::new("en-test-v1", "en", ["several", "a lot"]));
         router
     }
 
@@ -211,6 +216,7 @@ mod tests {
                 held: LexiconMatch {
                     token_index: 0,
                     language: "en".to_string(),
+                    lexicon_id: "en-test-v1".to_string(),
                     term: "several".to_string(),
                     matched_text: "several".to_string(),
                     span: 8..15,
@@ -218,6 +224,34 @@ mod tests {
                 reason: DiscardReason::NoLongerMatched,
             }
         );
+    }
+
+    #[test]
+    fn a_rebuilt_lexicon_discards_a_held_candidate_even_with_the_same_term_and_span() {
+        // The interim is held against one curated build ("en-test-v1"); by
+        // the time the endpoint fires, the router's registered lexicon for
+        // "en" has been rebuilt into a new, differently-identified build
+        // ("en-test-v2"). Same token index, language, and term — but a
+        // different lexicon produced the endpoint's own match, so the held
+        // candidate cannot be said to have been confirmed by the build that
+        // originally found it.
+        let mut router = LexiconRouter::new();
+        router.register(Lexicon::new("en-test-v1", "en", ["several"]));
+        let mut hold = CandidateHold::new();
+        let interim_tokens = [token("several", "en")];
+        hold.hold_interim("stream-1", &router, &interim_tokens, 0.6);
+
+        router.register(Lexicon::new("en-test-v2", "en", ["several"]));
+        let resolutions = hold.resolve_endpoint("stream-1", &router, &interim_tokens, 0.6);
+
+        assert_eq!(resolutions.len(), 1);
+        assert!(matches!(
+            &resolutions[0],
+            Resolution::Discarded {
+                reason: DiscardReason::NoLongerMatched,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -164,8 +164,8 @@ mod tests {
 
     fn router_with_en_and_zh_lexicons() -> LexiconRouter {
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["several", "a lot"]));
-        router.register(Lexicon::new("zh", ["一些"]));
+        router.register(Lexicon::new("en-test-v1", "en", ["several", "a lot"]));
+        router.register(Lexicon::new("zh-test-v1", "zh", ["一些"]));
         router
     }
 

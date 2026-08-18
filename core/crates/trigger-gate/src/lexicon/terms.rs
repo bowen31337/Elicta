@@ -25,9 +25,18 @@ pub struct LexiconMatch {
     /// BCP-47 primary subtag of the lexicon that produced this match — never
     /// a different language than the token's own tag, because a lexicon is
     /// only ever scanned over tokens [`super::router::LexiconRouter`] has
-    /// already grouped as that language (section 8.2a's "lexicon
-    /// identifier").
+    /// already grouped as that language.
     pub language: String,
+    /// The persisted identifier of the specific [`Lexicon`] build that
+    /// produced this match (PRD section 8.2a) — e.g. `"en-ambiguity-v1"`.
+    /// Distinct from `language`: `language` names which BCP-47 tag a lexicon
+    /// is scanned over, `lexicon_id` names *which curated build* did the
+    /// scanning, so a lexicon that gets rebuilt or revised over time can
+    /// still be told apart from an earlier build registered for the same
+    /// language. Copied verbatim from the [`Lexicon`] that ran the scan —
+    /// there is no path through [`Lexicon::scan`] that fabricates or omits
+    /// it.
+    pub lexicon_id: String,
     /// The curated lexicon entry that matched, lower-cased.
     pub term: String,
     /// The exact text the match covers, sliced from the lower-cased token
@@ -50,6 +59,12 @@ pub struct LexiconMatch {
 /// adjectives, vague quantifiers — FR-5.2), scanned only over tokens already
 /// known to belong to `language`.
 pub struct Lexicon {
+    /// A persisted identifier for this specific curated build (PRD section
+    /// 8.2a), e.g. `"en-ambiguity-v1"` — stamped onto every
+    /// [`LexiconMatch`] this lexicon produces so a match can always be
+    /// traced back to the exact curated lexicon that found it, independent
+    /// of `language`.
+    pub lexicon_id: String,
     pub language: String,
     terms: Vec<String>,
     automaton: AhoCorasick,
@@ -58,14 +73,19 @@ pub struct Lexicon {
 impl Lexicon {
     /// `terms` need not be pre-lowered — `Lexicon` normalises case itself so
     /// matching stays case-insensitive regardless of how the lexicon was
-    /// authored.
+    /// authored. `lexicon_id` is opaque to this type — it is never parsed,
+    /// only carried onto every resulting `LexiconMatch` — so callers are
+    /// free to version it however they curate lexicons (`"en-ambiguity-v1"`,
+    /// a content hash, etc).
     pub fn new(
+        lexicon_id: impl Into<String>,
         language: impl Into<String>,
         terms: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         let terms: Vec<String> = terms.into_iter().map(|t| t.into().to_lowercase()).collect();
         let automaton = AhoCorasick::new(&terms);
         Lexicon {
+            lexicon_id: lexicon_id.into(),
             language: language.into(),
             terms,
             automaton,
@@ -74,11 +94,12 @@ impl Lexicon {
 
     /// Scans every token in `tokens` for every curated term in one
     /// Aho-Corasick pass per token (FR-5.2), tagging each match with this
-    /// lexicon's own `language` — never the token's, though by the time a
-    /// token reaches here (via [`super::router::LexiconRouter::run`]) the
-    /// two always agree. A term appearing more than once in a single token
-    /// produces one `LexiconMatch` per occurrence, each with its own span,
-    /// not one match for the token as a whole.
+    /// lexicon's own `language` and `lexicon_id` — never the token's,
+    /// though by the time a token reaches here (via
+    /// [`super::router::LexiconRouter::run`]) `language` always agrees. A
+    /// term appearing more than once in a single token produces one
+    /// `LexiconMatch` per occurrence, each with its own span, not one match
+    /// for the token as a whole.
     pub fn scan(&self, tokens: &[PositionedToken]) -> Vec<LexiconMatch> {
         let mut matches = Vec::new();
         for positioned in tokens {
@@ -87,6 +108,7 @@ impl Lexicon {
                 matches.push(LexiconMatch {
                     token_index: positioned.index,
                     language: self.language.clone(),
+                    lexicon_id: self.lexicon_id.clone(),
                     term: self.terms[term_index].clone(),
                     matched_text: haystack[span.clone()].to_string(),
                     span,
@@ -116,7 +138,7 @@ mod tests {
 
     #[test]
     fn scan_matches_a_curated_term_case_insensitively() {
-        let lexicon = Lexicon::new("en", ["Several", "a lot"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["Several", "a lot"]);
         let tokens = vec![positioned(0, "Several", "en")];
 
         let matches = lexicon.scan(&tokens);
@@ -128,8 +150,19 @@ mod tests {
     }
 
     #[test]
+    fn scan_stamps_every_match_with_the_lexicon_that_produced_it() {
+        let lexicon = Lexicon::new("en-ambiguity-v1", "en", ["several"]);
+        let tokens = vec![positioned(0, "several", "en")];
+
+        let matches = lexicon.scan(&tokens);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].lexicon_id, "en-ambiguity-v1");
+    }
+
+    #[test]
     fn scan_finds_no_match_when_no_term_appears() {
-        let lexicon = Lexicon::new("en", ["several"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["several"]);
         let tokens = vec![positioned(0, "precisely", "en")];
 
         assert!(lexicon.scan(&tokens).is_empty());
@@ -138,7 +171,7 @@ mod tests {
     #[test]
     fn scan_matches_a_substring_within_a_multi_character_token() {
         // e.g. a Chinese ASR token spanning more than the ambiguous phrase.
-        let lexicon = Lexicon::new("zh", ["一些"]);
+        let lexicon = Lexicon::new("zh-test-v1", "zh", ["一些"]);
         let tokens = vec![positioned(0, "有一些问题", "zh")];
 
         let matches = lexicon.scan(&tokens);
@@ -152,7 +185,7 @@ mod tests {
         // Proves the isolation contract at the `Lexicon` level: it has no
         // access to any token outside the slice it's handed, regardless of
         // that token's own `lang` field.
-        let lexicon = Lexicon::new("en", ["several"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["several"]);
         let tokens = vec![positioned(0, "several", "zh")]; // mistagged on purpose
 
         let matches = lexicon.scan(&tokens);
@@ -167,7 +200,7 @@ mod tests {
 
     #[test]
     fn scan_reports_the_matched_terms_own_span_within_the_token() {
-        let lexicon = Lexicon::new("en", ["several"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["several"]);
         let tokens = vec![positioned(0, "we need several", "en")];
 
         let matches = lexicon.scan(&tokens);
@@ -179,7 +212,7 @@ mod tests {
 
     #[test]
     fn scan_finds_every_occurrence_of_a_term_repeated_in_one_token() {
-        let lexicon = Lexicon::new("en", ["some"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["some"]);
         let tokens = vec![positioned(0, "some issues, and then some more", "en")];
 
         let matches = lexicon.scan(&tokens);
@@ -191,7 +224,7 @@ mod tests {
 
     #[test]
     fn scan_finds_every_distinct_curated_term_in_one_pass_over_a_token() {
-        let lexicon = Lexicon::new("en", ["several", "a lot", "some"]);
+        let lexicon = Lexicon::new("en-test-v1", "en", ["several", "a lot", "some"]);
         let tokens = vec![positioned(
             0,
             "there were several, a lot, and some issues",

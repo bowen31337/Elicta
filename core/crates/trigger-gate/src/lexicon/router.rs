@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use super::curated::load_curated_lexicons;
 use super::grouping::{group_by_language, TaggedToken};
 use super::terms::{Lexicon, LexiconMatch};
 
@@ -27,6 +28,18 @@ impl LexiconRouter {
         LexiconRouter {
             lexicons: HashMap::new(),
         }
+    }
+
+    /// Builds a router with every curated per-language lexicon this build
+    /// ships (PRD section 8.2a, feature 144) already registered —
+    /// [`super::curated::load_curated_lexicons`], not an empty router a
+    /// caller has to populate by hand with ad hoc term lists.
+    pub fn with_curated_lexicons() -> Self {
+        let mut router = Self::new();
+        for lexicon in load_curated_lexicons() {
+            router.register(lexicon);
+        }
+        router
     }
 
     /// Registers `lexicon` for its own `language`, replacing any previously
@@ -82,8 +95,8 @@ mod tests {
 
     fn router_with_en_and_zh_lexicons() -> LexiconRouter {
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["several", "a lot"]));
-        router.register(Lexicon::new("zh", ["一些", "很多"]));
+        router.register(Lexicon::new("en-test-v1", "en", ["several", "a lot"]));
+        router.register(Lexicon::new("zh-test-v1", "zh", ["一些", "很多"]));
         router
     }
 
@@ -126,8 +139,8 @@ mod tests {
         // though the zh lexicon "would" match the same text if it were ever
         // run over this token.
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["many"]));
-        router.register(Lexicon::new("zh", ["many"])); // contrived cross-language collision
+        router.register(Lexicon::new("en-test-v1", "en", ["many"]));
+        router.register(Lexicon::new("zh-test-v1", "zh", ["many"])); // contrived cross-language collision
 
         let tokens = vec![token("many", "en")];
         let matches = router.run(&tokens, 0.6);
@@ -139,7 +152,7 @@ mod tests {
     #[test]
     fn language_with_no_registered_lexicon_emits_no_matches_and_does_not_fall_back() {
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["several"])); // no "fr" lexicon registered
+        router.register(Lexicon::new("en-test-v1", "en", ["several"])); // no "fr" lexicon registered
 
         let tokens = vec![token("plusieurs", "fr"), token("several", "en")];
         let matches = router.run(&tokens, 0.6);
@@ -151,7 +164,7 @@ mod tests {
     #[test]
     fn tokens_below_language_confidence_threshold_are_never_scanned() {
         let mut router = LexiconRouter::new();
-        router.register(Lexicon::new("en", ["several"]));
+        router.register(Lexicon::new("en-test-v1", "en", ["several"]));
 
         let tokens = vec![TaggedToken {
             text: "several".to_string(),
@@ -189,5 +202,35 @@ mod tests {
     #[test]
     fn empty_utterance_emits_no_matches() {
         assert!(router_with_en_and_zh_lexicons().run(&[], 0.6).is_empty());
+    }
+
+    #[test]
+    fn a_match_carries_the_lexicon_id_of_the_lexicon_that_produced_it() {
+        // Two lexicons for the same language, registered one after the
+        // other: the second registration replaces the first (this type's
+        // documented "replacing any previously registered lexicon"
+        // behavior), so only its own `lexicon_id` should ever appear on a
+        // resulting match.
+        let mut router = LexiconRouter::new();
+        router.register(Lexicon::new("en-ambiguity-v1", "en", ["several"]));
+        router.register(Lexicon::new("en-ambiguity-v2", "en", ["several"]));
+
+        let matches = router.run(&[token("several", "en")], 0.6);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].lexicon_id, "en-ambiguity-v2");
+    }
+
+    #[test]
+    fn with_curated_lexicons_registers_a_separately_built_lexicon_per_language() {
+        let router = LexiconRouter::with_curated_lexicons();
+        let tokens = vec![token("several", "en"), token("差不多", "zh")];
+
+        let matches = router.run(&tokens, 0.6);
+
+        let en_match = matches.iter().find(|m| m.language == "en").unwrap();
+        let zh_match = matches.iter().find(|m| m.language == "zh").unwrap();
+        assert_eq!(en_match.lexicon_id, "en-ambiguity-v1");
+        assert_eq!(zh_match.lexicon_id, "zh-ambiguity-v1");
     }
 }
