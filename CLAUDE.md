@@ -41,7 +41,7 @@ Root `Cargo.toml` mounts `core/crates/*` by glob, so a new crate needs no worksp
 Rust (root workspace; toolchain via rustup, stable — verified on 1.96.1):
 ```bash
 cargo build --workspace --locked
-cargo test --workspace --locked              # 834 tests, all green
+cargo test --workspace --locked              # 839 tests, all green
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p trigger-gate                   # single crate
 ```
@@ -49,15 +49,15 @@ cargo test -p trigger-gate                   # single crate
 Python service (`uv`, deps in `apps/service/uv.lock`):
 ```bash
 cd apps/service && uv sync --locked
-cd apps/service && uv run pytest             # 642 tests; testpaths = ["src"]
+cd apps/service && uv run pytest             # 706 tests; testpaths = ["src"]
 cd apps/service && uv run ruff check .
-uv run --project apps/service python -m pytest tests/e2e/api_integration   # from repo root
+uv run --project apps/service python -m pytest tests/e2e/api_integration   # 45 tests, from repo root
 ```
 
 Desktop (`pnpm`, Node >= 20):
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter elicta-desktop test              # 182 tests
+pnpm --filter elicta-desktop test              # 199 tests
 pnpm --filter elicta-desktop typecheck
 pnpm --filter elicta-desktop build             # tsc --noEmit && vite build
 pnpm dev                                       # tauri dev
@@ -73,7 +73,7 @@ uv run --project apps/service alembic upgrade head --sql   # render SQL, no data
 
 Run the service:
 ```bash
-cd apps/service && uv run uvicorn app.main:app --reload    # serves 40 API paths
+cd apps/service && uv run uvicorn app.main:app --reload    # serves 42 API paths
 ```
 
 CI: `.github/workflows/` — `test.yml` gates every language (cargo test + clippy, ruff + pytest +
@@ -107,7 +107,10 @@ embarrassment gates, plus signing/release workflows.
   fallback that a UI-set value overrides. Secrets are **write-only** across that API — a read
   returns `configured` plus a four-character hint, never the value — and `SecretValue` refuses
   to print itself, so a stray log line cannot leak one. Credentials are re-read per call, so a
-  key entered in the UI takes effect without a restart.
+  key entered in the UI takes effect without a restart. Anthropic access is bring-your-own
+  **key or OAuth token** — `build_anthropic_client` pairs each with its header, and a bearer
+  token additionally needs `anthropic-beta: oauth-2025-04-20`, which the SDK does *not* add for
+  a static credential.
 - **`app/orchestration/` owns pipeline order.** `debrief.py` runs architecture §7 steps 2–8,
   `compiler.py` runs §3.10; `composition.py` decides *when* they run. Stages fail closed — a
   failed stage halts the chain rather than feeding the next one. Add a stage to the orchestrator,
@@ -145,8 +148,8 @@ embarrassment gates, plus signing/release workflows.
 - **`.gitignore` un-ignores two paths** (`apps/desktop/src/features/panel/coverage/`,
   `core/crates/coverage/`) that the generic `coverage/` rule would swallow. New `coverage`-named
   paths need the same treatment.
-- **Formatting is not gated yet.** `cargo fmt --all --check` reports 326 hunks across 64 files
-  and `ruff format --check` 95 files, all pre-existing. Both are deferred to their own
+- **Formatting is not gated yet.** `cargo fmt --all --check` reports 328 hunks across 65 files
+  and `ruff format --check` 94 files, all pre-existing. Both are deferred to their own
   mechanical commits; `test.yml` says where to re-enable the check.
 
 ## claw-forge Agent Notes

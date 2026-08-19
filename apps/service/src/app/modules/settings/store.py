@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from .models import (
+    ConnectorSettings,
     InferenceSettings,
     SecretKey,
     SecretStatus,
@@ -59,6 +60,8 @@ class SettingsStore(Protocol):
 
     def write_vendors(self, vendors: VendorSettings) -> None: ...
 
+    def write_connectors(self, connectors: ConnectorSettings) -> None: ...
+
     def set_secret(self, key: SecretKey, value: str) -> None:
         """Store a secret. An empty value clears it."""
 
@@ -72,6 +75,7 @@ class InMemorySettingsStore:
     def __init__(self, *, read_environment: bool = True) -> None:
         self._inference = InferenceSettings()
         self._vendors = VendorSettings()
+        self._connectors = ConnectorSettings()
         self._secrets: dict[SecretKey, SecretValue] = {}
         self._secret_updated: dict[SecretKey, datetime] = {}
         self._updated_at: datetime | None = None
@@ -85,6 +89,7 @@ class InMemorySettingsStore:
         return ServiceSettings(
             inference=self._inference,
             vendors=self._vendors,
+            connectors=self._connectors,
             secrets=[self._status(key) for key in SecretKey],
             durable=self.durable,
             updated_at=self._updated_at,
@@ -105,6 +110,10 @@ class InMemorySettingsStore:
 
     def write_vendors(self, vendors: VendorSettings) -> None:
         self._vendors = vendors
+        self._touch()
+
+    def write_connectors(self, connectors: ConnectorSettings) -> None:
+        self._connectors = connectors
         self._touch()
 
     def set_secret(self, key: SecretKey, value: str) -> None:

@@ -17,18 +17,39 @@ out of sync with.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
 from app.composition import Backend, build_app
 from app.module_loader import MountedRouter, load_modules
-from app.modules.settings.store import InMemorySettingsStore, SettingsStore
+from app.modules.settings.sqlite_store import SqliteSettingsStore
+from app.modules.settings.store import SettingsStore
 from app.orchestration.anthropic_engines import engines_from_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+
+def default_settings_database() -> Path:
+    """Where operator settings are persisted.
+
+    `ELICTA_SETTINGS_DB` overrides it; otherwise the file lives under the
+    user's data directory rather than the working directory, so running the
+    service from a different folder does not silently start it with an empty
+    configuration.
+    """
+
+    configured = os.environ.get("ELICTA_SETTINGS_DB")
+    if configured:
+        return Path(configured)
+    return Path(
+        os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+    ) / "elicta" / "settings.db"
 
 
 def create_app(
@@ -49,7 +70,7 @@ def create_app(
     # takes effect without a restart. Until one is configured, the stages
     # that need a model fail closed and name what is missing; the service
     # still starts and serves its full API.
-    store = settings_store or InMemorySettingsStore()
+    store = settings_store or SqliteSettingsStore(default_settings_database())
     debrief_engines, compiler_engines = engines_from_settings(store)
     app = build_app(
         backend if backend is not None else Backend(),

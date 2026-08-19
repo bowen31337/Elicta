@@ -27,9 +27,20 @@ export interface SecretStatus {
   readonly hint: string | null;
 }
 
+export type SpeechVendor = 'deepgram' | 'assemblyai';
+
+export interface ConnectorSettings {
+  readonly live_vendor: SpeechVendor;
+  readonly record_vendors: readonly SpeechVendor[];
+  readonly keyterm_prompting: boolean;
+  readonly disable_vendor_retention: boolean;
+  readonly region: string | null;
+}
+
 export interface ServiceSettings {
   readonly inference: { model: string; base_url: string | null; auth_mode: AuthMode };
   readonly vendors: { asr_base_url: string | null; capture_base_url: string | null };
+  readonly connectors: ConnectorSettings;
   readonly secrets: readonly SecretStatus[];
   readonly durable: boolean;
 }
@@ -43,6 +54,7 @@ export interface SettingsDraft {
    * send back a value it did not receive from the operator, because it never
    * receives the stored one -- it only ever sees a four-character hint.
    */
+  readonly connectors?: ConnectorSettings;
   readonly secrets?: readonly { key: SecretKey; value: string }[];
 }
 

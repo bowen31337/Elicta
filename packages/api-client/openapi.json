@@ -2801,6 +2801,51 @@
         "title": "ConnectionCheck",
         "description": "The result of testing a configured vendor credential.\n\n`detail` is a human-readable reason on failure. It is built from the\nvendor's error type, never from the credential."
       },
+      "ConnectorSettings": {
+        "properties": {
+          "live_vendor": {
+            "$ref": "#/components/schemas/SpeechVendor",
+            "description": "Streaming engine for the live trigger path. AssemblyAI's confidence-based turn model reaches a lower latency floor than a silence timer (\u00a714.2) and is the cheaper of the two per hour.",
+            "default": "assemblyai"
+          },
+          "record_vendors": {
+            "items": {
+              "$ref": "#/components/schemas/SpeechVendor"
+            },
+            "type": "array",
+            "title": "Record Vendors",
+            "description": "Batch engines for the record path. FR-2.6 requires two, and T3 requires that they diverge independently."
+          },
+          "keyterm_prompting": {
+            "type": "boolean",
+            "title": "Keyterm Prompting",
+            "description": "Send the engagement vocabulary as keyterms (FR-2.9). \u00a714.1 ranks this the highest-leverage engine-side accuracy control.",
+            "default": true
+          },
+          "disable_vendor_retention": {
+            "type": "boolean",
+            "title": "Disable Vendor Retention",
+            "description": "Set the vendor's opt-out parameter on every request (NFR-2.3). \u00a714.1: a DPA that says retention is off and a request that does not say so is a gap that surfaces in an audit.",
+            "default": true
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region",
+            "description": "Vendor region. Pinned once for residency (NFR-2.2) and for round-trip latency (\u00a714.2) \u2014 the same knob serves both."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConnectorSettings",
+        "description": "Which speech vendors serve each path (ADR-004's dual-path split).\n\nThe live and record paths are configured separately on purpose: they have\ndifferent consumers. The live path is bought on turn-detection latency\n(\u00a714.2), the record path on independent divergence between two engines\n(FR-2.6, T3). Forcing one vendor to serve both would optimise neither."
+      },
       "ConsentConfirmationRequest": {
         "properties": {
           "confirmed_by": {
@@ -4548,6 +4593,9 @@
           "vendors": {
             "$ref": "#/components/schemas/VendorSettings"
           },
+          "connectors": {
+            "$ref": "#/components/schemas/ConnectorSettings"
+          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretStatus"
@@ -4664,6 +4712,16 @@
               }
             ]
           },
+          "connectors": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretUpdate"
@@ -4742,6 +4800,15 @@
         ],
         "title": "SlowLaneTickResult",
         "description": "What accepting one slow-lane tick for a meeting produced (PRD FR-5.10).\n\n`coverage_updates` is empty when the pass changed no slot's fill state,\nand `new_candidates` is empty when it surfaced nothing new -- a tick\nthat runs but produces neither is still a 200, not an error: PRD FR-5.10\nand architecture \u00a73.8 make failure non-fatal, and \"nothing changed this\npass\" is not a failure."
+      },
+      "SpeechVendor": {
+        "type": "string",
+        "enum": [
+          "deepgram",
+          "assemblyai"
+        ],
+        "title": "SpeechVendor",
+        "description": "Speech vendors the service can connect to.\n\nBoth are the engines architecture \u00a714.1-14.2 analyses in detail, and they\nare chosen together rather than interchangeably: FR-2.6 runs two batch\nengines over the record path, and T3 warns that the pair is only worth\nrunning if the engines fail *differently* \u2014 two models sharing a training\nlineage agree on the same mistakes and the reconciliation signal is\nworthless. Deepgram and AssemblyAI have independent lineages, which is\nwhat makes them a usable pair."
       },
       "StartReplayRunRequest": {
         "properties": {

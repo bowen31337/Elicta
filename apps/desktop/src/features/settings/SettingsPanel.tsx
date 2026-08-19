@@ -5,10 +5,28 @@ import {
   AUTH_MODE_SECRET,
   useSettings,
   type AuthMode,
+  type ConnectorSettings,
+  type SpeechVendor,
   type SecretKey,
   type SecretStatus,
   type UseSettingsResult,
 } from './useSettings';
+
+
+/**
+ * What each vendor is good at, in the operator's terms. Shown inline because
+ * the choice is not obvious from the names, and picking the wrong engine for
+ * the live path costs latency the meeting cannot spare.
+ */
+const VENDOR_LABELS: Record<SpeechVendor, string> = {
+  assemblyai: 'AssemblyAI',
+  deepgram: 'Deepgram',
+};
+
+const LIVE_VENDOR_NOTE: Record<SpeechVendor, string> = {
+  assemblyai: 'Ends a turn when the sentence sounds finished, which cuts the wait before a nudge.',
+  deepgram: 'Ends a turn after a fixed silence. Predictable, but slower to react.',
+};
 
 const SECRET_LABELS: Record<SecretKey, string> = {
   anthropic_api_key: 'Anthropic API key',
@@ -44,10 +62,13 @@ function SecretField({
   const label = SECRET_LABELS[status.key];
   return (
     <div className="settings-field">
-      <label htmlFor={status.key}>
-        {label}
-        {inUse ? <span className="settings-inuse"> · in use</span> : null}
-      </label>
+      <div className="settings-label-row">
+        {/* The badge sits outside the label on purpose: an input's accessible
+            name must not change as state changes, or every assistive
+            technology announces a different field than the one before. */}
+        <label htmlFor={status.key}>{label}</label>
+        {inUse ? <span className="settings-inuse">in use</span> : null}
+      </div>
       <p className="settings-help">{SECRET_HELP[status.key]}</p>
       <div className="settings-secret-row">
         <input
@@ -100,6 +121,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const [secretDrafts, setSecretDrafts] = useState<Partial<Record<SecretKey, string>>>({});
   const [model, setModel] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [connectors, setConnectors] = useState<ConnectorSettings | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<SecretKey, string>>>({});
   const [saved, setSaved] = useState(false);
 
@@ -118,6 +140,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const currentModel = model ?? settings.inference.model;
   const currentAuthMode = authMode ?? settings.inference.auth_mode;
   const activeSecret = AUTH_MODE_SECRET[currentAuthMode];
+  const currentConnectors = connectors ?? settings.connectors;
 
   const onSave = async () => {
     const secrets = Object.entries(secretDrafts)
@@ -130,6 +153,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
         base_url: settings.inference.base_url,
         auth_mode: currentAuthMode,
       },
+      connectors: currentConnectors,
       ...(secrets.length > 0 ? { secrets } : {}),
     });
 
@@ -213,6 +237,105 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
           type="text"
           value={currentModel}
           onChange={(event) => setModel(event.target.value)}
+        />
+      </div>
+
+      <h2>Speech vendors</h2>
+      <div className="settings-field">
+        <label htmlFor="live-vendor">Live transcription</label>
+        <p className="settings-help">
+          Drives the in-meeting nudges. {LIVE_VENDOR_NOTE[currentConnectors.live_vendor]}
+        </p>
+        <select
+          id="live-vendor"
+          value={currentConnectors.live_vendor}
+          onChange={(event) =>
+            setConnectors({
+              ...currentConnectors,
+              live_vendor: event.target.value as SpeechVendor,
+            })
+          }
+        >
+          {(['assemblyai', 'deepgram'] as const).map((vendor) => (
+            <option key={vendor} value={vendor}>
+              {VENDOR_LABELS[vendor]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="settings-field">
+        <span className="settings-pseudo-label">Recording transcription</span>
+        <p className="settings-help">
+          Two engines transcribe the recording separately after the meeting;
+          where they disagree is flagged for you to check. They must be
+          different vendors — the same engine twice would always agree with
+          itself.
+        </p>
+        <p className="settings-state">
+          {currentConnectors.record_vendors
+            .map((vendor) => VENDOR_LABELS[vendor])
+            .join(' + ')}
+        </p>
+      </div>
+
+      <div className="settings-field">
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={currentConnectors.keyterm_prompting}
+            onChange={(event) =>
+              setConnectors({
+                ...currentConnectors,
+                keyterm_prompting: event.target.checked,
+              })
+            }
+          />
+          Send engagement vocabulary to the transcriber
+        </label>
+        <p className="settings-help">
+          Client and product names are transcribed far more accurately when the
+          engine is told about them in advance.
+        </p>
+      </div>
+
+      <div className="settings-field">
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={currentConnectors.disable_vendor_retention}
+            onChange={(event) =>
+              setConnectors({
+                ...currentConnectors,
+                disable_vendor_retention: event.target.checked,
+              })
+            }
+          />
+          Tell vendors not to retain client audio
+        </label>
+        <p className="settings-help">
+          Sets the opt-out on every request. Your contract may already say
+          this; sending it per request is what an audit can verify.
+        </p>
+      </div>
+
+      <div className="settings-field">
+        <label htmlFor="region">Region</label>
+        <p className="settings-help">
+          Where audio is processed. Pin it to the region your engagement
+          requires; closer regions also respond faster.
+        </p>
+        <input
+          id="region"
+          type="text"
+          value={currentConnectors.region ?? ''}
+          placeholder="Vendor default"
+          onChange={(event) =>
+            setConnectors({
+              ...currentConnectors,
+              region: event.target.value || null,
+            })
+          }
         />
       </div>
 

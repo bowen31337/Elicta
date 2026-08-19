@@ -22,3 +22,7 @@
   display: flex; flex-direction: column; gap: 4px; }
 .settings-panel legend { font-size: .85rem; font-weight: 500; padding: 0; }
 .settings-inuse { font-weight: 400; opacity: .7; font-size: .78rem; }
+.settings-label-row { display: flex; gap: 8px; align-items: baseline; }
+.settings-check { display: inline-flex; gap: 6px; align-items: center; font-weight: 500; }
+.settings-pseudo-label { font-size: .85rem; font-weight: 500; }
+.settings-panel select { padding: 3px 6px; }

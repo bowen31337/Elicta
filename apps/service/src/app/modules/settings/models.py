@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SecretKey(str, Enum):
@@ -145,6 +145,97 @@ class VendorSettings(BaseModel):
     capture_base_url: str | None = None
 
 
+class SpeechVendor(str, Enum):
+    """Speech vendors the service can connect to.
+
+    Both are the engines architecture §14.1-14.2 analyses in detail, and they
+    are chosen together rather than interchangeably: FR-2.6 runs two batch
+    engines over the record path, and T3 warns that the pair is only worth
+    running if the engines fail *differently* — two models sharing a training
+    lineage agree on the same mistakes and the reconciliation signal is
+    worthless. Deepgram and AssemblyAI have independent lineages, which is
+    what makes them a usable pair.
+    """
+
+    DEEPGRAM = "deepgram"
+    ASSEMBLYAI = "assemblyai"
+
+
+class ConnectorSettings(BaseModel):
+    """Which speech vendors serve each path (ADR-004's dual-path split).
+
+    The live and record paths are configured separately on purpose: they have
+    different consumers. The live path is bought on turn-detection latency
+    (§14.2), the record path on independent divergence between two engines
+    (FR-2.6, T3). Forcing one vendor to serve both would optimise neither.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    live_vendor: SpeechVendor = Field(
+        default=SpeechVendor.ASSEMBLYAI,
+        description=(
+            "Streaming engine for the live trigger path. AssemblyAI's "
+            "confidence-based turn model reaches a lower latency floor than a "
+            "silence timer (§14.2) and is the cheaper of the two per hour."
+        ),
+    )
+    record_vendors: list[SpeechVendor] = Field(
+        default_factory=lambda: [SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI],
+        description=(
+            "Batch engines for the record path. FR-2.6 requires two, and T3 "
+            "requires that they diverge independently."
+        ),
+    )
+    keyterm_prompting: bool = Field(
+        default=True,
+        description=(
+            "Send the engagement vocabulary as keyterms (FR-2.9). §14.1 ranks "
+            "this the highest-leverage engine-side accuracy control."
+        ),
+    )
+    disable_vendor_retention: bool = Field(
+        default=True,
+        description=(
+            "Set the vendor's opt-out parameter on every request (NFR-2.3). "
+            "§14.1: a DPA that says retention is off and a request that does "
+            "not say so is a gap that surfaces in an audit."
+        ),
+    )
+    region: str | None = Field(
+        default=None,
+        description=(
+            "Vendor region. Pinned once for residency (NFR-2.2) and for "
+            "round-trip latency (§14.2) — the same knob serves both."
+        ),
+    )
+
+    @field_validator("record_vendors")
+    @classmethod
+    def _require_two_independent_engines(
+        cls, value: list[SpeechVendor]
+    ) -> list[SpeechVendor]:
+        """FR-2.6 needs two engines, and T3 needs them to be different ones.
+
+        Configuring the same engine twice would produce two transcripts that
+        agree by construction — reconciliation would report perfect agreement
+        and flag nothing, which is worse than a single engine because it
+        manufactures false assurance.
+        """
+
+        if len(value) != 2:
+            raise ValueError(
+                "the record path runs exactly two batch engines (PRD FR-2.6)"
+            )
+        if value[0] == value[1]:
+            raise ValueError(
+                "the two record-path engines must be different vendors: engines "
+                "sharing a lineage agree on the same errors, so reconciliation "
+                "manufactures false assurance (architecture T3)"
+            )
+        return value
+
+
 class ServiceSettings(BaseModel):
     """Everything an operator can administer, with no secret values in it."""
 
@@ -152,6 +243,7 @@ class ServiceSettings(BaseModel):
 
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
     vendors: VendorSettings = Field(default_factory=VendorSettings)
+    connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     secrets: list[SecretStatus] = Field(default_factory=list)
     durable: bool = Field(
         default=False,
@@ -190,6 +282,7 @@ class SettingsUpdateRequest(BaseModel):
 
     inference: InferenceSettings | None = None
     vendors: VendorSettings | None = None
+    connectors: ConnectorSettings | None = None
     secrets: list[SecretUpdate] = Field(default_factory=list)
 
 

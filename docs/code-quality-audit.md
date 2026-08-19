@@ -454,3 +454,21 @@ says so plainly rather than letting an operator discover it. The durable impleme
 the platform secret store that `core/shared/crypto` already reaches for the database key (macOS
 Keychain, Windows Credential Manager). The speech vendors have no probe because no vendor is
 selected yet (T15).
+
+### Bring your own key or token
+
+Anthropic access accepts either credential an organisation might issue: an API key
+(`X-Api-Key`) or an OAuth token from `claude setup-token` (`Authorization: Bearer`). Both can be
+stored; an explicit `auth_mode` decides which is live, rather than inferring it from whichever
+field happens to be filled — an operator holding both must be able to say which one is in use.
+
+The non-obvious part is the beta flag. `Authorization: Bearer` auth is gated behind
+`anthropic-beta: oauth-2025-04-20`, and the SDK injects that only for credentials it manages
+itself — it explicitly skips when a static credential is already on the request, which is exactly
+the bring-your-own case. Supplying it is therefore the service's job; without it a perfectly valid
+token returns a 401 that reads like a bad credential. `build_anthropic_client` is the single place
+both pairings are made, and tests assert each header combination.
+
+Verified live: with an OAuth token selected, the API answered `Invalid bearer token` rather than
+`API key is invalid` — the auth *scheme* was accepted and only the token value rejected, which is
+the signal that the bearer path and its beta flag are both correct.

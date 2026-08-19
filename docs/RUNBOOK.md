@@ -43,6 +43,18 @@ Vendor credentials and endpoints are administered in the desktop app's
 **fallback** for headless deployments; a value configured in the UI wins over
 the environment, and takes effect without restarting the service.
 
+**Bring your own key or token.** Anthropic access is authenticated either with
+an API key from the console (`X-Api-Key`) or with an OAuth token from
+`claude setup-token` (`Authorization: Bearer`). The operator picks which in
+the Settings screen; both can be stored, and the selected mode decides which
+is live. The environment fallbacks are `ANTHROPIC_API_KEY` for the first and
+`ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_OAUTH_TOKEN` for the second.
+
+A bearer token also needs the `anthropic-beta: oauth-2025-04-20` flag that
+unlocks it. The SDK adds that only for credentials it manages itself and skips
+it when a static credential is supplied, so the service sets it — without it a
+valid token returns a 401 that reads like a bad credential.
+
 Secrets are write-only across that API. A read returns whether a credential is
 configured and its last four characters — never the value — so the settings
 form starts empty and leaving a field blank means "leave it unchanged".

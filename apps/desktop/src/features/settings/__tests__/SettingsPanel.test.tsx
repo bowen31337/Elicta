@@ -8,6 +8,13 @@ import type { SecretKey, ServiceSettings, UseSettingsResult } from '../useSettin
 const CONFIGURED: ServiceSettings = {
   inference: { model: 'claude-opus-5', base_url: null, auth_mode: 'api_key' },
   vendors: { asr_base_url: null, capture_base_url: null },
+  connectors: {
+    live_vendor: 'assemblyai',
+    record_vendors: ['deepgram', 'assemblyai'],
+    keyterm_prompting: true,
+    disable_vendor_retention: true,
+    region: null,
+  },
   secrets: [
     { key: 'anthropic_api_key', configured: true, hint: 'abcd' },
     { key: 'anthropic_oauth_token', configured: false, hint: null },
@@ -50,7 +57,8 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel controller={controller()} />);
 
     expect(screen.getByText('A key is stored. Leave this blank to keep it.')).toBeInTheDocument();
-    expect(screen.getByText('No key is stored yet.')).toBeInTheDocument();
+    // Several credentials are unset, so this state appears more than once.
+    expect(screen.getAllByText('No key is stored yet.').length).toBeGreaterThan(0);
   });
 
   it('does not send a secret the operator did not type', async () => {
@@ -156,7 +164,7 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel controller={controller()} />);
 
     // The API-key field is labelled as in use; the token field is not.
-    expect(screen.getByText('· in use')).toBeInTheDocument();
+    expect(screen.getByText('in use')).toBeInTheDocument();
   });
 
   it('follows the stored mode when the operator uses a token', () => {
@@ -189,5 +197,68 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel controller={controller()} />);
 
     expect(screen.getByLabelText(/Anthropic OAuth token/)).toBeInTheDocument();
+  });
+
+  it('lets the operator choose the live transcription vendor', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Live transcription'),
+      'deepgram',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connectors.live_vendor).toBe('deepgram');
+  });
+
+  it('explains the live vendor choice in the operator\'s terms', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(
+      screen.getByText(/Ends a turn when the sentence sounds finished/),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the two recording engines that cross-check each other', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.getByText('Deepgram + AssemblyAI')).toBeInTheDocument();
+  });
+
+  it('defaults to sending vocabulary and opting out of vendor retention', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(
+      screen.getByLabelText('Send engagement vocabulary to the transcriber'),
+    ).toBeChecked();
+    expect(
+      screen.getByLabelText('Tell vendors not to retain client audio'),
+    ).toBeChecked();
+  });
+
+  it('saves a retention opt-out that the operator turns off', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.click(
+      screen.getByLabelText('Tell vendors not to retain client audio'),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connectors.disable_vendor_retention).toBe(false);
+  });
+
+  it('saves a pinned region', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.type(screen.getByLabelText('Region'), 'eu');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connectors.region).toBe('eu');
   });
 });

@@ -1114,6 +1114,44 @@ export interface components {
             detail: string;
         };
         /**
+         * ConnectorSettings
+         * @description Which speech vendors serve each path (ADR-004's dual-path split).
+         *
+         *     The live and record paths are configured separately on purpose: they have
+         *     different consumers. The live path is bought on turn-detection latency
+         *     (§14.2), the record path on independent divergence between two engines
+         *     (FR-2.6, T3). Forcing one vendor to serve both would optimise neither.
+         */
+        ConnectorSettings: {
+            /**
+             * @description Streaming engine for the live trigger path. AssemblyAI's confidence-based turn model reaches a lower latency floor than a silence timer (§14.2) and is the cheaper of the two per hour.
+             * @default assemblyai
+             */
+            live_vendor: components["schemas"]["SpeechVendor"];
+            /**
+             * Record Vendors
+             * @description Batch engines for the record path. FR-2.6 requires two, and T3 requires that they diverge independently.
+             */
+            record_vendors?: components["schemas"]["SpeechVendor"][];
+            /**
+             * Keyterm Prompting
+             * @description Send the engagement vocabulary as keyterms (FR-2.9). §14.1 ranks this the highest-leverage engine-side accuracy control.
+             * @default true
+             */
+            keyterm_prompting: boolean;
+            /**
+             * Disable Vendor Retention
+             * @description Set the vendor's opt-out parameter on every request (NFR-2.3). §14.1: a DPA that says retention is off and a request that does not say so is a gap that surfaces in an audit.
+             * @default true
+             */
+            disable_vendor_retention: boolean;
+            /**
+             * Region
+             * @description Vendor region. Pinned once for residency (NFR-2.2) and for round-trip latency (§14.2) — the same knob serves both.
+             */
+            region?: string | null;
+        };
+        /**
          * ConsentConfirmationRequest
          * @description Payload for an operator confirming the consent prompt (PRD feature 246).
          */
@@ -2058,6 +2096,7 @@ export interface components {
         ServiceSettings: {
             inference?: components["schemas"]["InferenceSettings"];
             vendors?: components["schemas"]["VendorSettings"];
+            connectors?: components["schemas"]["ConnectorSettings"];
             /** Secrets */
             secrets?: components["schemas"]["SecretStatus"][];
             /**
@@ -2119,6 +2158,7 @@ export interface components {
         SettingsUpdateRequest: {
             inference?: components["schemas"]["InferenceSettings"] | null;
             vendors?: components["schemas"]["VendorSettings"] | null;
+            connectors?: components["schemas"]["ConnectorSettings"] | null;
             /** Secrets */
             secrets?: components["schemas"]["SecretUpdate"][];
         };
@@ -2159,6 +2199,20 @@ export interface components {
              */
             ticked_at: string;
         };
+        /**
+         * SpeechVendor
+         * @description Speech vendors the service can connect to.
+         *
+         *     Both are the engines architecture §14.1-14.2 analyses in detail, and they
+         *     are chosen together rather than interchangeably: FR-2.6 runs two batch
+         *     engines over the record path, and T3 warns that the pair is only worth
+         *     running if the engines fail *differently* — two models sharing a training
+         *     lineage agree on the same mistakes and the reconciliation signal is
+         *     worthless. Deepgram and AssemblyAI have independent lineages, which is
+         *     what makes them a usable pair.
+         * @enum {string}
+         */
+        SpeechVendor: "deepgram" | "assemblyai";
         /**
          * StartReplayRunRequest
          * @description A request to start a replay run against an already-uploaded recording.
