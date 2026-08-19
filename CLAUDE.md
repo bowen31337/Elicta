@@ -80,10 +80,25 @@ because Swift had back-deployed `libswift_Concurrency.dylib` to an `@rpath` with
 no `LC_RPATH`. `bundle.macOS.minimumSystemVersion` (13.0) is what prevents that;
 it also sets `MACOSX_DEPLOYMENT_TARGET`, so lowering it reintroduces the crash.
 
-`build.yml`'s automatic triggers are commented out — it runs on `macos-26` at
-10x billing for ~35 min. `gh workflow run build.yml --ref main` still works, and
-it uploads an artifact rather than publishing a release; attaching a `.dmg` to a
-release is a separate `gh release upload` step.
+`build.yml` builds **macOS only** on push; the Windows jobs are gated behind
+`if: inputs.windows` and are asked for explicitly:
+```bash
+gh workflow run build.yml -f windows=true
+```
+The macOS job runs on `macos-26` at 10x billing for ~35 min, and
+`cancel-in-progress` means a second push kills the first run mid-flight. It
+uploads an artifact rather than publishing a release; attaching a `.dmg` to a
+release is a separate `gh release upload --clobber` step.
+
+The Windows backends are `#[cfg(target_os = "windows")]`, so a Linux
+`cargo test --workspace` never compiles them — the same blind spot applies to
+the macOS ones. Cross-check them without a runner:
+```bash
+cargo check -p capture --target x86_64-pc-windows-msvc --all-targets
+cargo check -p capture --target aarch64-pc-windows-msvc --all-targets
+```
+That type-checks the gated code but links nothing, so it catches trait and
+signature breakage, not linkage or runtime behaviour.
 
 Desktop (`pnpm`, Node >= 22.13):
 ```bash

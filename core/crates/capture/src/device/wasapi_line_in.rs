@@ -21,16 +21,13 @@ use windows::Win32::Media::Audio::{
     eCapture, eConsole, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
     MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
 };
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
-    COINIT_MULTITHREADED,
-};
+use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 
 use crate::ring::{AudioFormat, RawFrame};
 
 use super::kind::AudioSourceKind;
 use super::source::{AudioSource, AudioSourceError};
-use super::wasapi::parse_wave_format;
+use super::wasapi::{enter_apartment, parse_wave_format};
 use super::wasapi_format::{decode_capture_packet, WasapiMixFormat};
 
 /// Buffer duration requested from WASAPI for the line-in capture client, in
@@ -50,11 +47,6 @@ pub struct WasapiLineInSource {
     capture_client: IAudioCaptureClient,
     audio_client: IAudioClient,
     format: WasapiMixFormat,
-    /// Whether this instance is the one that called `CoInitializeEx` on this
-    /// thread (`S_OK`) rather than finding COM already initialized
-    /// (`S_FALSE`) — only the caller that initialized COM should
-    /// uninitialize it on drop.
-    owns_com_init: bool,
 }
 
 impl WasapiLineInSource {
@@ -62,36 +54,17 @@ impl WasapiLineInSource {
     /// capture endpoint exists (no line-in interface configured as the input
     /// device) or the endpoint refuses shared-mode initialization.
     ///
-    /// Must be called on the thread that will subsequently call
-    /// [`next_frame`](AudioSource::next_frame) — COM apartment state is
-    /// per-thread, and the capture worker this crate's normalisation
-    /// pipeline runs on (`core::ring`) is exactly that thread.
+    /// Callable from any thread. The apartment this needs is entered per
+    /// thread by the loopback backend's [`enter_apartment`], so the source it
+    /// returns may then be moved to the audio thread that pulls from it —
+    /// which is what the caller actually does.
     pub fn open() -> Result<Self, AudioSourceError> {
-        unsafe {
-            let init_hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            if init_hr.is_err() {
-                return Err(AudioSourceError::Disconnected(format!(
-                    "CoInitializeEx failed: {init_hr:?}"
-                )));
-            }
-            // S_OK means this call initialized COM on this thread; S_FALSE
-            // means it was already initialized by someone else, who owns
-            // tearing it down.
-            let owns_com_init = init_hr.0 == 0;
-
-            match Self::open_with_com_initialized(owns_com_init) {
-                Ok(source) => Ok(source),
-                Err(err) => {
-                    if owns_com_init {
-                        CoUninitialize();
-                    }
-                    Err(err)
-                }
-            }
-        }
+        enter_apartment()?;
+        // SAFETY: this thread is now a member of the multi-threaded apartment.
+        unsafe { Self::open_in_apartment() }
     }
 
-    unsafe fn open_with_com_initialized(owns_com_init: bool) -> Result<Self, AudioSourceError> {
+    unsafe fn open_in_apartment() -> Result<Self, AudioSourceError> {
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(|e| {
                 AudioSourceError::Disconnected(format!("failed to create device enumerator: {e}"))
@@ -139,7 +112,6 @@ impl WasapiLineInSource {
             capture_client,
             audio_client,
             format,
-            owns_com_init,
         })
     }
 }
@@ -154,6 +126,10 @@ impl AudioSource for WasapiLineInSource {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>, AudioSourceError> {
+        // This is normally the audio thread rather than the one that opened
+        // the device, and it has to be in the apartment before the first
+        // interface call rather than after it.
+        enter_apartment()?;
         loop {
             let packet_frames = unsafe { self.capture_client.GetNextPacketSize() }
                 .map_err(|e| AudioSourceError::Disconnected(format!("GetNextPacketSize failed: {e}")))?;
@@ -194,14 +170,25 @@ impl AudioSource for WasapiLineInSource {
 
 impl Drop for WasapiLineInSource {
     fn drop(&mut self) {
+        // A source can be dropped on a thread that never pulled from it, so
+        // the apartment may still need entering. If it cannot be, `Stop` is
+        // skipped: leaking a stopped-anyway stream at process exit is better
+        // than calling a COM method from outside any apartment.
+        if enter_apartment().is_err() {
+            return;
+        }
+        // SAFETY: this thread is in the apartment these pointers belong to.
         unsafe {
             let _ = self.audio_client.Stop();
-            if self.owns_com_init {
-                CoUninitialize();
-            }
         }
     }
 }
+
+// SAFETY: as for `WasapiLoopbackSource` — these are COM interface pointers
+// into the multi-threaded apartment, every thread that touches them enters it
+// first via `enter_apartment`, and pointers pass freely within one apartment.
+// The apartment is deliberately owned by the thread, not by this value.
+unsafe impl Send for WasapiLineInSource {}
 
 /// Fails the build on this platform if the backend stops being movable to the
 /// audio thread — a regression that would otherwise only surface as a compile

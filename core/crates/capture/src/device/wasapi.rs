@@ -55,17 +55,84 @@ const KSDATAFORMAT_SUBTYPE_PCM: GUID = GUID::from_u128(0x00000001_0000_0010_8000
 const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: GUID =
     GUID::from_u128(0x00000003_0000_0010_8000_00aa00389b71);
 
+/// Ties multi-threaded-apartment membership to the *thread* rather than to a
+/// capture source.
+///
+/// COM apartment state is per-thread, and `CoUninitialize` only balances a
+/// `CoInitializeEx` made on that same thread. A source cannot own that: it is
+/// opened on whichever thread asked for a device and then moved to the
+/// dedicated audio thread that pulls from it — `AudioSource` requires `Send`
+/// precisely so it can be. An apartment owned by the object would therefore be
+/// left from the wrong thread and leaked on the right one.
+///
+/// A thread-local owns it instead. Its `Drop` runs at thread exit, on the
+/// thread that entered, which is the only place the call balances.
+struct ComApartment {
+    /// `S_OK` means this call put the thread in the apartment and must take it
+    /// back out; `S_FALSE` means it was already a member and whoever put it
+    /// there owns the exit.
+    entered_here: bool,
+}
+
+impl ComApartment {
+    fn enter() -> Result<Self, String> {
+        // SAFETY: callable on any thread; the HRESULT distinguishes "entered"
+        // from "was already a member".
+        let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if hr.is_err() {
+            return Err(format!("CoInitializeEx failed: {hr:?}"));
+        }
+        Ok(Self { entered_here: hr.0 == 0 })
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.entered_here {
+            // SAFETY: balances this thread's own successful `CoInitializeEx`,
+            // and runs at thread exit on that same thread.
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+thread_local! {
+    /// A failure is cached rather than retried: a thread that cannot enter the
+    /// apartment will not start being able to between packets, and retrying
+    /// per call would turn one error into one per frame.
+    static APARTMENT: Result<ComApartment, String> = ComApartment::enter();
+}
+
+/// Puts the calling thread in the multi-threaded apartment if it is not there
+/// already, and keeps it there for the rest of the thread's life.
+///
+/// Every entry point that touches a COM interface calls this — opening a
+/// device, pulling a frame, stopping one on drop — because any of them can be
+/// the first thing a given thread does.
+///
+/// `pub(super)` so the line-in backend shares one apartment policy with this
+/// one rather than keeping a second copy of it.
+pub(super) fn enter_apartment() -> Result<(), AudioSourceError> {
+    APARTMENT
+        .try_with(|apartment| match apartment {
+            Ok(_) => Ok(()),
+            Err(reason) => Err(AudioSourceError::Disconnected(reason.clone())),
+        })
+        // `try_with` fails only once the thread-local has been destroyed, i.e.
+        // during thread teardown, when nothing can be captured anyway.
+        .unwrap_or_else(|_| {
+            Err(AudioSourceError::Disconnected(
+                "COM apartment already torn down on this thread".to_string(),
+            ))
+        })
+}
+
 /// A running WASAPI loopback capture session against the current default
 /// render endpoint.
 pub struct WasapiLoopbackSource {
     capture_client: IAudioCaptureClient,
     audio_client: IAudioClient,
     format: WasapiMixFormat,
-    /// Whether this instance is the one that called `CoInitializeEx` on this
-    /// thread (`S_OK`) rather than finding COM already initialized
-    /// (`S_FALSE`) — only the caller that initialized COM should
-    /// uninitialize it on drop.
-    owns_com_init: bool,
 }
 
 impl WasapiLoopbackSource {
@@ -74,36 +141,17 @@ impl WasapiLoopbackSource {
     /// device configured) or the endpoint refuses shared-mode loopback
     /// initialization.
     ///
-    /// Must be called on the thread that will subsequently call
-    /// [`next_frame`](AudioSource::next_frame) — COM apartment state is
-    /// per-thread, and the capture worker this crate's normalisation
-    /// pipeline runs on (`core::ring`) is exactly that thread.
+    /// Callable from any thread. The apartment this needs is entered per
+    /// thread by [`enter_apartment`], so the source it returns may then be
+    /// moved to the audio thread that pulls from it — which is what the
+    /// caller actually does.
     pub fn open() -> Result<Self, AudioSourceError> {
-        unsafe {
-            let init_hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            if init_hr.is_err() {
-                return Err(AudioSourceError::Disconnected(format!(
-                    "CoInitializeEx failed: {init_hr:?}"
-                )));
-            }
-            // S_OK means this call initialized COM on this thread; S_FALSE
-            // means it was already initialized by someone else, who owns
-            // tearing it down.
-            let owns_com_init = init_hr.0 == 0;
-
-            match Self::open_with_com_initialized(owns_com_init) {
-                Ok(source) => Ok(source),
-                Err(err) => {
-                    if owns_com_init {
-                        CoUninitialize();
-                    }
-                    Err(err)
-                }
-            }
-        }
+        enter_apartment()?;
+        // SAFETY: this thread is now a member of the multi-threaded apartment.
+        unsafe { Self::open_in_apartment() }
     }
 
-    unsafe fn open_with_com_initialized(owns_com_init: bool) -> Result<Self, AudioSourceError> {
+    unsafe fn open_in_apartment() -> Result<Self, AudioSourceError> {
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(|e| {
                 AudioSourceError::Disconnected(format!("failed to create device enumerator: {e}"))
@@ -149,7 +197,6 @@ impl WasapiLoopbackSource {
             capture_client,
             audio_client,
             format,
-            owns_com_init,
         })
     }
 }
@@ -164,6 +211,10 @@ impl AudioSource for WasapiLoopbackSource {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>, AudioSourceError> {
+        // This is normally the audio thread rather than the one that opened
+        // the device, and it has to be in the apartment before the first
+        // interface call rather than after it.
+        enter_apartment()?;
         loop {
             let packet_frames = unsafe { self.capture_client.GetNextPacketSize() }
                 .map_err(|e| AudioSourceError::Disconnected(format!("GetNextPacketSize failed: {e}")))?;
@@ -204,11 +255,16 @@ impl AudioSource for WasapiLoopbackSource {
 
 impl Drop for WasapiLoopbackSource {
     fn drop(&mut self) {
+        // A source can be dropped on a thread that never pulled from it, so
+        // the apartment may still need entering. If it cannot be, `Stop` is
+        // skipped: leaking a stopped-anyway stream at process exit is better
+        // than calling a COM method from outside any apartment.
+        if enter_apartment().is_err() {
+            return;
+        }
+        // SAFETY: this thread is in the apartment these pointers belong to.
         unsafe {
             let _ = self.audio_client.Stop();
-            if self.owns_com_init {
-                CoUninitialize();
-            }
         }
     }
 }
@@ -260,6 +316,20 @@ pub(super) unsafe fn parse_wave_format(ptr: *mut WAVEFORMATEX) -> Result<WasapiM
         sample_format,
     })
 }
+
+// SAFETY: the fields are COM interface pointers, which the `windows` crate
+// leaves `!Send` because an interface pointer *in general* may be bound to the
+// apartment that created it. These are not. Every thread that touches one is a
+// member of the multi-threaded apartment — `enter_apartment` is called when
+// opening a device, on every frame and on drop — and within a single apartment
+// interface pointers pass freely, without marshalling. The MTA is one
+// apartment shared by every thread that joins it, so moving this to the audio
+// thread hands it back to the apartment it was created in rather than across a
+// boundary.
+//
+// What makes that true is that the apartment is *not* owned here; see
+// `ComApartment` for why owning it would break exactly this property.
+unsafe impl Send for WasapiLoopbackSource {}
 
 /// Fails the build on this platform if the backend stops being movable to the
 /// audio thread — a regression that would otherwise only surface as a compile

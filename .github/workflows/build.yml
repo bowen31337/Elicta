@@ -10,23 +10,17 @@ name: Build Desktop Artifacts
 # (PRD NFR-3.3); Windows artifacts are Authenticode-signed inline below.
 
 on:
-  # Automatic triggers are off for now -- see scripts/build-macos.sh for the
-  # local build, which is the faster loop while the desktop shell is being
-  # hand-tested. This job runs on macos-26 runners, billed at ten times the
-  # Linux rate for roughly thirty-five minutes, and `cancel-in-progress`
-  # below meant a second push killed the first run mid-flight.
-  #
-  # Restore by uncommenting; nothing else about the workflow changed, and
-  # `workflow_dispatch` / `workflow_call` still work meanwhile, so
-  # sign-macos.yml can still reuse this and a build can still be asked for
-  # on demand.
-  #
-  # push:
-  #   branches: [main]
-  #   tags: ["v*"]
-  # pull_request:
-  #   branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      windows:
+        description: Also build the Windows bundles
+        type: boolean
+        default: false
   workflow_call:
     outputs:
       artifact-name:
@@ -167,6 +161,15 @@ jobs:
 
   build-windows:
     name: Windows (${{ matrix.arch }})
+    # Off by default: only macOS is built on push. Ask for these from the
+    # Actions tab ("Run workflow" -> "Also build the Windows bundles"), or
+    # `gh workflow run build.yml -f windows=true`.
+    #
+    # Kept rather than deleted because the WASAPI backend below it does now
+    # compile -- verified by cross-checking both windows-msvc targets from
+    # Linux, which type-checks the cfg-gated code but links nothing. A real
+    # toolchain running this job is the only thing that proves the bundle.
+    if: ${{ inputs.windows }}
     # One job template matrixed over both Windows architectures so x64 and
     # arm64 run the identical steps against the shared Rust core
     # (core/crates/*) — there is no per-arch `if:` branching or separate
