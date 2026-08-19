@@ -2,6 +2,26 @@
 
 Rules for prose chapters. Generated chapters are the renderer's problem, not yours.
 
+## Who you are writing for
+
+Somebody who **uses** Elicta and does not work on it. A consultant, an analyst,
+the person who administers it for a team. They are intelligent and busy, and
+they have no repository, no terminal, and no interest in how it is built.
+
+That is not a tone. It is a scope rule, and two parts of it are checked:
+
+- **No technical description of the software.** No components, no network
+  interfaces, no file layouts, no build or test commands. If a sentence only
+  makes sense to somebody who has the source open, it belongs in `CLAUDE.md`
+  or `docs/`, not here.
+- **Explain the product by what it does on screen**, not by what happens
+  underneath. "The button is unavailable until consent is confirmed" is right.
+  "The consent gate is enforced in the service layer" is not.
+
+Where something is genuinely unfinished, say so in the chapter, in the same
+plain voice. A guide that describes intentions in the same tone as behaviour is
+worse than no guide, because the reader cannot tell which is which.
+
 ## Structure
 
 - **One H1 per chapter, and it matches `book.toml` exactly.** `check` enforces this.
@@ -44,10 +64,27 @@ clearest thing to say, say it and explain it once, in the sentence where it firs
 appears. Assume the reader is intelligent and busy, not that they are an
 engineer.
 
-## Pictures
+## Screenshots
 
-Draw things. A diagram belongs in a `diagram` block, which the generator renders
-as an actual picture:
+Show the screen. A chapter about something the reader will look at should
+contain a picture of it:
+
+```markdown
+![What the caption says](../../docs/journeys/screenshots/panel-asked-it.png)
+```
+
+A line that is nothing but a picture becomes a picture; a picture mentioned
+inside a sentence stays inside the sentence. Captions are sentences, not labels
+— say what the reader should notice, not what the file is called.
+
+Blank space at the foot of a screenshot is cropped automatically, and a picture
+taller than it is wide is held back from the full text width. You do not need to
+size anything.
+
+## Diagrams
+
+Draw the things that have no screen. A diagram belongs in a `diagram` block,
+which the generator renders as an actual picture:
 
 - `steps` — a numbered sequence, each stage with a sentence or two
 - `flow` — a short chain with arrows

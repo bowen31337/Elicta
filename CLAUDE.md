@@ -67,7 +67,7 @@ cd apps/service && uv run ruff check .
 uv run --project apps/service python -m pytest tests/e2e/api_integration   # 45 tests, from repo root
 ```
 
-Desktop (`pnpm`, Node >= 20):
+Desktop (`pnpm`, Node >= 22.13):
 ```bash
 pnpm install --frozen-lockfile
 pnpm --filter elicta-desktop test              # 199 tests
@@ -143,11 +143,15 @@ embarrassment gates, plus signing/release workflows.
 
 ## The Handbook
 
-`handbook/` is the repository's own documentation, and it is **generated code, not
-prose-only**. `handbook/tools/gen.py` derives six reference chapters from the crates,
-`packages/api-client/openapi.json`, the service modules, the desktop features,
-`.env.example` and `.claude/commands/`. The remaining chapters are hand-written and each
-declares, in `handbook/book.toml`, the paths it describes.
+`handbook/` is the **user guide** — for the people who use Elicta, not the people who
+build it. It carries no description of the internals, and that is enforced: a prose
+chapter may contain no links and no requirement identifiers, and technical content
+belongs in this file or `docs/` instead. Chapters show real screens from
+`docs/journeys/screenshots/`, embedded in the PDF.
+
+It is still generated code. One chapter (*What Works Today*) is derived from the status
+tables in `docs/journeys/*.md`; the rest are hand-written and each declares, in
+`handbook/book.toml`, the paths it describes — mostly the screens it shows.
 
 ```bash
 python3 handbook/tools/gen.py build     # chapters, index, footers and the PDF
@@ -158,10 +162,12 @@ python3 handbook/tools/gen.py accept --chapter <id>
 cd handbook/tools && python3 -m unittest   # pytest does not collect these
 ```
 
-- **A new crate, route, service module, desktop feature, env var or slash command makes a
-  generated chapter stale.** `check` fails until `build` is re-run — the `handbook` job in
-  `test.yml` enforces it, and a `Stop` hook in `.claude/settings.json` enforces it per
-  session. Treat it exactly like regenerating `packages/api-client`.
+- **A change to a screen puts the chapter that shows it into drift**, and a change to a
+  journey's status table makes the generated chapter stale. `check` fails on the latter
+  until `build` is re-run — the `handbook` job in `test.yml` enforces it, and a `Stop`
+  hook in `.claude/settings.json` enforces it per session.
+- **Drift on a screen usually means the screenshot is out of date**, which no check can
+  see. Look at the picture, not just the words.
 - **Never edit a file carrying `<!-- HANDBOOK-GENERATED -->`.** Change the source or the
   renderer; the next `build` reverts anything else.
 - **Prose chapters own everything above `<!-- HANDBOOK-NAV -->`;** `build` owns the rest.
@@ -189,6 +195,12 @@ cd handbook/tools && python3 -m unittest   # pytest does not collect these
   `steps`, `flow`, `timeline`, `compare` or `stack` — which `diagrams.py` renders as
   a real picture. Mermaid still renders as a source panel and should not be used in
   new chapters.
+- **Screenshots are embedded, not linked.** `images.py` reads PNGs with stdlib zlib
+  only; `pdf.py` embeds them. Blank space at the foot of a screenshot is cropped with
+  a clipping path, so the file is never modified.
+- **Generators that describe the internals still exist but are unmounted**, listed in
+  `generators.UNMOUNTED` with a reason. A test asserts every generator is either
+  mounted in `book.toml` or declared there, so nothing is silently wired to nothing.
 - `/handbook-sync` walks the whole post-feature pass.
 
 ## Gotchas

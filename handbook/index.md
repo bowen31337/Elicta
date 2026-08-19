@@ -1,11 +1,11 @@
 <!-- HANDBOOK-GENERATED: do not edit by hand -->
+<!-- built from: handbook/book.toml -->
 
 # The Elicta Handbook
 
-> This page is written by machine, read straight out of the code each
-> time this handbook is produced, so it cannot fall out of date. Editing
-> it by hand has no effect — the next build puts it back. It is read
-> from `handbook/book.toml`.
+> This page is assembled automatically every time this guide is made,
+> from notes kept alongside the product itself, so it cannot fall out of date.
+> Editing it by hand has no effect — the next build puts it back.
 
 Elicta helps you ask the question you would otherwise have missed — while the
 client is still in the room — and then writes up what was agreed, quoting the

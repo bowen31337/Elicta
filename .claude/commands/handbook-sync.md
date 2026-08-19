@@ -1,12 +1,16 @@
 # Sync the Handbook
 
-Bring `handbook/` back in line with the code after a feature landed or changed.
-Regenerates the reference chapters, then works through whatever the drift
+Bring `handbook/` back in line with the product after a feature landed or
+changed. Regenerates what is generated, then works through whatever the drift
 checker says still needs a human.
 
-Use this after shipping anything that changes a crate, an API route, a service
-module, a desktop feature, a configuration variable, a slash command, or the
-behaviour a chapter describes.
+**The handbook is a guide for the people who use Elicta, not for the people who
+build it.** It carries no description of the internals — no components, no
+network interfaces, no build commands — and the checks enforce that. Technical
+documentation belongs in `CLAUDE.md` and `docs/`.
+
+Use this after shipping anything that changes a screen, changes what the product
+does for its user, or changes a journey's status table.
 
 The handbook is English-only.
 
@@ -31,9 +35,7 @@ hand-written prose above the `<!-- HANDBOOK-NAV -->` marker, and it never writes
 The PDF is rewritten only when its source digest moves — the chapters, the
 manifest, or `pdf.py` / `mdread.py` / `typeset.py`. `gen.py pdf` forces it.
 
-Report to the user what `build` changed. New crates, routes or configuration
-keys appearing in the reference chapters are the signal that prose chapters
-likely need work too.
+Report to the user what `build` changed.
 
 ## Step 2 — Fix every error
 
@@ -56,6 +58,7 @@ Errors block CI, and each one is machine-fixable. Work through them:
 | `missing-pdf` / `stale-pdf` | Re-run `build` (or `gen.py pdf`). Commit `handbook/handbook.pdf` with the chapters. |
 | `cross-reference` | A chapter links somewhere. The handbook is read as one bound document by people outside the team — say the thing in place instead of pointing. |
 | `spec-reference` | A chapter cites a requirement identifier, architecture section or decision record. State it in words; the reader has none of those documents. |
+| `dead-link` on a `.png` | A screenshot was renamed or removed. Fix the path, or recapture the screen. |
 | `false-claim` | **Read carefully** — see below. |
 
 ### On `false-claim` errors
@@ -87,7 +90,11 @@ For each drifted chapter:
 3. Decide honestly: is the chapter still accurate?
    - **Still accurate** → nothing to write; it just needs re-baselining.
    - **Now wrong or incomplete** → update it.
-4. Baseline it:
+4. **Look at the screenshot.** A drifted screen usually means the picture is out
+   of date, and no check can see that. Screenshots live in
+   `docs/journeys/screenshots/` and are captured from the running app; if one is
+   stale, recapture it before baselining the chapter.
+5. Baseline it:
 
 ```bash
 python3 handbook/tools/gen.py accept --chapter <CHAPTER_ID>
@@ -116,9 +123,14 @@ which CI also checks. Fix it before committing.
 Then confirm at least one changed page renders correctly — Mermaid blocks and
 tables are the usual casualties.
 
-If a chapter's prose changed, look at the PDF too. `pdftotext -layout` is enough
-to catch the failures that matter: markup leaking onto the page (`**`, backticks,
-`](`), a table column crushed too narrow, or text running past the measure.
+If a chapter's prose changed, look at the PDF too. `pdftotext -layout` catches
+markup leaking onto the page (`**`, backticks, `](`), a crushed table column, or
+text running past the measure. For anything involving a picture, rasterise and
+actually look:
+
+```bash
+bash handbook/tools/preview.sh        # handbook/preview/page-NN.png
+```
 
 ## Step 5 — Report
 

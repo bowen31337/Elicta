@@ -101,6 +101,19 @@ class DocumentTest(unittest.TestCase):
         other = typeset.render_pdf(ROOT, self.book, digest="otherdigest")
         self.assertNotEqual(self.data, other)
 
+    def test_the_title_page_shows_the_reader_no_file_paths(self):
+        # The guide is for people who use the product. A path to the tool
+        # that made the document means nothing to them.
+        first_page = self.data.split(b"/Contents")[0]
+        drawn = " ".join(re.findall(r"\((.*?)\) Tj", self.text[:12000]))
+        for fragment in ("gen.py", "handbook/", "tools/", ".py"):
+            self.assertNotIn(fragment, drawn, f"{fragment!r} reached the title page")
+
+    def test_the_source_digest_stays_in_the_metadata_not_on_the_page(self):
+        drawn = " ".join(re.findall(r"\((.*?)\) Tj", self.text[:12000]))
+        self.assertNotIn("testdigest", drawn)
+        self.assertIn("/SourceDigest (testdigest)", self.text)
+
     def test_the_document_is_not_absurdly_small(self):
         # 15 chapters and 1200 lines of Markdown cannot fit in a few KB; a
         # tiny file would mean the body silently failed to render.
