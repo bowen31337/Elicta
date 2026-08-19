@@ -31,13 +31,14 @@ jobs:
     name: macOS universal (arm64 + x86_64)
     # Apple Silicon runner: builds aarch64-apple-darwin natively and
     # x86_64-apple-darwin via cross-compilation, then lipo's them together.
-    # macos-15 (SDK 15.5), not macos-14: screencapturekit -> apple-metal
-    # ships a Swift bridge referencing MTLResidencySet, MTLLogState,
-    # MTLCommandQueueDescriptor and MTLSamplerDescriptor.reductionMode, none
-    # of which exist in the 14.5 SDK, so the bundle build failed there. 15.5
-    # is the oldest hosted SDK that compiles all of them -- preferred over
-    # macos-26 so the shipped binary links against the older SDK.
-    runs-on: macos-15
+    # macos-26 (SDK 26.5): screencapturekit -> apple-metal ships a Swift
+    # bridge over Metal 4, referencing MTLSamplerDescriptor.reductionMode and
+    # .lodBias alongside MTLResidencySet, MTLLogState and
+    # MTLCommandQueueDescriptor. The 14.5 SDK has none of them and 15.5 has
+    # only the latter three, so this is the oldest hosted image that builds
+    # the dependency at all -- not a preference. Dropping to an older image
+    # means pinning screencapturekit back off Metal 4 first.
+    runs-on: macos-26
     outputs:
       artifact-name: ${{ steps.artifact.outputs.name }}
     steps:
