@@ -110,3 +110,70 @@ jobs:
 
       - name: Build
         run: pnpm --filter elicta-desktop build
+
+      # WCAG 2.2 AA, measured against the rendered DOM rather than asserted
+      # from the stylesheet — contrast depends on what a colour composites
+      # over, which only exists once the page does. Both themes, because they
+      # are two palettes, not one inverted.
+      - name: Accessibility audit
+        run: |
+          pnpm --filter elicta-desktop exec vite --port 1420 &
+          npx --yes wait-on http://127.0.0.1:1420/journeys.html -t 60000
+          node tests/e2e/journeys/audit-a11y.mjs
+
+  # Documentation as a build artifact, not a promise. `handbook/tools/gen.py`
+  # derives the reference chapters from the crates, the OpenAPI schema, the
+  # service modules, the desktop features, `.env.example` and the checked-in
+  # slash commands, and binds the whole handbook into `handbook/handbook.pdf`.
+  # A feature that adds any of those makes a chapter -- and the PDF -- stale,
+  # and fails here until the handbook is rebuilt.
+  #
+  # Standard library only, so there is no install step and nothing to lock.
+  # That constraint is why the PDF writer is hand-rolled: this runner has no
+  # pandoc, no browser and no LaTeX, and adding one would make the PDF the
+  # single artifact that cannot be built where the handbook lives.
+  handbook:
+    name: Handbook — generated chapters and PDF are current
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pytest's testpaths is apps/service/src, so these are never collected
+      # by the service job. They run here or nowhere.
+      - name: Generator unit tests
+        working-directory: handbook/tools
+        run: python3 -m unittest --verbose
+
+      # Errors only. Drift is a warning: whether a prose chapter is still
+      # true after the code moved is a judgement, and a gate that demands
+      # judgement gets switched off rather than satisfied. `stale-pdf` is an
+      # error, not a warning -- it is decided by comparing two digests.
+      - name: Check
+        run: python3 handbook/tools/gen.py check
+
+      # The reproducibility gate. `check` already compares the committed
+      # chapters against a fresh render; this catches the other failure --
+      # a generator whose output depends on something other than its inputs,
+      # which would make every future run of `check` a coin toss.
+      #
+      # The PDF is safe here because `build` rewrites it only when its
+      # source digest moves, so this step never trips on byte-level float
+      # differences between Python builds.
+      - name: Build is reproducible
+        run: |
+          python3 handbook/tools/gen.py build
+          # --porcelain as well as diff, so a chapter the build *created*
+          # counts too; an untracked file is invisible to `git diff`.
+          if [ -n "$(git status --porcelain -- handbook/)" ]; then
+            git --no-pager diff -- handbook/
+            git status --short -- handbook/
+            echo "::error::The committed handbook is stale, or the build is not reproducible."
+            echo "Run: python3 handbook/tools/gen.py build"
+            exit 1
+          fi

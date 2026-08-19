@@ -2,7 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the panel paint under the notch and the home
+         indicator; the safe-area insets in styles.css keep content clear of
+         them. Zoom is deliberately left enabled — pinch-to-zoom is an
+         accessibility affordance, not a layout bug. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <!-- Tells the browser both themes are supported, so form controls and
+         scrollbars follow the token layer instead of defaulting to light. -->
+    <meta name="color-scheme" content="light dark" />
+    <!-- Matches --bg-grouped in tokens.css for each theme, so the OS chrome
+         (iOS status bar, Android toolbar) blends into the app surface. -->
+    <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <!-- A meeting panel shows times and section numbers; iOS otherwise turns
+         some of them into phone links. -->
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Elicta" />
+    <meta name="description" content="Live requirements elicitation assistant for client meetings." />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
     <title>Elicta</title>
   </head>
   <body>

@@ -30,7 +30,13 @@ pub enum AudioSourceError {
 /// here — the only way a caller can observe a source is by asking its kind,
 /// its native format, and pulling frames, so every backend is
 /// interchangeable from the caller's point of view.
-pub trait AudioSource {
+/// `Send` is part of the contract, not an incidental bound: every capture
+/// path is pulled from a dedicated audio thread, because doing it on the UI
+/// thread would make a dropped frame a function of how busy the interface is.
+/// A backend that cannot move to that thread cannot be used at all, so the
+/// requirement belongs here where every implementation is held to it, rather
+/// than at each call site that spawns a thread.
+pub trait AudioSource: Send {
     /// Which capture path this instance represents.
     fn kind(&self) -> AudioSourceKind;
 

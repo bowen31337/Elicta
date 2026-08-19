@@ -1,5 +1,6 @@
 import { useAskedItChip } from './useAskedItChip';
 import type { CoverageSlot } from '../coverage/types';
+import './chips.tokens.css';
 import './AskedItChip.css';
 
 export interface AskedItChipProps {

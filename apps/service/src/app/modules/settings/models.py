@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SecretKey(str, Enum):
@@ -115,14 +115,72 @@ class AuthMode(str, Enum):
         )
 
 
+class LlmProvider(str, Enum):
+    """Where Claude calls are routed.
+
+    Every option here speaks the **Anthropic Messages API**, and that is a
+    hard constraint rather than a current limitation. The service depends on
+    surface that only exists there: schema-enforced structured outputs
+    (§14.4), explicit cache-boundary control on a hand-partitioned prefix
+    (§14.3), and the request shape `core/crates/slow-lane` builds. An
+    OpenAI-shaped endpoint would not fail at configuration time — it would
+    fail per stage, at the point where a debrief was expected — so the
+    provider list is closed to Messages-API surfaces on purpose.
+
+    Within that, the choice is wide open: Anthropic direct, the three cloud
+    resellers, or any self-hosted or third-party gateway that presents a
+    compatible endpoint.
+    """
+
+    ANTHROPIC = "anthropic"
+    BEDROCK = "bedrock"
+    VERTEX = "vertex"
+    FOUNDRY = "foundry"
+    COMPATIBLE = "anthropic_compatible"
+
+    @property
+    def uses_stored_credential(self) -> bool:
+        """Whether the credential comes from settings or the cloud environment.
+
+        Bedrock and Vertex authenticate with the host's own credential chain —
+        an IAM role, or GCP application-default credentials. Asking an
+        operator to paste a key for those would invite them to create a
+        long-lived static credential where their cloud already has a better
+        mechanism.
+        """
+
+        return self in (
+            LlmProvider.ANTHROPIC,
+            LlmProvider.FOUNDRY,
+            LlmProvider.COMPATIBLE,
+        )
+
+
 class InferenceSettings(BaseModel):
     """Non-secret inference configuration (architecture ADR-012, §3.10)."""
 
     model_config = ConfigDict(extra="forbid")
 
+    provider: LlmProvider = Field(
+        default=LlmProvider.ANTHROPIC,
+        description="Which Anthropic Messages API surface to route calls through.",
+    )
     auth_mode: AuthMode = Field(
         default=AuthMode.API_KEY,
-        description="Whether calls authenticate with an API key or an OAuth token.",
+        description=(
+            "Whether calls authenticate with an API key or an OAuth token. "
+            "Ignored for providers that use the host's own credential chain."
+        ),
+    )
+    region: str | None = Field(
+        default=None,
+        description="Cloud region. Required for Bedrock and Vertex.",
+    )
+    project_id: str | None = Field(
+        default=None, description="GCP project. Required for Vertex."
+    )
+    resource: str | None = Field(
+        default=None, description="Foundry resource name. Required for Foundry."
     )
 
     model: str = Field(
@@ -134,6 +192,36 @@ class InferenceSettings(BaseModel):
         default=None,
         description="Override the Anthropic API endpoint. Leave unset for the default.",
     )
+
+
+
+    @model_validator(mode="after")
+    def _require_what_the_provider_needs(self) -> InferenceSettings:
+        """Reject a provider that cannot possibly connect.
+
+        Catching this at save time turns a misconfiguration into a form error
+        the operator can act on, instead of a stage failure that surfaces
+        hours later in a debrief record.
+        """
+
+        missing: list[str] = []
+        if self.provider is LlmProvider.COMPATIBLE and not self.base_url:
+            missing.append("base_url (the compatible endpoint to call)")
+        if self.provider is LlmProvider.BEDROCK and not self.region:
+            missing.append("region (the AWS region)")
+        if self.provider is LlmProvider.VERTEX:
+            if not self.region:
+                missing.append("region (the Vertex region, or 'global')")
+            if not self.project_id:
+                missing.append("project_id (the GCP project)")
+        if self.provider is LlmProvider.FOUNDRY and not self.resource:
+            missing.append("resource (the Foundry resource name)")
+
+        if missing:
+            raise ValueError(
+                f"{self.provider.value} needs: " + ", ".join(missing)
+            )
+        return self
 
 
 class VendorSettings(BaseModel):
@@ -159,6 +247,7 @@ class SpeechVendor(str, Enum):
 
     DEEPGRAM = "deepgram"
     ASSEMBLYAI = "assemblyai"
+    CUSTOM = "custom"
 
 
 class ConnectorSettings(BaseModel):
@@ -209,6 +298,29 @@ class ConnectorSettings(BaseModel):
             "round-trip latency (§14.2) — the same knob serves both."
         ),
     )
+    custom_vendor_name: str | None = Field(
+        default=None,
+        description="Display name for a custom speech service, shown in logs and the UI.",
+    )
+    custom_base_url: str | None = Field(
+        default=None,
+        description="Endpoint for a custom speech service. Required when one is selected.",
+    )
+
+    @model_validator(mode="after")
+    def _a_custom_vendor_needs_an_endpoint(self) -> ConnectorSettings:
+        """A custom vendor with nowhere to call is a silent dead end.
+
+        Rejecting it at save time keeps the failure in the form, where the
+        operator can fix it, rather than in a meeting.
+        """
+
+        selected = [self.live_vendor, *self.record_vendors]
+        if SpeechVendor.CUSTOM in selected and not self.custom_base_url:
+            raise ValueError(
+                "a custom speech service needs custom_base_url — the endpoint to call"
+            )
+        return self
 
     @field_validator("record_vendors")
     @classmethod

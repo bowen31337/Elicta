@@ -1,28 +1,309 @@
-.settings-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
-.settings-panel h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
-.settings-panel h2 { font-size: 0.8rem; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase; margin: 10px 0 0; opacity: .7; }
-.settings-field { display: flex; flex-direction: column; gap: 4px; }
-.settings-field label { font-size: .85rem; font-weight: 500; }
-.settings-help { font-size: .75rem; opacity: .7; margin: 0; }
-.settings-state { font-size: .75rem; opacity: .8; margin: 0; }
-.settings-secret-row { display: flex; gap: 6px; align-items: center; }
+/* Settings uses Apple's grouped-list idiom: sections of rows on a grouped
+   background, with the explanatory text set below each control rather than
+   beside it. That layout is what makes a dense configuration screen scannable
+   instead of a wall of fields. */
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  padding: var(--space-7) var(--space-6) var(--space-10);
+  max-width: 640px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.settings-panel h1 {
+  margin: 0;
+  font-size: var(--text-large-title);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.settings-panel h2 {
+  margin: var(--space-4) 0 calc(var(--space-1) * -1) var(--space-2);
+  font-size: var(--text-footnote);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--label-supporting);
+}
+
+/* Each field is a card in the group, not a bare input on the page. */
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.settings-field > label,
+.settings-pseudo-label,
+.settings-panel legend {
+  font-size: var(--text-headline);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
+  padding: 0;
+}
+
+.settings-label-row { display: flex; gap: var(--space-3); align-items: baseline; }
+
+.settings-help {
+  margin: 0;
+  font-size: var(--text-footnote);
+  line-height: var(--leading-relaxed);
+  color: var(--label-supporting);
+}
+
+.settings-state {
+  margin: 0;
+  font-size: var(--text-footnote);
+  color: var(--label-supporting);
+}
+
+.settings-secret-row { display: flex; gap: var(--space-3); align-items: center; }
 .settings-secret-row input { flex: 1; min-width: 0; }
-.settings-warning { font-size: .78rem; border-radius: 4px; padding: 8px 10px;
-  background: rgba(180, 120, 10, .12); margin: 0; }
-.settings-error { font-size: .78rem; border-radius: 4px; padding: 8px 10px;
-  background: rgba(180, 40, 30, .12); margin: 0; }
-.settings-danger { color: rgb(150, 40, 30); }
-.settings-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
-.settings-saved { font-size: .78rem; opacity: .75; }
-.settings-loading { padding: 16px; font-size: .85rem; opacity: .7; }
-.settings-radio { display: inline-flex; gap: 5px; align-items: center;
-  font-size: .85rem; margin-right: 14px; }
-.settings-panel fieldset { border: 0; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 4px; }
-.settings-panel legend { font-size: .85rem; font-weight: 500; padding: 0; }
-.settings-inuse { font-weight: 400; opacity: .7; font-size: .78rem; }
-.settings-label-row { display: flex; gap: 8px; align-items: baseline; }
-.settings-check { display: inline-flex; gap: 6px; align-items: center; font-weight: 500; }
-.settings-pseudo-label { font-size: .85rem; font-weight: 500; }
-.settings-panel select { padding: 3px 6px; }
+
+.settings-panel input[type='text'],
+.settings-panel input[type='password'],
+.settings-panel select {
+  width: 100%;
+  font: inherit;
+  font-size: var(--text-subhead);
+  color: var(--label);
+  background: var(--fill-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.settings-panel input::placeholder { color: var(--label-tertiary); }
+
+.settings-panel button {
+  font: inherit;
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-semibold);
+  color: var(--accent-ink);
+  background: var(--fill-4);
+  border: 0;
+  border-radius: var(--radius-capsule);
+  padding: var(--space-2) var(--space-5);
+  min-height: 34px;
+  cursor: pointer;
+  transition: transform var(--duration-instant) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+.settings-panel button:active { transform: scale(0.96); }
+.settings-panel button:disabled { color: var(--label-tertiary); cursor: default; }
+.settings-panel button:disabled:active { transform: none; }
+.settings-danger { color: var(--red-ink); }
+
+.settings-actions {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+.settings-actions button:first-child {
+  background: var(--accent-fill);
+  color: #fff;
+  padding-inline: var(--space-7);
+}
+.settings-saved { font-size: var(--text-footnote); color: var(--green-ink); }
+
+.settings-warning,
+.settings-error {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-footnote);
+  line-height: var(--leading-relaxed);
+}
+.settings-warning { background: color-mix(in srgb, var(--orange) 14%, transparent); color: var(--label); }
+.settings-error { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--label); }
+
+.settings-check {
+  display: inline-flex;
+  gap: var(--space-3);
+  align-items: center;
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-regular);
+  margin-right: var(--space-5);
+}
+/* Strip the UA's fieldset chrome — but never `padding`, and never on the card
+   class. `.settings-panel fieldset` (0,1,1) outranks `.settings-field` (0,1,0),
+   so a blanket `padding: 0` here silently flattened the one card built on a
+   fieldset: its label, help text and controls sat hard against the rounded
+   edge while every sibling card inset them by 16px. Scoping the reset is the
+   fix rather than raising `.settings-field`'s specificity, which would leave
+   the same trap armed for the next fieldset someone adds. */
+.settings-panel fieldset:not(.settings-field) {
+  border: 0; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.settings-panel input[type='checkbox'] {
+  /* The <label> wraps the input, so the activation target is the whole row.
+     Sizing the row well past WCAG 2.5.8's 24px floor gives headroom rather
+     than clearing it by two pixels; the glyphs are sized the way Apple draws
+     them, around 20px. */
+  width: 20px; height: 20px; min-height: 0; margin: 0; flex: none;
+  accent-color: var(--accent-fill);
+}
+.settings-check { min-height: 32px; }
+
+.settings-inuse {
+  font-size: var(--text-caption-1);
+  font-weight: var(--weight-semibold);
+  color: var(--green-ink);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  padding: 1px var(--space-3);
+  border-radius: var(--radius-capsule);
+}
+
+.settings-loading { padding: var(--space-7); color: var(--label-supporting); }
+
+.settings-panel .eyebrow-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin: 0; font-size: var(--text-footnote); font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--label-supporting);
+}
+.settings-panel .eyebrow-row .mark { color: var(--accent-ink); flex: none; }
+
+/* A <legend> escapes its fieldset's padding box by default, so the label would
+   sit on the page background while the rest of the card sat below it —
+   inconsistent with every other field, where the label is inside the card.
+   Floating it keeps the semantics and puts it back in the box.
+
+   Floated rather than made a flex item. A legend does lay out as a normal flex
+   child in current Chromium, but this ships on two engines — WebView2 and
+   WKWebView — and legend layout is the corner of CSS where they have agreed
+   least and most recently. A float behaves identically everywhere and has for
+   twenty years. The cost is that block layout ignores `gap`, so this card sets
+   its rhythm in margins instead. */
+.settings-panel fieldset.settings-field {
+  border: 0;
+  margin: 0;
+  display: block;
+}
+.settings-panel fieldset.settings-field > legend {
+  float: left;
+  width: 100%;
+  /* The same label-to-content step the sibling cards get from their flex
+     `gap`. This card cannot use `gap` (see above), so it states it. */
+  margin-bottom: var(--space-2);
+}
+.settings-panel fieldset.settings-field::after { content: ''; display: table; clear: both; }
+.settings-panel fieldset.settings-field .settings-help {
+  clear: both;
+  /* The one gap `gap` would have given us. Sits between the explanation and
+     the control it explains, so the control reads as the answer to it. */
+  margin-bottom: var(--space-4);
+}
+
+/* --- Segmented control ------------------------------------------------------
+   Apple's control for a small, mutually exclusive choice: one track, equal
+   segments, the selected one lifted out of the track on a white fill rather
+   than tinted. The native radio stays in the DOM and stays focusable — it is
+   stretched invisibly across its own segment, so the hit target is the whole
+   segment and assistive technology still reads a radio group.
+
+   `inline-grid` with equal columns, not `flex`. Two things follow from it,
+   both of them how macOS actually draws this control: the track hugs its
+   content instead of stretching the full card width like the popup menu above
+   it, and every segment is as wide as the widest label rather than as wide as
+   its own, so "API key" and "OAuth token" do not sit in ragged boxes. */
+.settings-segmented {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  clear: both;
+  padding: 2px;
+  gap: 2px;
+  background: var(--segment-track);
+  border-radius: var(--radius-md);
+}
+
+/* The control's two surfaces, as tokens, because the *relationship* between
+   them has to survive both themes and a naive reuse of `--bg-tertiary` does
+   not. The track is a recess; the selected segment lifts out of it. On white
+   that falls out for free — a grey track, a white segment. In dark mode
+   `--bg-tertiary` is the card colour, which is *darker* than a `--fill-*`
+   track, so reusing it inverted the depth: the selected segment read as a
+   hole. Each theme therefore names its own pair, and the invariant both
+   satisfy is that the selected fill is lighter than the track it sits in. */
+:root {
+  --segment-track: var(--fill-3);
+  --segment-selected: var(--bg-tertiary);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --segment-track: rgba(0, 0, 0, 0.32);
+    --segment-selected: var(--fill-1);
+  }
+}
+[data-theme="dark"] {
+  --segment-track: rgba(0, 0, 0, 0.32);
+  --segment-selected: var(--fill-1);
+}
+
+.settings-radio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 34px is the macOS segmented-control height, and comfortably clears WCAG
+     2.5.8's 24px floor rather than scraping past it. */
+  min-height: 34px;
+  padding-inline: var(--space-4);
+  border-radius: calc(var(--radius-md) - 2px);
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-medium);
+  color: var(--label);
+  white-space: nowrap;
+  cursor: pointer;
+  /* Fire-and-forget state change, not something the pointer can drag or
+     reverse mid-flight, so a token easing is the right tool and a spring
+     would be overbuilt. `--ease-out` never `ease-in`: the selection should
+     leave immediately and settle, not creep away and rush. */
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* The input covers its segment rather than being hidden off-screen: hiding it
+   would move the focus ring somewhere the eye is not, and shrinking it to a
+   point would shrink the hit target with it. */
+.settings-segmented input[type='radio'] {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-radio:has(input:checked) {
+  background: var(--segment-selected);
+  box-shadow: var(--shadow-1);
+}
+
+/* Feedback on press, not on release. */
+.settings-radio:active { background: var(--fill-4); }
+.settings-radio:has(input:checked):active { background: var(--segment-selected); }
+
+.settings-radio:has(input:focus-visible) {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-radio { transition-duration: 0.01ms; }
+}
+
+/* `prefers-contrast: more` wants a real edge, not a fill difference. */
+@media (prefers-contrast: more) {
+  .settings-segmented { outline: 1px solid var(--separator-opaque); }
+  .settings-radio:has(input:checked) { outline: 1px solid var(--label); }
+}

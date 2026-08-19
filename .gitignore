@@ -44,6 +44,10 @@ coverage/
 # crate by name -- un-ignore them.
 !apps/desktop/src/features/panel/coverage/
 !core/crates/coverage/
+# Page images from handbook/tools/preview.sh — a local convenience for
+# editors that render images but not PDFs. The PDF itself IS committed.
+handbook/preview/
+
 *.log
 *.bak
 *.tmp

@@ -560,7 +560,7 @@ OAUTH_BETA_HEADER = "oauth-2025-04-20"
 def build_anthropic_client(
     mode: Any, secret: str, *, base_url: str | None = None
 ) -> AsyncAnthropic:
-    """Construct a client for whichever credential the operator supplied.
+    """A direct or compatible-endpoint client for the supplied credential.
 
     An API key goes on `X-Api-Key`; an OAuth token goes on
     `Authorization: Bearer` and carries the beta flag that unlocks it. Getting
@@ -584,6 +584,52 @@ def build_anthropic_client(
     return AsyncAnthropic(**kwargs)
 
 
+def build_llm_client(inference: Any, secret: str | None) -> Any:
+    """The client for whichever Messages API surface the operator chose.
+
+    Each cloud reseller has its own client class rather than a `base_url`
+    override on the default one: they differ in request signing and in how
+    model ids are addressed, and pointing the plain client at their endpoint
+    produces authentication failures that read like bad credentials.
+
+    Bedrock and Vertex take no secret from settings on purpose — they
+    authenticate through the host's own credential chain (an IAM role, GCP
+    application-default credentials), which is a better mechanism than a
+    long-lived key pasted into a form.
+    """
+
+    from anthropic import (
+        AsyncAnthropicBedrockMantle,
+        AsyncAnthropicFoundry,
+        AsyncAnthropicVertex,
+    )
+
+    from app.modules.settings.models import LlmProvider
+
+    provider = inference.provider
+
+    if provider is LlmProvider.BEDROCK:
+        return AsyncAnthropicBedrockMantle(aws_region=inference.region)
+
+    if provider is LlmProvider.VERTEX:
+        return AsyncAnthropicVertex(
+            project_id=inference.project_id, region=inference.region
+        )
+
+    if provider is LlmProvider.FOUNDRY:
+        if secret is None:
+            raise EngineNotConfiguredError("inference (no Foundry key configured)")
+        return AsyncAnthropicFoundry(api_key=secret, resource=inference.resource)
+
+    # Anthropic direct, and any compatible gateway — same client, differing
+    # only in where it points.
+    if secret is None:
+        raise EngineNotConfiguredError("inference (no credential configured)")
+    return build_anthropic_client(
+        inference.auth_mode, secret, base_url=inference.base_url
+    )
+
+
 class SettingsBackedClient:
     """An Anthropic client that re-resolves its credentials on every call.
 
@@ -599,23 +645,30 @@ class SettingsBackedClient:
 
     def __init__(self, store: Any) -> None:
         self._store = store
-        self._cache: dict[tuple[str, str | None, str], AsyncAnthropic] = {}
+        self._cache: dict[tuple[str, str | None, str], Any] = {}
 
-    def _resolve(self) -> AsyncAnthropic:
-        settings = self._store.read()
-        mode = settings.inference.auth_mode
-        secret = self._store.get_secret(mode.secret_key)
-        if secret is None:
-            raise EngineNotConfiguredError(
-                f"inference (no {mode.value.replace('_', ' ')} configured)"
-            )
+    def _resolve(self) -> Any:
+        inference = self._store.read().inference
+        secret = None
 
-        cache_key = (secret.reveal(), settings.inference.base_url, mode.value)
+        if inference.provider.uses_stored_credential:
+            stored = self._store.get_secret(inference.auth_mode.secret_key)
+            if stored is None:
+                raise EngineNotConfiguredError(
+                    f"inference (no {inference.auth_mode.value.replace('_', ' ')} "
+                    f"configured for {inference.provider.value})"
+                )
+            secret = stored.reveal()
+
+        cache_key = (
+            secret or "",
+            inference.base_url,
+            f"{inference.provider.value}:{inference.auth_mode.value}:"
+            f"{inference.region}:{inference.project_id}:{inference.resource}",
+        )
         client = self._cache.get(cache_key)
         if client is None:
-            client = build_anthropic_client(
-                mode, secret.reveal(), base_url=settings.inference.base_url
-            )
+            client = build_llm_client(inference, secret)
             self._cache[cache_key] = client
         return client
 

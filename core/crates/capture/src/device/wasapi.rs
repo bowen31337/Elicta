@@ -260,3 +260,11 @@ pub(super) unsafe fn parse_wave_format(ptr: *mut WAVEFORMATEX) -> Result<WasapiM
         sample_format,
     })
 }
+
+/// Fails the build on this platform if the backend stops being movable to the
+/// audio thread — a regression that would otherwise only surface as a compile
+/// error in whatever spawns the capture thread, far from its cause.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<WasapiLoopbackSource>();
+};

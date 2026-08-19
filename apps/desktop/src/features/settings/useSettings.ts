@@ -27,9 +27,34 @@ export interface SecretStatus {
   readonly hint: string | null;
 }
 
-export type SpeechVendor = 'deepgram' | 'assemblyai';
+export type SpeechVendor = 'deepgram' | 'assemblyai' | 'custom';
+
+/**
+ * Where Claude calls are routed. Every option speaks the Anthropic Messages
+ * API — that is a constraint, not a gap. The service depends on structured
+ * outputs and cache-boundary control that only exist on that surface, so an
+ * OpenAI-shaped endpoint would fail per stage rather than at setup.
+ */
+export type LlmProvider =
+  | 'anthropic'
+  | 'bedrock'
+  | 'vertex'
+  | 'foundry'
+  | 'anthropic_compatible';
+
+export interface InferenceSettings {
+  model: string;
+  base_url: string | null;
+  auth_mode: AuthMode;
+  provider: LlmProvider;
+  region: string | null;
+  project_id: string | null;
+  resource: string | null;
+}
 
 export interface ConnectorSettings {
+  readonly custom_vendor_name?: string | null;
+  readonly custom_base_url?: string | null;
   readonly live_vendor: SpeechVendor;
   readonly record_vendors: readonly SpeechVendor[];
   readonly keyterm_prompting: boolean;
@@ -38,7 +63,7 @@ export interface ConnectorSettings {
 }
 
 export interface ServiceSettings {
-  readonly inference: { model: string; base_url: string | null; auth_mode: AuthMode };
+  readonly inference: InferenceSettings;
   readonly vendors: { asr_base_url: string | null; capture_base_url: string | null };
   readonly connectors: ConnectorSettings;
   readonly secrets: readonly SecretStatus[];
@@ -46,7 +71,7 @@ export interface ServiceSettings {
 }
 
 export interface SettingsDraft {
-  readonly inference?: { model: string; base_url: string | null; auth_mode: AuthMode };
+  readonly inference?: InferenceSettings;
   readonly vendors?: { asr_base_url: string | null; capture_base_url: string | null };
   /**
    * Only the secrets the operator actually typed into. A key absent here is

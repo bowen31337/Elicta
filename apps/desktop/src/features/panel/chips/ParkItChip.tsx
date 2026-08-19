@@ -1,6 +1,7 @@
 import { useParkItChip } from './useParkItChip';
 import type { UseParkItChipOptions } from './useParkItChip';
 import type { Thread } from './types';
+import './chips.tokens.css';
 import './ParkItChip.css';
 
 export interface ParkItChipProps extends UseParkItChipOptions {

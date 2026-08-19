@@ -1,6 +1,7 @@
 import { useGoDeeperChip } from './useGoDeeperChip';
 import type { UseGoDeeperChipOptions } from './useGoDeeperChip';
 import type { Thread } from './types';
+import './chips.tokens.css';
 import './GoDeeperChip.css';
 
 export interface GoDeeperChipProps extends UseGoDeeperChipOptions {

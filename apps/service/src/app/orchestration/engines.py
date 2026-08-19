@@ -65,6 +65,9 @@ def inference_is_configured() -> bool:
     )
 
 
+UNCONFIGURED = "unconfigured"
+
+
 def _unconfigured(stage: str) -> Callable[..., Awaitable[Any]]:
     async def call(*_args: Any, **_kwargs: Any) -> Any:
         raise EngineNotConfiguredError(stage)
@@ -90,13 +93,25 @@ class DebriefEngines:
     @classmethod
     def unconfigured(cls) -> DebriefEngines:
         return cls(
-            name="unconfigured",
+            name=UNCONFIGURED,
             diarize=_unconfigured("diarization (architecture §7 step 2)"),
             clean=_unconfigured("transcript cleanup (§7 step 4)"),
             translate=_unconfigured("transcript translation (§7 step 4)"),
             classify=_unconfigured("section classification (§7 step 5)"),
             run_chain=_unconfigured("BMAD analyst chain (§7 step 6)"),
         )
+
+    @property
+    def is_configured(self) -> bool:
+        """Whether these engines can actually reach a model.
+
+        An explicit property rather than a `name == "unconfigured"` check at
+        each call site: the name is a label for records, and a caller that
+        matched on it would silently start answering "configured" the day
+        someone renamed it.
+        """
+
+        return self.name != UNCONFIGURED
 
 
 @dataclass(frozen=True)
@@ -112,12 +127,18 @@ class CompilerEngines:
     @classmethod
     def unconfigured(cls) -> CompilerEngines:
         return cls(
-            name="unconfigured",
+            name=UNCONFIGURED,
             extract=_unconfigured("document claim extraction (§3.10)"),
             structure=_unconfigured("claim structuring (§3.10)"),
             submit_batch=_unconfigured("BMAD analyst batch submission (§3.10)"),
             fetch_batch=_unconfigured("BMAD analyst batch collection (§3.10)"),
         )
+
+    @property
+    def is_configured(self) -> bool:
+        """Whether these engines can actually reach a model. See `DebriefEngines`."""
+
+        return self.name != UNCONFIGURED
 
 
 def engagement_filesystem_scope(engagement_id: str) -> AgentFilesystemScope:

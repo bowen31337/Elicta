@@ -1,0 +1,177 @@
+# The chapter manifest. This file and `handbook/tools/generators.py` are the
+# only two places a chapter is declared.
+#
+#   kind = "prose"      a human owns everything above the nav marker
+#   kind = "generated"  the generator owns every byte; never edit the file
+#
+# This is a guide for the people who *use* Elicta. It carries no description
+# of how the software is built: no components, no network interfaces, no
+# commands. Those generators still exist and are listed in `UNMOUNTED` in
+# generators.py with the reason they are not here.
+#
+# `watches` lists the paths a prose chapter describes — mostly the screens it
+# shows. When those move, `check` reports the chapter as suspect and a person
+# decides whether the screenshots and the words still match.
+
+[handbook]
+title = "The Elicta Handbook"
+intro = """
+Elicta helps you ask the question you would otherwise have missed — while the
+client is still in the room — and then writes up what was agreed, quoting the
+words that were actually said.
+
+This is a guide to using it. It goes in the order you will meet it: setting it
+up, preparing for an engagement, the meeting itself, and what comes out
+afterwards. Every screen is shown.
+
+It assumes nothing about how the software is built. Where something is not
+finished, it says so plainly rather than describing an intention in the same
+voice as a fact.
+"""
+
+# ── Getting started ──────────────────────────────────────────────────────
+
+[[chapter]]
+id = "what-it-does"
+part = "Getting Started"
+file = "chapters/01-what-elicta-does.md"
+title = "What Elicta Does"
+kind = "prose"
+summary = "The problem it solves, and what using it is like."
+watches = ["apps/desktop/src/features/panel"]
+
+[[chapter]]
+id = "setting-up"
+part = "Getting Started"
+file = "chapters/02-setting-it-up.md"
+title = "Setting It Up"
+kind = "prose"
+summary = "Choosing the outside services, and how credentials are handled."
+watches = ["apps/desktop/src/features/settings"]
+
+[[chapter]]
+id = "installing"
+part = "Getting Started"
+file = "chapters/03-installing-it.md"
+title = "Getting It Onto People's Machines"
+kind = "prose"
+summary = "For whoever rolls it out, and the mistake worth avoiding."
+watches = ["packaging"]
+
+# ── Before a meeting ─────────────────────────────────────────────────────
+
+[[chapter]]
+id = "preparing"
+part = "Before a Meeting"
+file = "chapters/10-preparing.md"
+title = "Preparing for an Engagement"
+kind = "prose"
+summary = "Documents, the client's own words, and reviewing the questions."
+watches = ["apps/desktop/src/features/prep"]
+
+[[chapter]]
+id = "starting"
+part = "Before a Meeting"
+file = "chapters/11-starting-a-meeting.md"
+title = "Starting a Meeting"
+kind = "prose"
+summary = "The consent gate, and what happens to the audio."
+watches = ["apps/desktop/src/features/consent"]
+
+# ── During the meeting ───────────────────────────────────────────────────
+
+[[chapter]]
+id = "the-panel"
+part = "During the Meeting"
+file = "chapters/20-the-panel.md"
+title = "The Panel and the Suggestion"
+kind = "prose"
+summary = "What appears, what it means, and the four one-tap responses."
+watches = ["apps/desktop/src/features/panel"]
+
+[[chapter]]
+id = "recording"
+part = "During the Meeting"
+file = "chapters/21-controlling-the-recording.md"
+title = "Controlling the Recording"
+kind = "prose"
+summary = "Pause, knowing which state you are in, and the microphone warning."
+watches = ["apps/desktop/src/features/recording", "apps/desktop/src/features/capture"]
+
+[[chapter]]
+id = "languages"
+part = "During the Meeting"
+file = "chapters/22-two-languages.md"
+title = "Running a Meeting in Two Languages"
+kind = "prose"
+summary = "Both languages at once, and why numbers get special treatment."
+watches = ["core/crates/language"]
+
+[[chapter]]
+id = "degraded"
+part = "During the Meeting"
+file = "chapters/23-when-the-connection-drops.md"
+title = "When the Connection Drops"
+kind = "prose"
+summary = "What keeps working, and being told which mode you are in."
+watches = ["core/crates/slow-lane", "core/shared/health"]
+
+# ── After the meeting ────────────────────────────────────────────────────
+
+[[chapter]]
+id = "recording-check"
+part = "After the Meeting"
+file = "chapters/30-checking-the-recording.md"
+title = "Checking the Recording"
+kind = "prose"
+summary = "Two transcriptions, their disagreements, and destroying the audio."
+watches = ["apps/desktop/src/features/replay", "apps/service/src/app/modules/asr-record"]
+
+[[chapter]]
+id = "write-up"
+part = "After the Meeting"
+file = "chapters/31-the-write-up.md"
+title = "Getting the Write-Up"
+kind = "prose"
+summary = "The documents, said versus worked out, and asking in your own words."
+watches = ["apps/desktop/src/features/debrief", "apps/service/src/app/modules/debrief"]
+
+[[chapter]]
+id = "next-meeting"
+part = "After the Meeting"
+file = "chapters/32-the-next-meeting.md"
+title = "Carrying It Into the Next Meeting"
+kind = "prose"
+summary = "What survives, and the question that keeps coming back."
+watches = ["apps/desktop/src/features/arc"]
+
+# ── Running it well ──────────────────────────────────────────────────────
+
+[[chapter]]
+id = "judging"
+part = "Running It Well"
+file = "chapters/40-judging-the-suggestions.md"
+title = "Judging Whether the Suggestions Are Any Good"
+kind = "prose"
+summary = "Replaying real meetings, two ratings, and the bar that is absolute."
+watches = ["core/crates/ranking", "apps/desktop/src/features/replay"]
+
+[[chapter]]
+id = "limits"
+part = "Running It Well"
+file = "chapters/41-what-it-will-not-do.md"
+title = "What It Will Not Do"
+kind = "prose"
+summary = "The edges of the product, and why each line was drawn."
+watches = ["core/shared/egress"]
+
+# ── Generated ────────────────────────────────────────────────────────────
+
+[[chapter]]
+id = "readiness"
+part = "Running It Well"
+file = "chapters/50-what-works-today.md"
+title = "What Works Today"
+kind = "generated"
+generator = "readiness"
+summary = "Every status note, collected — including the parts that are not finished."

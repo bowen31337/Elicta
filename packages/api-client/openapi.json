@@ -2839,6 +2839,30 @@
             ],
             "title": "Region",
             "description": "Vendor region. Pinned once for residency (NFR-2.2) and for round-trip latency (\u00a714.2) \u2014 the same knob serves both."
+          },
+          "custom_vendor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Vendor Name",
+            "description": "Display name for a custom speech service, shown in logs and the UI."
+          },
+          "custom_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Base Url",
+            "description": "Endpoint for a custom speech service. Required when one is selected."
           }
         },
         "additionalProperties": false,
@@ -3635,10 +3659,51 @@
       },
       "InferenceSettings": {
         "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/LlmProvider",
+            "description": "Which Anthropic Messages API surface to route calls through.",
+            "default": "anthropic"
+          },
           "auth_mode": {
             "$ref": "#/components/schemas/AuthMode",
-            "description": "Whether calls authenticate with an API key or an OAuth token.",
+            "description": "Whether calls authenticate with an API key or an OAuth token. Ignored for providers that use the host's own credential chain.",
             "default": "api_key"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region",
+            "description": "Cloud region. Required for Bedrock and Vertex."
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id",
+            "description": "GCP project. Required for Vertex."
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource",
+            "description": "Foundry resource name. Required for Foundry."
           },
           "model": {
             "type": "string",
@@ -3719,6 +3784,18 @@
         ],
         "title": "LanguagePrecision",
         "description": "M1 for one language: precision@surfaced over its rated suggestions."
+      },
+      "LlmProvider": {
+        "type": "string",
+        "enum": [
+          "anthropic",
+          "bedrock",
+          "vertex",
+          "foundry",
+          "anthropic_compatible"
+        ],
+        "title": "LlmProvider",
+        "description": "Where Claude calls are routed.\n\nEvery option here speaks the **Anthropic Messages API**, and that is a\nhard constraint rather than a current limitation. The service depends on\nsurface that only exists there: schema-enforced structured outputs\n(\u00a714.4), explicit cache-boundary control on a hand-partitioned prefix\n(\u00a714.3), and the request shape `core/crates/slow-lane` builds. An\nOpenAI-shaped endpoint would not fail at configuration time \u2014 it would\nfail per stage, at the point where a debrief was expected \u2014 so the\nprovider list is closed to Messages-API surfaces on purpose.\n\nWithin that, the choice is wide open: Anthropic direct, the three cloud\nresellers, or any self-hosted or third-party gateway that presents a\ncompatible endpoint."
       },
       "MeetingAttendee": {
         "properties": {
@@ -4805,7 +4882,8 @@
         "type": "string",
         "enum": [
           "deepgram",
-          "assemblyai"
+          "assemblyai",
+          "custom"
         ],
         "title": "SpeechVendor",
         "description": "Speech vendors the service can connect to.\n\nBoth are the engines architecture \u00a714.1-14.2 analyses in detail, and they\nare chosen together rather than interchangeably: FR-2.6 runs two batch\nengines over the record path, and T3 warns that the pair is only worth\nrunning if the engines fail *differently* \u2014 two models sharing a training\nlineage agree on the same mistakes and the reconciliation signal is\nworthless. Deepgram and AssemblyAI have independent lineages, which is\nwhat makes them a usable pair."

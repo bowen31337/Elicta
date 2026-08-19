@@ -8,13 +8,17 @@
 //! changing that contract.
 //!
 //! Each weight has its own environment variable and falls back to
-//! [`DEFAULT_WEIGHTS`]'s matching field when unset or unparsable -- an
+//! [`COLD_START_WEIGHTS`](super::cold_start::COLD_START_WEIGHTS)'s matching
+//! field when unset or unparsable. That fallback used to be the all-`1.0`
+//! placeholder, which meant an un-tuned deployment ran on weights nobody had
+//! chosen; the cold-start set is reasoned, and documents its reasoning. An
 //! invalid override degrades to the placeholder default rather than
 //! panicking, the same "malformed input degrades gracefully" contract this
 //! crate's other terms use for degenerate inputs (see `priority.rs`'s
 //! non-positive-priority handling).
 
-use super::candidate_score::{ScoreWeights, DEFAULT_WEIGHTS};
+use super::candidate_score::ScoreWeights;
+use super::cold_start::COLD_START_WEIGHTS as DEFAULT_WEIGHTS;
 
 /// Environment variable read for [`ScoreWeights::trigger_match`].
 pub const TRIGGER_MATCH_WEIGHT_ENV: &str = "RANKING_WEIGHT_TRIGGER_MATCH";

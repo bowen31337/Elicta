@@ -89,8 +89,100 @@ pub fn zh_ambiguity_lexicon() -> Lexicon {
             "适当",     // appropriate / a moderate amount
             "快速",     // quickly / fast
             "重大",     // significant
+            // -- Quantity hedges that read as numbers but are not ------------
+            "不少",     // "quite a few" — sounds quantified, commits to nothing
+            "大概",     // approximately
+            "左右",     // "or so", trailing a number: 三百左右 = "about 300"
+            "上下",     // same shape as 左右, used with counts and money
+            "以内",     // "within", stated without the bound that matters
+            // -- Commitment deferrals -----------------------------------------
+            // The highest-value group and the one with no English counterpart
+            // in the list above. Chinese business speech defers commitment
+            // with verb reduplication, which sounds like agreement and is not:
+            // 研究研究 ("we'll look into it") is a polite no in most rooms.
+            "再说吧",   // "let's talk about it later"
+            "到时候",   // "when the time comes"
+            "研究研究", // "we'll study it" — reduplicated, softened, non-committal
+            "考虑考虑", // "we'll consider it" — same construction
+            "有机会",   // "if there's an opportunity"
+            // -- Qualified agreement ------------------------------------------
+            // These precede a "yes" and withdraw most of it. An operator who
+            // does not hear the qualifier records a decision that was not made.
+            "原则上",   // "in principle" — agreement with the exceptions unstated
+            "基本上",   // "basically" — mostly true, with the remainder unsaid
+            "理论上",   // "in theory"
+            "应该没问题", // "should be fine" — the 应该 is doing the work
+            // -- Unnamed scope --------------------------------------------------
+            "相关的",   // "the relevant ones" — which ones is the requirement
+            "有关方面", // "the parties concerned" — names nobody
+            "各方面",   // "all aspects"
+            "等等",     // "and so on" — ends a list before it is complete
         ],
     )
+}
+
+/// The ambiguity categories this product recognises, and how each language's
+/// curated list covers them.
+///
+/// Journey 4 left an honest open question: an evasive answer Elicta catches in
+/// English may not be catchable in Mandarin at all. Left as prose that stayed
+/// an open question indefinitely, because nothing measured it. This is the
+/// measurement — the categories are enumerated, each language's coverage is
+/// asserted below, and a category one language cannot cover is named here
+/// rather than discovered in a meeting.
+///
+/// The finding, as of `zh-ambiguity-v1`: coverage is not symmetric, and that
+/// is correct rather than a deficiency. English carries vague *quantifiers*
+/// that Chinese expresses with measure words no lexicon can enumerate; Chinese
+/// carries a whole commitment-deferral category (verb reduplication:
+/// 研究研究, 考虑考虑) that English has no lexical equivalent for at all — the
+/// English equivalent is tone, which a term list cannot see. Each list is
+/// stronger than the other somewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmbiguityCategory {
+    /// Amounts stated without a number: "several", 不少.
+    UnquantifiedAmount,
+    /// Adjectives asserting a property without a threshold: "fast", 高效.
+    UnquantifiedProperty,
+    /// Time stated without a date: "soon", 尽快.
+    UnquantifiedTime,
+    /// Agreement withdrawn by a qualifier: 原则上, 基本上.
+    QualifiedAgreement,
+    /// Commitment deferred to an unnamed later: 研究研究, 再说吧.
+    ///
+    /// English has no lexical form of this. It is carried by intonation and
+    /// hedged modals, which a term lexicon cannot detect — so this category is
+    /// deliberately Chinese-only, and the English list does not pretend to it.
+    DeferredCommitment,
+    /// Scope named without members: "the relevant systems", 相关的.
+    UnnamedScope,
+}
+
+/// One example term per category, per language — `None` where the language has
+/// no lexical form of that category at all.
+pub fn category_coverage(language: &str) -> Vec<(AmbiguityCategory, Option<&'static str>)> {
+    match language {
+        "en" => vec![
+            (AmbiguityCategory::UnquantifiedAmount, Some("several")),
+            (AmbiguityCategory::UnquantifiedProperty, Some("fast")),
+            (AmbiguityCategory::UnquantifiedTime, Some("soon")),
+            (AmbiguityCategory::QualifiedAgreement, Some("typically")),
+            // Named as absent rather than filled with an approximation: a
+            // near-miss term here would fire on ordinary speech and cost the
+            // M2 gate, which allows zero embarrassing suggestions.
+            (AmbiguityCategory::DeferredCommitment, None),
+            (AmbiguityCategory::UnnamedScope, Some("as needed")),
+        ],
+        "zh" => vec![
+            (AmbiguityCategory::UnquantifiedAmount, Some("不少")),
+            (AmbiguityCategory::UnquantifiedProperty, Some("高效")),
+            (AmbiguityCategory::UnquantifiedTime, Some("尽快")),
+            (AmbiguityCategory::QualifiedAgreement, Some("原则上")),
+            (AmbiguityCategory::DeferredCommitment, Some("研究研究")),
+            (AmbiguityCategory::UnnamedScope, Some("相关的")),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 /// Every curated lexicon this build ships, one per language, ready to
@@ -147,6 +239,92 @@ mod tests {
         let matches = zh.scan(&positioned("差不多可以了", "zh"));
 
         assert!(matches.iter().any(|m| m.term == "差不多"));
+    }
+
+    #[test]
+    fn the_chinese_list_catches_deferred_commitment_which_english_cannot() {
+        // The highest-value Mandarin category and the clearest asymmetry:
+        // 研究研究 sounds like agreement and is a polite no. An operator who
+        // records it as a decision has recorded the opposite of what happened.
+        let zh = zh_ambiguity_lexicon();
+
+        for deferral in ["研究研究", "考虑考虑", "再说吧", "到时候"] {
+            let matches = zh.scan(&positioned(deferral, "zh"));
+            assert!(
+                matches.iter().any(|m| m.term == deferral),
+                "{deferral} is not caught"
+            );
+        }
+    }
+
+    #[test]
+    fn qualified_agreement_is_caught_before_it_is_recorded_as_a_decision() {
+        let zh = zh_ambiguity_lexicon();
+
+        let matches = zh.scan(&positioned("原则上应该没问题", "zh"));
+
+        assert!(matches.iter().any(|m| m.term == "原则上"));
+        assert!(matches.iter().any(|m| m.term == "应该没问题"));
+    }
+
+    #[test]
+    fn a_number_with_a_trailing_hedge_is_still_ambiguous() {
+        // 三百左右 is "about 300" — it reads as quantified and is not, which
+        // is exactly the failure the whole trigger exists to catch.
+        let zh = zh_ambiguity_lexicon();
+
+        assert!(zh
+            .scan(&positioned("我们每天大概三百左右", "zh"))
+            .iter()
+            .any(|m| m.term == "左右"));
+    }
+
+    #[test]
+    fn every_category_is_answered_for_both_languages() {
+        // The measurement that replaces journey 4's open question: each
+        // category is either covered or explicitly named as uncoverable, and
+        // no category is silently absent from a language's list.
+        for language in ["en", "zh"] {
+            let coverage = category_coverage(language);
+            assert_eq!(coverage.len(), 6, "{language} does not answer every category");
+
+            for (category, example) in coverage {
+                if let Some(term) = example {
+                    let lexicon = if language == "en" {
+                        en_ambiguity_lexicon()
+                    } else {
+                        zh_ambiguity_lexicon()
+                    };
+                    assert!(
+                        lexicon.scan(&positioned(term, language)).iter().any(|m| m.term == term),
+                        "{language} claims {category:?} via {term}, which its lexicon does not contain"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_one_category_english_cannot_cover_is_named_rather_than_faked() {
+        // Filling this with a near-miss term would fire on ordinary English
+        // and cost the M2 gate, which allows zero embarrassing suggestions.
+        let english_gaps: Vec<_> = category_coverage("en")
+            .into_iter()
+            .filter(|(_, example)| example.is_none())
+            .map(|(category, _)| category)
+            .collect();
+
+        assert_eq!(english_gaps, vec![AmbiguityCategory::DeferredCommitment]);
+        // And Chinese covers it, so the asymmetry runs in the direction the
+        // documentation claims.
+        assert!(category_coverage("zh")
+            .into_iter()
+            .all(|(_, example)| example.is_some()));
+    }
+
+    #[test]
+    fn an_unknown_language_claims_no_coverage() {
+        assert!(category_coverage("fr").is_empty());
     }
 
     #[test]

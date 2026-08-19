@@ -8,6 +8,11 @@ use super::normalize::Normalizer;
 /// interface, a loopback tap, a managed per-participant stream, or the
 /// acoustic fallback mic can each hand this pipeline a different rate and
 /// channel count.
+///
+/// `PartialEq` but not `Eq`, because `f32` samples are not totally ordered —
+/// the comparison exists so tests can assert on a frame, not so frames can be
+/// used as map keys.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RawFrame {
     pub format: AudioFormat,
     pub samples: Vec<f32>,

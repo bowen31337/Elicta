@@ -43,6 +43,7 @@ export interface SessionStreamNudge {
  * a service-tier sync channel to the second screen).
  */
 export type SessionStreamEvent =
+  | { readonly type: 'lane'; readonly lane: SessionStreamLane }
   | { readonly type: 'coverage'; readonly coverage: CoverageSummary }
   | { readonly type: 'nudge'; readonly nudge: SessionStreamNudge };
 
@@ -57,4 +58,18 @@ export interface SessionStopResult {
   readonly sessionId: string;
   readonly meetingId: string;
   readonly stoppedAt: string;
+}
+
+/**
+ * Whether the slow lane can currently reach a model (architecture §10).
+ *
+ * Carried on the session stream rather than polled, because the connection
+ * that would tell the panel the answer is the same one that goes quiet when
+ * the answer is "no" — a poll would have to guess at a timeout, and guess
+ * differently from whatever the service already knows.
+ */
+export interface SessionStreamLane {
+  readonly modelReachable: boolean;
+  /** Plain-language cause, shown to the operator when degraded. */
+  readonly reason: string | null;
 }

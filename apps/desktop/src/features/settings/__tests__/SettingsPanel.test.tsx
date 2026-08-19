@@ -6,7 +6,15 @@ import { SettingsPanel } from '../SettingsPanel';
 import type { SecretKey, ServiceSettings, UseSettingsResult } from '../useSettings';
 
 const CONFIGURED: ServiceSettings = {
-  inference: { model: 'claude-opus-5', base_url: null, auth_mode: 'api_key' },
+  inference: {
+    model: 'claude-opus-5',
+    base_url: null,
+    auth_mode: 'api_key',
+    provider: 'anthropic',
+    region: null,
+    project_id: null,
+    resource: null,
+  },
   vendors: { asr_base_url: null, capture_base_url: null },
   connectors: {
     live_vendor: 'assemblyai',
@@ -255,10 +263,90 @@ describe('SettingsPanel', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={controller({ save })} />);
 
-    await userEvent.type(screen.getByLabelText('Region'), 'eu');
+    await userEvent.type(screen.getByLabelText('Speech region'), 'eu');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][0].connectors.region).toBe('eu');
+  });
+
+  it('offers only Anthropic-compatible providers', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    const options = Array.from(
+      (screen.getByLabelText('Route Claude calls through') as HTMLSelectElement).options,
+    ).map((option) => option.value);
+
+    expect(options).toEqual([
+      'anthropic',
+      'bedrock',
+      'vertex',
+      'foundry',
+      'anthropic_compatible',
+    ]);
+    expect(options).not.toContain('openai');
+  });
+
+  it('asks for an endpoint only when a compatible gateway is chosen', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Route Claude calls through'),
+      'anthropic_compatible',
+    );
+
+    expect(screen.getByLabelText('Endpoint')).toBeInTheDocument();
+  });
+
+  it('asks Vertex for a project and a region, and nothing else for it', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Route Claude calls through'),
+      'vertex',
+    );
+
+    expect(screen.getByLabelText('Google Cloud project')).toBeInTheDocument();
+    expect(screen.getByLabelText('AI provider region')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument();
+  });
+
+  it("says plainly when a provider uses the host's own credentials", async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Route Claude calls through'),
+      'bedrock',
+    );
+
+    expect(screen.getByText(/no key needed here/)).toBeInTheDocument();
+  });
+
+  it('saves the chosen provider and its settings together', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Route Claude calls through'),
+      'anthropic_compatible',
+    );
+    await userEvent.type(screen.getByLabelText('Endpoint'), 'https://llm.internal');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].inference.provider).toBe('anthropic_compatible');
+    expect(save.mock.calls[0][0].inference.base_url).toBe('https://llm.internal');
+  });
+
+  it('lets the operator bring a speech service we do not ship support for', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'custom');
+
+    expect(
+      screen.getByLabelText('Custom speech service endpoint'),
+    ).toBeInTheDocument();
   });
 });

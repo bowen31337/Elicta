@@ -1,3 +1,260 @@
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ==========================================================================
+   Elicta surfaces.
+
+   The panel sits over whatever the operator has on screen during a meeting, so
+   it is built as a floating material rather than a page: translucent, lit along
+   its top edge, and casting a soft shadow. Everything else follows Apple's
+   grouped-list idiom, which is what a settings or review screen should feel
+   like on a desktop app.
+   ========================================================================== */
+
+:root { --panel-inset: var(--space-5); }
+
+/* ---- Viewport & touch -------------------------------------------------- */
+
+html {
+  /* Both themes are real, so form controls and scrollbars should follow the
+     token layer rather than defaulting to light. */
+  color-scheme: light dark;
+  /* iOS inflates type on rotation unless told not to. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg-grouped);
+  /* dvh, not vh: on iOS the URL bar changes the viewport height mid-scroll,
+     and 100vh is the *largest* of those states — it overflows by design. */
+  min-height: 100vh;
+  min-height: 100dvh;
+  /* The panel is the whole app; nothing behind it should rubber-band. */
+  overscroll-behavior-y: none;
+}
+
+/* Anything tappable responds on press, without the platform's own effects
+   getting in the way: no 300ms click delay, no grey flash on iOS, no
+   long-press callout menu, no text selection when a tap drifts. */
+:where(button, a, [role="button"], summary, label, .chip) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+:where(button, [role="button"], summary) {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+
+/* A supporting-text ink that actually clears 4.5:1.
+ *
+ * Measured on the light ground: --label-secondary is 3.29:1 and
+ * --label-tertiary 1.71:1, so neither passes for text below 24px. Apple uses
+ * those opacities widely, but they are a hierarchy ladder, not a contrast
+ * guarantee — and the trigger reason is the line an operator reads to judge
+ * whether the system understood the room (FR-5.11), which is exactly the text
+ * that must not be decorative. 0.76 is the first step that clears the bar
+ * (4.96:1 light, 10.07:1 dark).
+ */
+:root { --label-supporting: rgba(60, 60, 67, 0.76); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --label-supporting: rgba(235, 235, 245, 0.76); }
+}
+[data-theme="dark"] { --label-supporting: rgba(235, 235, 245, 0.76); }
+
+
+/* Semantic ink.
+ *
+ * Apple's system colours are designed as *fills* — white text on a solid
+ * green, or a large glyph — not as small text on a pale tint of themselves.
+ * Measured on a white card, `--green` on its own 16% tint is 1.91:1 and
+ * `--orange` 1.85:1; both fail WCAG 1.4.3 badly at 12px.
+ *
+ * These are the darkened (light) and lightened (dark) variants that clear
+ * 4.5:1 against exactly that tint, solved per colour rather than by a single
+ * blanket adjustment — each hue crosses the threshold at a different point.
+ * The vivid originals stay in use for fills and graphics, where they belong.
+ */
+:root {
+  /* Solved against the *hardest* ground each is used on, not the easiest. The
+     first pass solved these over a white card and they measured 4.67:1 — then
+     the same badge on translucent glass dropped to 4.15:1, because the glass
+     composites over the darker grouped background. A colour is only as
+     accessible as its worst ground. */
+  --green-ink:  #1e7334;  /* 5.18:1 on a card, 4.61:1 on glass */
+  --orange-ink: #945600;  /* 4.65:1 */
+  --red-ink:    #9e251e;  /* 5.59:1 */
+  --accent-ink: #004c9e;  /* 6.09:1 */
+  /* Apple's own filled button is white on system blue, which measures 4.02:1
+     light and 3.65:1 dark — under AA for a 15px label. These are the darkest
+     step that still reads as system blue while clearing the bar with white. */
+  --accent-fill: #006ee6;  /* white -> 4.80:1 */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --green-ink:  #30d158;  /* 5.09:1 — the system colour already clears it */
+    --orange-ink: #ff9f0a;  /* 5.00:1 */
+    --red-ink:    #ff867f;  /* 5.01:1 — the only hue needing lightening */
+    --accent-ink: #0dacff;  /* 4.63:1 */
+    --accent-fill: #0870d9; /* white -> 4.85:1 */
+  }
+}
+[data-theme="dark"] {
+  --green-ink: #30d158; --orange-ink: #ff9f0a;
+  --red-ink: #ff867f;   --accent-ink: #0dacff;
+  --accent-fill: #0870d9;
+}
+
+/* ---- Material ---------------------------------------------------------- */
+
+.glass {
+  background: var(--material-regular-tint);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+  backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.18),
+    0 0 0 0.5px rgba(0, 0, 0, 0.06),
+    var(--shadow-glass);
+  border-radius: var(--radius-xl);
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.06),
+      0 0 0 0.5px rgba(0, 0, 0, 0.4),
+      var(--shadow-glass);
+  }
+}
+
+/* A solid fallback when the OS asks for less transparency, and a real border
+   when it asks for more contrast — both are settings people rely on. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass { background: var(--bg-tertiary); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .glass { border: 1px solid var(--separator-opaque); }
+}
+
+/* ---- Type roles -------------------------------------------------------- */
+
+.t-large-title { font-size: var(--text-large-title); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight); line-height: var(--leading-tight); }
+.t-title-1 { font-size: var(--text-title-1); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-snug); line-height: var(--leading-tight); }
+.t-title-2 { font-size: var(--text-title-2); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug); line-height: var(--leading-snug); }
+.t-title-3 { font-size: var(--text-title-3); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug); line-height: var(--leading-snug); }
+.t-headline { font-size: var(--text-headline); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal); line-height: var(--leading-snug); }
+.t-body { font-size: var(--text-body); line-height: var(--leading-normal); }
+.t-subhead { font-size: var(--text-subhead); line-height: var(--leading-normal);
+  color: var(--label-supporting); }
+.t-footnote { font-size: var(--text-footnote); line-height: var(--leading-relaxed);
+  letter-spacing: var(--tracking-wide); color: var(--label-supporting); }
+.t-caption { font-size: var(--text-caption-1); line-height: var(--leading-relaxed);
+  letter-spacing: var(--tracking-wide); color: var(--label-supporting); }
+/* Section headers in grouped lists: small, tracked open, uppercase. */
+.t-section { font-size: var(--text-footnote); font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--label-supporting); }
+
+/* Digits that sit in columns or tick upward must not reflow as they change. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* ---- Grouped list ------------------------------------------------------ */
+
+.group { background: var(--bg-tertiary); border-radius: var(--radius-lg);
+  overflow: hidden; box-shadow: var(--shadow-1); }
+.row { display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-4) var(--space-5); min-height: 44px; }
+.row + .row { box-shadow: inset 0 0.5px 0 var(--separator); }
+.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* ---- Controls ---------------------------------------------------------- */
+
+.btn {
+  font: inherit; font-weight: var(--weight-semibold); font-size: var(--text-subhead);
+  color: var(--accent-ink); background: var(--fill-4); border: 0;
+  border-radius: var(--radius-capsule); padding: var(--space-3) var(--space-5);
+  min-height: 44px; cursor: pointer;
+  /* Feedback lands on pointer-down, and the spring is what makes a tap feel
+     like pressing an object rather than triggering a timer. */
+  transition: transform var(--duration-instant) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+.btn:active { transform: scale(0.96); background: var(--fill-2); }
+.btn:disabled { color: var(--label-tertiary); cursor: default; }
+.btn:disabled:active { transform: none; }
+.btn--filled { background: var(--accent-fill); color: #fff; }
+.btn--filled:active { background: color-mix(in srgb, var(--accent-fill) 86%, black); }
+.btn--danger { color: var(--red-ink); }
+.btn--on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs);
+}
+
+.field { width: 100%; font: inherit; font-size: var(--text-subhead);
+  color: var(--label); background: var(--fill-4); border: 0;
+  border-radius: var(--radius-sm); padding: var(--space-3) var(--space-4); min-height: 34px; }
+.field::placeholder { color: var(--label-tertiary); }
+
+/* ---- Coarse pointers --------------------------------------------------- */
+
+/* A cursor is a pixel; a fingertip is about 10mm. Apple's 44pt is the floor
+   below which taps start missing, so controls grow on touch devices — and
+   only there, so the desktop panel stays compact. */
+@media (pointer: coarse) {
+  .btn, .field { min-height: 44px; }
+  .row { min-height: 48px; }
+  /* Safari zooms the page when a focused input is under 16px. Bumping the
+     field to callout size is the fix; the alternative — disabling zoom — is
+     an accessibility regression. */
+  .field { font-size: var(--text-callout); }
+  /* Segment targets in the coverage meter are decorative but sit next to
+     tappable chrome; widen the row so a thumb does not land between them. */
+  .meter-track { gap: 4px; }
+}
+
+/* ---- Status ------------------------------------------------------------ */
+
+.pill { display: inline-flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-caption-1); font-weight: var(--weight-semibold);
+  padding: 2px var(--space-3); border-radius: var(--radius-capsule);
+  background: var(--fill-3); color: var(--label-supporting); }
+.pill--ok { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green-ink); }
+.pill--warn { background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange-ink); }
+.pill--alert { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red-ink); }
+
+/* For sticky chrome over scrolling content only: the chrome fades content out
+   beneath it rather than drawing a divider. On a surface that does not scroll
+   this renders as a visible band — i.e. as exactly the hard edge it exists to
+   avoid — so do not add it decoratively. */
+.scroll-edge {
+  height: 12px; margin-top: calc(var(--space-3) * -1);
+  background: linear-gradient(var(--bg-grouped), transparent);
+  -webkit-mask-image: linear-gradient(black, transparent);
+  mask-image: linear-gradient(black, transparent);
+  pointer-events: none;
+}
+
+/* ---- Motion ------------------------------------------------------------ */
+
+/* "Materialize, don't fade": a surface arrives by gaining substance, which is
+   how a real material behaves under light. */
+@keyframes materialize {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.materialize { animation: materialize var(--duration-base) var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .materialize { animation: none; }
+}

@@ -17,11 +17,22 @@ export interface NudgeStackProps {
   operatorLanguage?: string;
 }
 
-const MIN_HISTORY_OPACITY = 0.25;
-const HISTORY_OPACITY_STEP = 0.12;
-const MAX_HISTORY_OPACITY = 0.6;
+/* The floor is a contrast constraint, not a taste one.
+ *
+ * Element opacity multiplies whatever ink the text already has, so a dimmed
+ * history entry composites toward the background twice over. Measured on this
+ * product's grounds, the text stops clearing WCAG 1.4.3 below ~0.76 — the
+ * earlier 0.25 floor rendered at 2.35:1, less than half the required ratio.
+ *
+ * The recession FR-6.3 asks for is still there: history entries step down in
+ * opacity, and they are already a size below the active nudge, which is where
+ * most of the visual hierarchy comes from anyway.
+ */
+const MIN_HISTORY_OPACITY = 0.78;
+const HISTORY_OPACITY_STEP = 0.06;
+const MAX_HISTORY_OPACITY = 0.95;
 
-/** Older entries dim further, floored so nothing disappears entirely. */
+/** Older entries dim further, floored so every entry stays legible. */
 export function historyOpacity(index: number): number {
   return Math.max(MIN_HISTORY_OPACITY, MAX_HISTORY_OPACITY - index * HISTORY_OPACITY_STEP);
 }

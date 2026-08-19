@@ -1,35 +1,49 @@
+/* Shared control treatment lives in chips.tokens.css and styles.css. */
+
 .escape-hatch {
   display: flex;
-  margin-top: 0.5rem;
+  margin-top: var(--space-3);
 }
 
 /*
  * De-emphasised on purpose (PRD FR-6.9): smaller than chip/body text, muted
  * until focused, and bordered only by a faint underline rather than a full
  * box, so it reads as a fallback rather than competing with the chips above
- * it. Focus brings it to full opacity and a visible bottom border so it's
- * still usable once the operator actually reaches for it.
+ * it. Focus brings it to full label colour and a visible bottom border so
+ * it's still usable once the operator actually reaches for it.
+ *
+ * The focus ring is deliberately not suppressed here — the token layer's
+ * :focus-visible outline is the only way a keyboard user finds this field.
  */
 .escape-hatch__input {
   width: 100%;
-  padding: 0.25rem 0;
-  font-size: 0.75rem;
-  color: inherit;
-  opacity: 0.45;
+  font: inherit;
+  font-size: var(--text-caption-1);
+  padding: var(--space-2) 0;
+  color: var(--label-supporting);
   background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  outline: none;
-  transition: opacity 120ms ease, border-color 120ms ease;
+  border: 0;
+  border-bottom: 1px solid var(--separator);
+  transition: color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
 }
 
 .escape-hatch__input::placeholder {
-  color: inherit;
-  opacity: 0.8;
+  color: var(--label-supporting);
 }
 
 .escape-hatch__input:focus,
 .escape-hatch__input:not(:placeholder-shown) {
-  opacity: 0.85;
-  border-bottom-color: rgba(255, 255, 255, 0.4);
+  color: var(--label);
+  border-bottom-color: var(--label-supporting);
+}
+
+/* Safari zooms the page whenever a focused field is under 16px, which on a
+   panel this narrow throws the layout half off screen. On touch the escape
+   hatch stays de-emphasised by colour and placement instead of by size. */
+@media (pointer: coarse) {
+  .escape-hatch__input {
+    font-size: var(--text-callout);
+    padding-block: var(--space-3);
+  }
 }

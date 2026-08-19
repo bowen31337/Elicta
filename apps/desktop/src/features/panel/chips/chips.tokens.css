@@ -1,0 +1,88 @@
+/* Chips share one treatment, expressed once against the token layer.
+ *
+ * A chip is the operator's only input during a meeting, so it is sized for a
+ * thumb (44px target), gives feedback on press rather than release, and springs
+ * back rather than fading — the difference between pressing an object and
+ * triggering a timer.
+ */
+.asked-it-chip,
+.park-it-chip__button,
+.go-deeper-chip__button,
+.what-am-i-missing-chip__button,
+.escape-hatch__submit {
+  font: inherit;
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
+  color: var(--label);
+  background: var(--fill-3);
+  border: 0;
+  border-radius: var(--radius-capsule);
+  padding: var(--space-3) var(--space-5);
+  min-height: 44px;
+  cursor: pointer;
+  transition: transform var(--duration-instant) var(--ease-out),
+              background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+/* Guarded on a real hover device. A touch screen reports :hover after a tap
+   and holds it until the next one, so an unguarded hover style leaves the
+   last chip the operator pressed looking permanently armed. */
+@media (hover: hover) {
+  .asked-it-chip:hover:not(:disabled),
+  .park-it-chip__button:hover:not(:disabled),
+  .go-deeper-chip__button:hover:not(:disabled),
+  .what-am-i-missing-chip__button:hover:not(:disabled) {
+    background: var(--fill-2);
+  }
+}
+
+/* The base height above is already Apple's 44px floor, so a coarse pointer
+   only needs more room either side of the label — a thumb lands wide, not
+   tall, and these chips are the operator's only input during a meeting. */
+@media (pointer: coarse) {
+  .asked-it-chip,
+  .park-it-chip__button,
+  .go-deeper-chip__button,
+  .what-am-i-missing-chip__button,
+  .escape-hatch__submit {
+    padding-inline: var(--space-6);
+  }
+}
+
+.asked-it-chip:active:not(:disabled),
+.park-it-chip__button:active:not(:disabled),
+.go-deeper-chip__button:active:not(:disabled),
+.what-am-i-missing-chip__button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Confirmed reads as done, not as disabled-and-greyed: the operator needs to
+   see that their tap landed, which is the whole point of the local mutation.
+   Only `Asked it` qualifies — it disables on a local mutation that has already
+   happened (`disabled={asked}`). `Park it` and `Go deeper` disable while a
+   request is in flight, so they must not borrow this treatment: green there
+   would report success the server has not yet agreed to. */
+.asked-it-chip:disabled {
+  color: var(--green-ink);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  cursor: default;
+  transform: none;
+}
+
+/* In-flight: quieter, not finished. */
+.park-it-chip__button:disabled,
+.go-deeper-chip__button:disabled {
+  color: var(--label-supporting);
+  background: var(--fill-4);
+  cursor: default;
+  transform: none;
+}
+
+.park-it-chip__result,
+.go-deeper-chip__result,
+.what-am-i-missing-chip__result {
+  font-size: var(--text-caption-1);
+  color: var(--label-supporting);
+}

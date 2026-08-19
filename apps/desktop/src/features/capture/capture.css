@@ -1,0 +1,23 @@
+/* The state banner is the one element on this screen that must be readable
+   from across a desk, so it gets size, a tinted ground and a live region —
+   and never relies on colour alone to say which state it is. */
+.capture-state {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--fill-4);
+}
+.capture-state--capturing { background: color-mix(in srgb, var(--red) 12%, transparent); }
+.capture-state--paused { background: color-mix(in srgb, var(--orange) 12%, transparent); }
+.capture-elapsed { font-variant-numeric: tabular-nums; color: var(--label-supporting); }
+
+/* Pause is reached for under pressure: full width, no hunting. */
+.capture-toggle { width: 100%; margin-top: var(--space-3); }
+
+.capture-warning {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  color: var(--label);
+}

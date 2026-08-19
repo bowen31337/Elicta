@@ -1150,6 +1150,16 @@ export interface components {
              * @description Vendor region. Pinned once for residency (NFR-2.2) and for round-trip latency (§14.2) — the same knob serves both.
              */
             region?: string | null;
+            /**
+             * Custom Vendor Name
+             * @description Display name for a custom speech service, shown in logs and the UI.
+             */
+            custom_vendor_name?: string | null;
+            /**
+             * Custom Base Url
+             * @description Endpoint for a custom speech service. Required when one is selected.
+             */
+            custom_base_url?: string | null;
         };
         /**
          * ConsentConfirmationRequest
@@ -1579,10 +1589,30 @@ export interface components {
          */
         InferenceSettings: {
             /**
-             * @description Whether calls authenticate with an API key or an OAuth token.
+             * @description Which Anthropic Messages API surface to route calls through.
+             * @default anthropic
+             */
+            provider: components["schemas"]["LlmProvider"];
+            /**
+             * @description Whether calls authenticate with an API key or an OAuth token. Ignored for providers that use the host's own credential chain.
              * @default api_key
              */
             auth_mode: components["schemas"]["AuthMode"];
+            /**
+             * Region
+             * @description Cloud region. Required for Bedrock and Vertex.
+             */
+            region?: string | null;
+            /**
+             * Project Id
+             * @description GCP project. Required for Vertex.
+             */
+            project_id?: string | null;
+            /**
+             * Resource
+             * @description Foundry resource name. Required for Foundry.
+             */
+            resource?: string | null;
             /**
              * Model
              * @description Model used for the context compiler and debrief pipeline.
@@ -1624,6 +1654,25 @@ export interface components {
             /** Precision At Surfaced */
             precision_at_surfaced: number;
         };
+        /**
+         * LlmProvider
+         * @description Where Claude calls are routed.
+         *
+         *     Every option here speaks the **Anthropic Messages API**, and that is a
+         *     hard constraint rather than a current limitation. The service depends on
+         *     surface that only exists there: schema-enforced structured outputs
+         *     (§14.4), explicit cache-boundary control on a hand-partitioned prefix
+         *     (§14.3), and the request shape `core/crates/slow-lane` builds. An
+         *     OpenAI-shaped endpoint would not fail at configuration time — it would
+         *     fail per stage, at the point where a debrief was expected — so the
+         *     provider list is closed to Messages-API surfaces on purpose.
+         *
+         *     Within that, the choice is wide open: Anthropic direct, the three cloud
+         *     resellers, or any self-hosted or third-party gateway that presents a
+         *     compatible endpoint.
+         * @enum {string}
+         */
+        LlmProvider: "anthropic" | "bedrock" | "vertex" | "foundry" | "anthropic_compatible";
         /**
          * MeetingAttendee
          * @description One attendee on the meeting being read back (PRD FR-3.9, FR-3.10).
@@ -2212,7 +2261,7 @@ export interface components {
          *     what makes them a usable pair.
          * @enum {string}
          */
-        SpeechVendor: "deepgram" | "assemblyai";
+        SpeechVendor: "deepgram" | "assemblyai" | "custom";
         /**
          * StartReplayRunRequest
          * @description A request to start a replay run against an already-uploaded recording.

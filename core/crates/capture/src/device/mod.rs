@@ -34,6 +34,8 @@
 //! `AudioBufferList` byte-decoding step here for a `_format` module to hold.
 
 mod kind;
+mod managed;
+mod platform;
 mod profile;
 mod registry;
 mod source;
@@ -57,6 +59,10 @@ mod wasapi;
 mod wasapi_line_in;
 
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
+pub use managed::{
+    ManagedParticipantSource, MeetingSession, Participant, ParticipantFrame, RecordedMeeting,
+};
+pub use platform::{available_kinds, open, open_registry};
 #[cfg(target_os = "macos")]
 pub use macos::ScreenCaptureLoopbackSource;
 #[cfg(target_os = "macos")]

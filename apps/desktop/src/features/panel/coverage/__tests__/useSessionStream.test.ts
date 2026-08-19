@@ -130,3 +130,15 @@ describe('useSessionStream', () => {
     ]);
   });
 });
+
+describe('before a meeting starts', () => {
+  it('opens no connection when there is no meeting to follow', () => {
+    const createSource = vi.fn();
+
+    renderHook(() => useSessionStream(null, { createSource }));
+
+    // A stream to nothing would reconnect in a loop against a 404, which is
+    // exactly the state the panel sits in before capture begins.
+    expect(createSource).not.toHaveBeenCalled();
+  });
+});

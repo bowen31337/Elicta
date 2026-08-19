@@ -1,0 +1,67 @@
+/* The panel floats over the operator's screen, so it is padded like a card
+   rather than a page and never fills the window edge to edge. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* The panel paints edge to edge under the notch and the home indicator
+     (viewport-fit=cover in index.html), so its padding has to be the larger
+     of the card inset and the device's own inset. On a desktop window every
+     env() is 0 and this collapses back to a plain inset. */
+  padding:
+    max(var(--panel-inset), env(safe-area-inset-top))
+    max(var(--panel-inset), env(safe-area-inset-right))
+    max(var(--panel-inset), env(safe-area-inset-bottom))
+    max(var(--panel-inset), env(safe-area-inset-left));
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+}
+
+.panel-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+}
+.chrome-right { display: flex; align-items: center; gap: var(--space-3); }
+
+/* Coverage reads as segments rather than a percentage: an operator needs to
+   know how many sections are left, not a number that requires arithmetic. */
+.meter { display: flex; align-items: center; gap: var(--space-3); }
+.meter-track { display: flex; gap: 3px; }
+.meter-seg {
+  width: 16px; height: 4px; border-radius: var(--radius-capsule);
+  background: var(--fill-1);
+  transition: background var(--duration-base) var(--ease-out);
+}
+.meter-seg.is-filled { background: var(--green); }
+
+.degraded-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  color: var(--label);
+}
+
+/* The nudge is the only thing on this screen set at reading size. */
+.nudge { display: flex; flex-direction: column; gap: var(--space-3); }
+.nudge-stub { margin: 0; color: var(--label); text-wrap: balance; }
+.nudge-question { margin: 0; color: var(--label); text-wrap: pretty; }
+.nudge-reason { margin: 0; color: var(--label-supporting); }
+.nudge--idle { padding: var(--space-6) 0; }
+.nudge--idle p { margin: 0; color: var(--label-supporting); }
+
+.panel-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+/* Thumb-sized targets need thumb-sized gaps between them, or the miss lands
+   on the neighbouring chip rather than on nothing. */
+@media (pointer: coarse) {
+  .panel-chips { gap: var(--space-4); }
+}
+
+.history { display: flex; flex-direction: column; gap: var(--space-2); }
+.history-item { margin: 0; color: var(--label-supporting); }

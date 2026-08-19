@@ -1,18 +1,5 @@
-.asked-it-chip {
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: inherit;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background-color 120ms ease, opacity 120ms ease;
-}
-
-.asked-it-chip:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
-}
+/* The shared chip treatment — size, material, radius, press feedback — lives
+   in chips.tokens.css. This file carries only what is specific to `Asked it`. */
 
 /*
  * Confirmed state renders instantly on tap (PRD FR-6.6): no fade-in, no
@@ -20,8 +7,11 @@
  * is already local and complete by the time this class applies.
  */
 .asked-it-chip--confirmed {
-  background: rgba(80, 200, 120, 0.2);
-  border-color: rgba(80, 200, 120, 0.4);
-  opacity: 0.8;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
   cursor: default;
+}
+
+.asked-it-chip--confirmed:active {
+  transform: none;
 }

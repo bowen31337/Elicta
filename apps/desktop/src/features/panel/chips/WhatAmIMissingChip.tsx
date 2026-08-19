@@ -1,5 +1,6 @@
 import { useWhatAmIMissingChip } from './useWhatAmIMissingChip';
 import type { CoverageSlot, CoverageSummary } from '../coverage/types';
+import './chips.tokens.css';
 import './WhatAmIMissingChip.css';
 
 export interface WhatAmIMissingChipProps {

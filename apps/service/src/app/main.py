@@ -24,11 +24,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from app.composition import Backend, build_app
+from app.composition import Backend, attach_state_store, build_app
 from app.module_loader import MountedRouter, load_modules
 from app.modules.settings.sqlite_store import SqliteSettingsStore
 from app.modules.settings.store import SettingsStore
 from app.orchestration.anthropic_engines import engines_from_settings
+from app.persistence import open_state_store
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,8 +73,19 @@ def create_app(
     # still starts and serves its full API.
     store = settings_store or SqliteSettingsStore(default_settings_database())
     debrief_engines, compiler_engines = engines_from_settings(store)
+
+    # G4: an engagement's memory has to outlive the process, so the backend
+    # this function builds for itself is bound to the state database. A
+    # caller that supplied its own `backend` is not second-guessed — that is
+    # how the test suites inject a clean in-memory surface per test, and
+    # attaching storage underneath them would silently share state between
+    # tests that each expect to start empty.
+    if backend is None:
+        backend = attach_state_store(Backend(), open_state_store())
+        logger.info("startup: engagement state is durable")
+
     app = build_app(
-        backend if backend is not None else Backend(),
+        backend,
         debrief_engines=debrief_engines,
         compiler_engines=compiler_engines,
         settings_store=store,

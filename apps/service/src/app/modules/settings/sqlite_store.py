@@ -9,7 +9,9 @@ in-memory store rather than an improvement on it (NFR-2.5).
 
 **How the key is handled.** Values are encrypted with Fernet (AES-128-CBC plus
 an HMAC, so a tampered ciphertext fails loudly rather than decrypting to
-garbage). The key comes from `ELICTA_SETTINGS_KEY` if set; otherwise it is
+garbage). The key comes from a managed secret store when
+`ELICTA_SETTINGS_KEY_COMMAND` is set, from `ELICTA_SETTINGS_KEY` if that is
+set instead; otherwise it is
 generated once into a `0600` key file beside the database. That file is the
 thing to protect — it is deliberately *not* stored in the database, because a
 key sitting next to the ciphertext it protects is not a key.
@@ -63,10 +65,84 @@ CREATE TABLE IF NOT EXISTS secrets (
 """
 
 KEY_ENV_VAR = "ELICTA_SETTINGS_KEY"
+KEY_COMMAND_ENV_VAR = "ELICTA_SETTINGS_KEY_COMMAND"
+
+
+class SettingsKeyUnavailableError(RuntimeError):
+    """The configured managed secret store could not be reached.
+
+    Raised rather than falling back to a generated local key. A fallback would
+    quietly re-encrypt every secret under a key the secret store does not
+    know — so the settings would appear to work, and would be unreadable by
+    every other node in the deployment, which is a far worse outcome than a
+    service that refuses to start and says why.
+    """
+
+
+def _key_from_command(command: str) -> bytes:
+    """Runs the operator's secret-store command and takes its output as the key.
+
+    A command rather than an integration with any particular vendor. Every
+    secret manager worth using already ships a CLI that prints a secret to
+    stdout — `op read`, `vault kv get -field`, `aws secretsmanager
+    get-secret-value --query SecretString`, `gcloud secrets versions access` —
+    so one seam covers all of them, and covers the next one too. Building
+    against a specific vendor's SDK would have meant choosing which customers
+    get supported.
+
+    Run through the shell so that pipes and flags work as the operator wrote
+    them. That is a deliberate trade: this value comes from the deployment's
+    own configuration, exactly like the command line that started the service,
+    and is not reachable by any request.
+    """
+
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise SettingsKeyUnavailableError(
+            f"{KEY_COMMAND_ENV_VAR} timed out after 30s"
+        ) from error
+    except subprocess.CalledProcessError as error:
+        # stderr, not stdout: whatever the command printed on the way to
+        # failing is the diagnosis, and stdout may contain key material.
+        detail = error.stderr.decode(errors="replace").strip()
+        raise SettingsKeyUnavailableError(
+            f"{KEY_COMMAND_ENV_VAR} exited {error.returncode}: {detail}"
+        ) from error
+
+    key = completed.stdout.strip()
+    if not key:
+        raise SettingsKeyUnavailableError(f"{KEY_COMMAND_ENV_VAR} produced no output")
+    return key
 
 
 def _load_or_create_key(database_path: Path) -> bytes:
-    """The encryption key, from the environment or a 0600 file beside the DB."""
+    """The encryption key.
+
+    Three sources, in the order a deployment should prefer them:
+
+    1. `ELICTA_SETTINGS_KEY_COMMAND` — a command that fetches the key from a
+       managed secret store. This is the shared-deployment answer: the key
+       never lands on any node's disk, and rotating it is a secret-store
+       operation rather than a fleet-wide file edit.
+    2. `ELICTA_SETTINGS_KEY` — the key itself. Fine for a container whose
+       environment is already injected from a secret store.
+    3. A 0600 file beside the database, generated on first run. This is the
+       single-user desktop case, where there is no secret store and the
+       threat model is another user on the same machine.
+    """
+
+    command = os.environ.get(KEY_COMMAND_ENV_VAR)
+    if command:
+        return _key_from_command(command)
 
     configured = os.environ.get(KEY_ENV_VAR)
     if configured:

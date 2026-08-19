@@ -1,4 +1,10 @@
-import type { CoverageSlot, CoverageSummary, SessionStreamEvent, SessionStreamNudge } from './types';
+import type {
+  CoverageSlot,
+  CoverageSummary,
+  SessionStreamEvent,
+  SessionStreamLane,
+  SessionStreamNudge,
+} from './types';
 
 interface WireCoverageSlot {
   id: string;
@@ -31,6 +37,8 @@ export function parseSessionStreamEvent(eventName: string, rawData: string): Ses
       return { type: 'coverage', coverage: parseCoverageSummary(rawData) };
     case 'nudge':
       return { type: 'nudge', nudge: parseSessionStreamNudge(rawData) };
+    case 'lane':
+      return { type: 'lane', lane: parseSessionStreamLane(rawData) };
     default:
       return null;
   }
@@ -55,4 +63,14 @@ function parseSessionStreamNudge(rawData: string): SessionStreamNudge {
     triggerReason: payload.trigger_reason,
     createdAt: payload.created_at,
   };
+}
+
+interface WireSessionStreamLane {
+  model_reachable: boolean;
+  reason: string | null;
+}
+
+function parseSessionStreamLane(rawData: string): SessionStreamLane {
+  const payload = JSON.parse(rawData) as WireSessionStreamLane;
+  return { modelReachable: payload.model_reachable, reason: payload.reason ?? null };
 }

@@ -7,6 +7,8 @@ tests exist purely to make that leak impossible to reintroduce quietly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -267,3 +269,224 @@ def test_the_response_tells_the_operator_the_new_state() -> None:
     assert body["inference"]["model"] == "claude-opus-5"
     hints = {s["key"]: s["hint"] for s in body["secrets"]}
     assert hints["anthropic_api_key"] == "abcd"
+
+
+# --------------------------------------------------------------------------
+# Provider choice. Every option is an Anthropic Messages API surface — that
+# is a constraint, not a gap: the service depends on structured outputs and
+# cache-boundary control that only exist there.
+# --------------------------------------------------------------------------
+
+
+def test_every_offered_provider_is_an_anthropic_messages_api_surface() -> None:
+    """An OpenAI-shaped endpoint would fail per stage, not at configuration.
+
+    Keeping the list closed is what turns that into an impossible choice
+    rather than a debrief that fails hours later.
+    """
+
+    from .models import LlmProvider
+
+    assert {p.value for p in LlmProvider} == {
+        "anthropic",
+        "bedrock",
+        "vertex",
+        "foundry",
+        "anthropic_compatible",
+    }
+
+
+def test_a_compatible_gateway_needs_an_endpoint() -> None:
+    from .models import InferenceSettings, LlmProvider
+
+    with pytest.raises(ValueError, match="base_url"):
+        InferenceSettings(provider=LlmProvider.COMPATIBLE)
+
+
+def test_a_compatible_gateway_is_accepted_with_one() -> None:
+    """Any self-hosted or third-party Messages-API endpoint is a valid choice."""
+
+    from .models import InferenceSettings, LlmProvider
+
+    settings = InferenceSettings(
+        provider=LlmProvider.COMPATIBLE, base_url="https://llm.internal/v1"
+    )
+
+    assert settings.base_url == "https://llm.internal/v1"
+
+
+@pytest.mark.parametrize(
+    ("provider", "kwargs", "missing"),
+    [
+        ("bedrock", {}, "region"),
+        ("vertex", {"region": "us"}, "project_id"),
+        ("vertex", {"project_id": "p"}, "region"),
+        ("foundry", {}, "resource"),
+    ],
+)
+def test_a_provider_missing_what_it_needs_is_rejected_at_save_time(
+    provider: str, kwargs: dict, missing: str
+) -> None:
+    from .models import InferenceSettings
+
+    with pytest.raises(ValueError, match=missing):
+        InferenceSettings(provider=provider, **kwargs)
+
+
+def test_cloud_providers_use_the_hosts_own_credentials() -> None:
+    """Asking for a pasted key where IAM or ADC exists invites a worse one."""
+
+    from .models import LlmProvider
+
+    assert LlmProvider.BEDROCK.uses_stored_credential is False
+    assert LlmProvider.VERTEX.uses_stored_credential is False
+    assert LlmProvider.ANTHROPIC.uses_stored_credential is True
+    assert LlmProvider.COMPATIBLE.uses_stored_credential is True
+
+
+def test_a_custom_speech_service_can_be_configured() -> None:
+    """An engagement may mandate a processor we have never heard of."""
+
+    from .models import ConnectorSettings, SpeechVendor
+
+    connectors = ConnectorSettings(
+        live_vendor=SpeechVendor.CUSTOM,
+        custom_vendor_name="In-house STT",
+        custom_base_url="https://stt.internal",
+    )
+
+    assert connectors.live_vendor is SpeechVendor.CUSTOM
+
+
+def test_a_custom_speech_service_without_an_endpoint_is_rejected() -> None:
+    from .models import ConnectorSettings, SpeechVendor
+
+    with pytest.raises(ValueError, match="custom_base_url"):
+        ConnectorSettings(live_vendor=SpeechVendor.CUSTOM)
+
+
+def test_the_record_pair_must_still_differ_even_when_custom() -> None:
+    """T3 holds regardless of vendor: identical engines agree by construction."""
+
+    from .models import ConnectorSettings, SpeechVendor
+
+    with pytest.raises(ValueError, match="different vendors"):
+        ConnectorSettings(
+            record_vendors=[SpeechVendor.CUSTOM, SpeechVendor.CUSTOM],
+            custom_base_url="https://stt.internal",
+        )
+
+
+class TestManagedSecretStore:
+    """The key comes from wherever a shared deployment keeps its secrets.
+
+    The point of this seam is that it never falls back. A store that could not
+    be reached and quietly generated a local key instead would look like it
+    worked, and would produce a node whose settings no other node can read.
+    """
+
+    def test_the_key_is_read_from_the_operators_secret_store_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cryptography.fernet import Fernet
+
+        from app.modules.settings.sqlite_store import (
+            KEY_COMMAND_ENV_VAR,
+            SqliteSettingsStore,
+        )
+
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv(KEY_COMMAND_ENV_VAR, f"printf %s {key}")
+
+        store = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
+        store.set_secret(SecretKey.ANTHROPIC_API_KEY, "sk-ant-secret")
+
+        # No key file was written: the whole point is that it stays in the
+        # store, so a compromised host yields nothing.
+        assert not (tmp_path / "settings.key").exists()
+        assert store.get_secret(SecretKey.ANTHROPIC_API_KEY) is not None
+
+    def test_a_second_process_with_the_same_command_reads_the_same_secrets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cryptography.fernet import Fernet
+
+        from app.modules.settings.sqlite_store import (
+            KEY_COMMAND_ENV_VAR,
+            SqliteSettingsStore,
+        )
+
+        key = Fernet.generate_key().decode()
+        monkeypatch.setenv(KEY_COMMAND_ENV_VAR, f"printf %s {key}")
+        database = tmp_path / "settings.db"
+
+        SqliteSettingsStore(database, read_environment=False).set_secret(
+            SecretKey.ANTHROPIC_API_KEY, "sk-ant-secret"
+        )
+        # A different node in the same deployment, sharing only the store.
+        second = SqliteSettingsStore(database, read_environment=False)
+
+        secret = second.get_secret(SecretKey.ANTHROPIC_API_KEY)
+        assert secret is not None and secret.reveal() == "sk-ant-secret"
+
+    def test_an_unreachable_store_fails_loudly_rather_than_inventing_a_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.modules.settings.sqlite_store import (
+            KEY_COMMAND_ENV_VAR,
+            SettingsKeyUnavailableError,
+            SqliteSettingsStore,
+        )
+
+        monkeypatch.setenv(KEY_COMMAND_ENV_VAR, "printf 'vault sealed' >&2; exit 1")
+
+        with pytest.raises(SettingsKeyUnavailableError) as raised:
+            SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
+
+        # The command's own diagnosis reaches the operator, who is the only
+        # one who can fix a sealed vault.
+        assert "vault sealed" in str(raised.value)
+        assert not (tmp_path / "settings.key").exists()
+
+    def test_an_empty_answer_is_treated_as_a_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A command that succeeds but prints nothing is the shape a typo in a
+        # secret's name takes. Accepting it would encrypt everything under an
+        # empty key.
+        from app.modules.settings.sqlite_store import (
+            KEY_COMMAND_ENV_VAR,
+            SettingsKeyUnavailableError,
+            SqliteSettingsStore,
+        )
+
+        monkeypatch.setenv(KEY_COMMAND_ENV_VAR, "true")
+
+        with pytest.raises(SettingsKeyUnavailableError):
+            SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
+
+    def test_the_command_wins_over_a_key_in_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cryptography.fernet import Fernet
+
+        from app.modules.settings.sqlite_store import (
+            KEY_COMMAND_ENV_VAR,
+            KEY_ENV_VAR,
+            SqliteSettingsStore,
+        )
+
+        managed = Fernet.generate_key().decode()
+        monkeypatch.setenv(KEY_ENV_VAR, Fernet.generate_key().decode())
+        monkeypatch.setenv(KEY_COMMAND_ENV_VAR, f"printf %s {managed}")
+
+        SqliteSettingsStore(tmp_path / "settings.db", read_environment=False).set_secret(
+            SecretKey.ANTHROPIC_API_KEY, "sk-ant-secret"
+        )
+
+        # Readable with the managed key, proving that is the one in use.
+        monkeypatch.delenv(KEY_COMMAND_ENV_VAR)
+        monkeypatch.setenv(KEY_ENV_VAR, managed)
+        reopened = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
+        secret = reopened.get_secret(SecretKey.ANTHROPIC_API_KEY)
+        assert secret is not None and secret.reveal() == "sk-ant-secret"

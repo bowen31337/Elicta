@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import { useEscapeHatchInput } from './useEscapeHatchInput';
 import type { EscapeHatchQuery } from './types';
+import './chips.tokens.css';
 import './EscapeHatchInput.css';
 
 export interface EscapeHatchInputProps {

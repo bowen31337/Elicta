@@ -152,6 +152,7 @@ from app.modules.settings.models import (
     ServiceSettings,
     SettingsUpdateRequest,
 )
+from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
@@ -163,6 +164,7 @@ from app.orchestration.compiler import (
 )
 from app.orchestration.debrief import DebriefSinks, run_debrief_pipeline
 from app.orchestration.engines import CompilerEngines, DebriefEngines
+from app.persistence import StateStore
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
 _artifacts_models = importlib.import_module("app.modules.debrief.artifacts.models")
@@ -298,6 +300,8 @@ class Backend:
     record_path_engine_count: int = 2
 
     known_meetings: set[str] = field(default_factory=set)
+    # (event name, payload) pairs the session stream replays to the panel.
+    session_stream_events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
 
     nudge_dispositions: list[NudgeDispositionResponse] = field(default_factory=list)
 
@@ -329,6 +333,39 @@ class Backend:
 
     replay_ratings: list[tuple[str, SuggestionRatingRequest]] = field(default_factory=list)
     replay_statuses: dict[str, ReplayRunStatusResponse] = field(default_factory=dict)
+
+
+def attach_state_store(backend: Backend, store: StateStore) -> Backend:
+    """Swap `backend`'s engagement-continuity fields for durable ones.
+
+    The five collections replaced here are what an engagement *remembers*:
+    who the client is, its meetings, the questions a meeting left open, the
+    standing requirements state, and the compiled candidate bank. Everything
+    else on `Backend` is per-run pipeline output that is rebuilt from the
+    transcript, and deliberately stays in memory.
+
+    The substitution is invisible to the 33 routers above. Each field keeps
+    the `MutableMapping` interface it already had, so the closures that read
+    and write it are unchanged — the difference is only that a write now also
+    reaches the database before it returns (PRD G4, FR-8.9).
+
+    Returns the same `backend` it was handed, for use as an expression.
+    """
+
+    backend.engagements = store.engagements(lambda row: EngagementCreateRequest(**row))
+    backend.engagement_updates = store.engagement_updates(
+        lambda row: EngagementUpdateResponse(**row)
+    )
+    backend.next_engagement_id = store.highest_engagement_ordinal()
+    backend.meeting_details = store.meeting_details(lambda row: MeetingDetail(**row))
+    backend.requirements_states = store.requirements_state(
+        lambda row: RequirementsState(**row)
+    )
+    backend.engagement_open_questions = store.open_questions(
+        lambda row: ApiInheritedOpenQuestion(**row)
+    )
+    backend.compiled_candidates = store.candidates(lambda row: ApiBankCandidate(**row))
+    return backend
 
 
 def build_app(
@@ -668,13 +705,25 @@ def build_app(
                     secret, base_url=inference.base_url, mode=mode
                 )
 
+        # The speech vendors have real probes now, chosen by whichever vendor
+        # the connector settings name. A custom vendor still has none — we do
+        # not know its API — so it reports "configured, not verified".
+        if probe is None and key is SecretKey.ASR_VENDOR_API_KEY:
+            vendor_probe = probe_for_vendor(
+                settings_store.read().connectors.live_vendor.value
+            )
+            if vendor_probe is not None:
+
+                async def probe(secret: str, call=vendor_probe) -> None:
+                    await call(secret, base_url=settings_store.read().vendors.asr_base_url)
+
         return await check_secret_connection(settings_store, key, probe)
 
     app.include_router(
         build_settings_router(read_settings, apply_settings, check_connection)
     )
 
-    _include_operational_routers(app, backend, compiler_engines)
+    _include_operational_routers(app, backend, compiler_engines, debrief_engines)
 
     return app
 
@@ -691,6 +740,7 @@ def build_app(
 
 _live_session_models = importlib.import_module("app.modules.live-session.models")
 _live_session_router = importlib.import_module("app.modules.live-session.router")
+_live_session_stream = importlib.import_module("app.modules.live-session.stream")
 _slow_lane_models = importlib.import_module("app.modules.slow-lane.models")
 _slow_lane_router = importlib.import_module("app.modules.slow-lane.router")
 
@@ -699,7 +749,10 @@ SlowLaneTickResult = _slow_lane_models.SlowLaneTickResult
 
 
 def _include_operational_routers(
-    app: FastAPI, backend: Backend, compiler_engines: CompilerEngines
+    app: FastAPI,
+    backend: Backend,
+    compiler_engines: CompilerEngines,
+    debrief_engines: DebriefEngines | None = None,
 ) -> None:
     """Mount every router that the integration-suite assembly left out."""
 
@@ -734,6 +787,45 @@ def _include_operational_routers(
         return started
 
     app.include_router(_live_session_router.build_live_session_router(start_session))
+
+    def _lane_status() -> dict[str, Any]:
+        """Whether the slow lane can reach a model right now.
+
+        Read from the engines the app was actually built with rather than from
+        a flag someone has to remember to set: an unconfigured credential and a
+        provider outage both land here as "no engine", which is precisely what
+        the operator needs told, and neither can be forgotten about.
+        """
+
+        if debrief_engines is not None and debrief_engines.is_configured:
+            return {"model_reachable": True, "reason": None}
+        return {
+            "model_reachable": False,
+            "reason": "No AI provider is configured in Settings.",
+        }
+
+    async def session_events(meeting_id: str):
+        """Replay whatever this meeting has queued, then finish.
+
+        Backed by the in-memory backend today, so a test or a demo can push
+        events and see them arrive at the panel. A live meeting substitutes a
+        real source here and nothing downstream changes — the stream has no
+        opinion about where its events come from.
+
+        The first frame is always `lane`, before any coverage or nudge. The
+        panel has to know which mode it is in *before* it starts rendering
+        suggestions, because the same silence means "nothing to say" in one
+        mode and "the model is unreachable" in the other, and an operator who
+        cannot tell those apart will read too much into a quiet panel
+        (architecture §10, FR-6.8).
+        """
+
+        yield "lane", _lane_status()
+
+        for name, payload in backend.session_stream_events.get(meeting_id, []):
+            yield name, payload
+
+    app.include_router(_live_session_stream.build_session_stream_router(session_events))
 
     # --- slow lane tick --------------------------------------------------
     async def run_tick(meeting_id: str) -> Any:

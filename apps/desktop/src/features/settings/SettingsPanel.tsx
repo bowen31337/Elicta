@@ -1,11 +1,14 @@
 import { useState } from 'react';
 
 import './SettingsPanel.css';
+import { ScreenEyebrow } from '../../ui/Mark';
 import {
   AUTH_MODE_SECRET,
   useSettings,
   type AuthMode,
   type ConnectorSettings,
+  type InferenceSettings,
+  type LlmProvider,
   type SpeechVendor,
   type SecretKey,
   type SecretStatus,
@@ -18,14 +21,40 @@ import {
  * the choice is not obvious from the names, and picking the wrong engine for
  * the live path costs latency the meeting cannot spare.
  */
+/**
+ * Every provider here is an Anthropic Messages API surface. That is a
+ * deliberate constraint: the compiler and debrief stages rely on
+ * schema-enforced outputs and explicit prompt-cache boundaries that only
+ * exist there, so an OpenAI-shaped endpoint would fail mid-meeting rather
+ * than at setup.
+ */
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  anthropic: 'Anthropic',
+  bedrock: 'AWS Bedrock',
+  vertex: 'Google Vertex AI',
+  foundry: 'Microsoft Foundry',
+  anthropic_compatible: 'Other Anthropic-compatible endpoint',
+};
+
+const PROVIDER_NOTE: Record<LlmProvider, string> = {
+  anthropic: 'Calls api.anthropic.com with the credential below.',
+  bedrock: 'Uses your AWS role or credentials — no key needed here.',
+  vertex: 'Uses your Google Cloud credentials — no key needed here.',
+  foundry: 'Calls your Foundry resource with the credential below.',
+  anthropic_compatible:
+    'Any gateway that speaks the Anthropic Messages API, including a self-hosted one.',
+};
+
 const VENDOR_LABELS: Record<SpeechVendor, string> = {
   assemblyai: 'AssemblyAI',
   deepgram: 'Deepgram',
+  custom: 'Other service',
 };
 
 const LIVE_VENDOR_NOTE: Record<SpeechVendor, string> = {
   assemblyai: 'Ends a turn when the sentence sounds finished, which cuts the wait before a nudge.',
   deepgram: 'Ends a turn after a fixed silence. Predictable, but slower to react.',
+  custom: 'Your own service. Confirm it supports vocabulary prompting and retention opt-out.',
 };
 
 const SECRET_LABELS: Record<SecretKey, string> = {
@@ -120,6 +149,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
 
   const [secretDrafts, setSecretDrafts] = useState<Partial<Record<SecretKey, string>>>({});
   const [model, setModel] = useState<string | null>(null);
+  const [inference, setInference] = useState<InferenceSettings | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [connectors, setConnectors] = useState<ConnectorSettings | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<SecretKey, string>>>({});
@@ -137,7 +167,8 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
     );
   }
 
-  const currentModel = model ?? settings.inference.model;
+  const currentInference = inference ?? settings.inference;
+  const currentModel = model ?? currentInference.model;
   const currentAuthMode = authMode ?? settings.inference.auth_mode;
   const activeSecret = AUTH_MODE_SECRET[currentAuthMode];
   const currentConnectors = connectors ?? settings.connectors;
@@ -149,8 +180,8 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
 
     const ok = await save({
       inference: {
+        ...currentInference,
         model: currentModel,
-        base_url: settings.inference.base_url,
         auth_mode: currentAuthMode,
       },
       connectors: currentConnectors,
@@ -176,6 +207,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
 
   return (
     <section className="settings-panel" aria-labelledby="settings-heading">
+      <ScreenEyebrow>Service</ScreenEyebrow>
       <h1 id="settings-heading">Settings</h1>
 
       {settings.durable ? null : (
@@ -191,6 +223,94 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
         </p>
       ) : null}
 
+      <h2>AI provider</h2>
+      <div className="settings-field">
+        <label htmlFor="provider">Route Claude calls through</label>
+        <p className="settings-help">{PROVIDER_NOTE[currentInference.provider]}</p>
+        <select
+          id="provider"
+          value={currentInference.provider}
+          onChange={(event) =>
+            setInference({
+              ...currentInference,
+              provider: event.target.value as LlmProvider,
+            })
+          }
+        >
+          {(
+            ['anthropic', 'bedrock', 'vertex', 'foundry', 'anthropic_compatible'] as const
+          ).map((provider) => (
+            <option key={provider} value={provider}>
+              {PROVIDER_LABELS[provider]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {currentInference.provider === 'anthropic_compatible' ? (
+        <div className="settings-field">
+          <label htmlFor="provider-base-url">Endpoint</label>
+          <p className="settings-help">
+            Must speak the Anthropic Messages API.
+          </p>
+          <input
+            id="provider-base-url"
+            type="text"
+            value={currentInference.base_url ?? ''}
+            placeholder="https://llm.internal/v1"
+            onChange={(event) =>
+              setInference({
+                ...currentInference,
+                base_url: event.target.value || null,
+              })
+            }
+          />
+        </div>
+      ) : null}
+
+      {currentInference.provider === 'bedrock' || currentInference.provider === 'vertex' ? (
+        <div className="settings-field">
+          <label htmlFor="provider-region">AI provider region</label>
+          <input
+            id="provider-region"
+            type="text"
+            value={currentInference.region ?? ''}
+            placeholder={currentInference.provider === 'vertex' ? 'global' : 'us-east-1'}
+            onChange={(event) =>
+              setInference({ ...currentInference, region: event.target.value || null })
+            }
+          />
+        </div>
+      ) : null}
+
+      {currentInference.provider === 'vertex' ? (
+        <div className="settings-field">
+          <label htmlFor="provider-project">Google Cloud project</label>
+          <input
+            id="provider-project"
+            type="text"
+            value={currentInference.project_id ?? ''}
+            onChange={(event) =>
+              setInference({ ...currentInference, project_id: event.target.value || null })
+            }
+          />
+        </div>
+      ) : null}
+
+      {currentInference.provider === 'foundry' ? (
+        <div className="settings-field">
+          <label htmlFor="provider-resource">Foundry resource</label>
+          <input
+            id="provider-resource"
+            type="text"
+            value={currentInference.resource ?? ''}
+            onChange={(event) =>
+              setInference({ ...currentInference, resource: event.target.value || null })
+            }
+          />
+        </div>
+      ) : null}
+
       <h2>Credentials</h2>
       <fieldset className="settings-field">
         <legend>Authenticate with</legend>
@@ -198,18 +318,25 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
           Bring your own credential. Use whichever your organisation issues — a
           key or a token, not both.
         </p>
-        {(['api_key', 'oauth_token'] as const).map((mode) => (
-          <label key={mode} className="settings-radio">
-            <input
-              type="radio"
-              name="auth-mode"
-              value={mode}
-              checked={currentAuthMode === mode}
-              onChange={() => setAuthMode(mode)}
-            />
-            {mode === 'api_key' ? 'API key' : 'OAuth token'}
-          </label>
-        ))}
+        {/* Two mutually exclusive options with short labels is what a
+            segmented control is for, so that is what this looks like. The
+            markup stays a radio group: the input is still there, still
+            focusable and still announced as a radio — the segment is painted
+            around it rather than replacing it. */}
+        <div className="settings-segmented">
+          {(['api_key', 'oauth_token'] as const).map((mode) => (
+            <label key={mode} className="settings-radio">
+              <input
+                type="radio"
+                name="auth-mode"
+                value={mode}
+                checked={currentAuthMode === mode}
+                onChange={() => setAuthMode(mode)}
+              />
+              <span>{mode === 'api_key' ? 'API key' : 'OAuth token'}</span>
+            </label>
+          ))}
+        </div>
       </fieldset>
       {settings.secrets.map((status) => (
         <SecretField
@@ -256,7 +383,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
             })
           }
         >
-          {(['assemblyai', 'deepgram'] as const).map((vendor) => (
+          {(['assemblyai', 'deepgram', 'custom'] as const).map((vendor) => (
             <option key={vendor} value={vendor}>
               {VENDOR_LABELS[vendor]}
             </option>
@@ -319,8 +446,31 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
         </p>
       </div>
 
+      {currentConnectors.live_vendor === 'custom' ||
+      currentConnectors.record_vendors.includes('custom') ? (
+        <div className="settings-field">
+          <label htmlFor="custom-stt">Custom speech service endpoint</label>
+          <p className="settings-help">
+            Where to reach it. Vocabulary prompting and retention opt-out must
+            be confirmed against that vendor's own API.
+          </p>
+          <input
+            id="custom-stt"
+            type="text"
+            value={currentConnectors.custom_base_url ?? ''}
+            placeholder="https://stt.internal"
+            onChange={(event) =>
+              setConnectors({
+                ...currentConnectors,
+                custom_base_url: event.target.value || null,
+              })
+            }
+          />
+        </div>
+      ) : null}
+
       <div className="settings-field">
-        <label htmlFor="region">Region</label>
+        <label htmlFor="region">Speech region</label>
         <p className="settings-help">
           Where audio is processed. Pin it to the region your engagement
           requires; closer regions also respond faster.

@@ -17,6 +17,19 @@ Specs are the source of truth for behaviour — features cite them by ID (`FR-5.
 - `docs/live-elicitation-assistant-architecture.md` — design + ADRs
 - `docs/RUNBOOK.md` — env-var reference (`.env.example` is the source of truth for names)
 - `docs/code-quality-audit.md` — audit of what is built vs wired, with the integration gaps
+- `docs/journeys/` — one file per user journey, with screenshots captured from the running app
+
+UI is built on the Apple design token layer (`apps/desktop/src/tokens.css`): reference
+`var(--label)` / `var(--space-5)` and the `.t-*` type roles rather than hardcoding values. The
+panel uses the `.glass` material; other screens use the `.group` / `.row` grouped-list idiom.
+Both themes and the three `prefers-reduced-*` settings are handled at the token layer — do not
+reintroduce hardcoded colors. Text colour comes from `--label` or
+`--label-supporting`; `--label-secondary` / `--label-tertiary` fail WCAG AA for small text and are
+for non-text use only. Coloured *text* uses `--green-ink` / `--orange-ink` / `--red-ink` /
+`--accent-ink`; the vivid system colours are for fills. `tests/e2e/journeys/audit-a11y.mjs` gates
+this in CI. Solve a colour against the **worst ground it is used on**
+(glass composites darker than a card), and never let element `opacity` dim already-reduced ink —
+both produced real AA failures here.
 - `docs/claw-forge-process-evaluation.md` — root-cause analysis of why the seams were left empty
 
 ## Stack & Layout
@@ -110,7 +123,12 @@ embarrassment gates, plus signing/release workflows.
   key entered in the UI takes effect without a restart. Anthropic access is bring-your-own
   **key or OAuth token** — `build_anthropic_client` pairs each with its header, and a bearer
   token additionally needs `anthropic-beta: oauth-2025-04-20`, which the SDK does *not* add for
-  a static credential.
+  a static credential. Settings persist in SQLite (`ELICTA_SETTINGS_DB`) with secrets encrypted
+  at rest; the key lives outside the database (`ELICTA_SETTINGS_KEY`, else a `0600` file beside
+  it), and an undecryptable secret reads as *not configured* rather than raising. The provider
+  list (Anthropic / Bedrock / Vertex / Foundry / compatible gateway) is **closed to Anthropic
+  Messages API surfaces** — structured outputs, cache-boundary control and the slow lane's
+  request shape all assume it, so an OpenAI-shaped endpoint would fail per stage, not at setup.
 - **`app/orchestration/` owns pipeline order.** `debrief.py` runs architecture §7 steps 2–8,
   `compiler.py` runs §3.10; `composition.py` decides *when* they run. Stages fail closed — a
   failed stage halts the chain rather than feeding the next one. Add a stage to the orchestrator,
@@ -122,6 +140,56 @@ embarrassment gates, plus signing/release workflows.
 - **Acceptance criteria must fail on the empty case.** `test_main.py` asserts route *counts* and
   real dispatch, not that a log line was emitted — an app serving zero routes passed the old
   check for months. Assert quantity, not mechanism.
+
+## The Handbook
+
+`handbook/` is the repository's own documentation, and it is **generated code, not
+prose-only**. `handbook/tools/gen.py` derives six reference chapters from the crates,
+`packages/api-client/openapi.json`, the service modules, the desktop features,
+`.env.example` and `.claude/commands/`. The remaining chapters are hand-written and each
+declares, in `handbook/book.toml`, the paths it describes.
+
+```bash
+python3 handbook/tools/gen.py build     # chapters, index, footers and the PDF
+python3 handbook/tools/gen.py check     # errors block CI, warnings ask a human
+python3 handbook/tools/gen.py status
+python3 handbook/tools/gen.py pdf       # rebuild handbook/handbook.pdf alone
+python3 handbook/tools/gen.py accept --chapter <id>
+cd handbook/tools && python3 -m unittest   # pytest does not collect these
+```
+
+- **A new crate, route, service module, desktop feature, env var or slash command makes a
+  generated chapter stale.** `check` fails until `build` is re-run — the `handbook` job in
+  `test.yml` enforces it, and a `Stop` hook in `.claude/settings.json` enforces it per
+  session. Treat it exactly like regenerating `packages/api-client`.
+- **Never edit a file carrying `<!-- HANDBOOK-GENERATED -->`.** Change the source or the
+  renderer; the next `build` reverts anything else.
+- **Prose chapters own everything above `<!-- HANDBOOK-NAV -->`;** `build` owns the rest.
+- **`accept` is a claim that a human re-read the chapter.** `build` deliberately never
+  writes `handbook/drift.lock.json`. Baselining to clear warnings empties the mechanism.
+- **`BANNED_CLAIMS` in `handbook/tools/lint.py`** lists statements known false here (the
+  `run.sh` commands, formatting being gated, counting routes off `app.routes`, literal
+  imports of hyphenated modules). A chapter warning readers about one adds
+  `<!-- lint-allow: <tag> -->`; nobody deletes the entry to go green.
+- **`build` also writes `handbook/handbook.pdf`** — the whole handbook bound as one
+  document, typeset by `mdread.py` / `typeset.py` / `pdf.py`, which write the PDF
+  format directly because nothing else here can (no pandoc, no browser, no LaTeX,
+  and CI installs only Python). The file records a digest of its sources in its
+  own metadata, so `build` rewrites it only when the content or the layout code
+  changed; `check` reports `stale-pdf` when it did not. Mermaid diagrams appear as
+  captioned source, not pictures.
+- **The handbook is written for readers outside the team**, and the PDF is how they
+  read it. Two rules are gated, not merely advised: a prose chapter may contain **no
+  links** (`cross-reference`) and **no requirement identifiers, architecture section
+  numbers or decision-record numbers** (`spec-reference`). Say the thing in words
+  where the reader is. The one chapter that must show an identifier marks itself with
+  `<!-- lint-allow: spec-reference -->`. Citations in doc comments are stripped from
+  generated chapters by `render.plain_summary`.
+- **Diagrams are drawn, not printed as source.** Use a ` ```diagram ` block —
+  `steps`, `flow`, `timeline`, `compare` or `stack` — which `diagrams.py` renders as
+  a real picture. Mermaid still renders as a source panel and should not be used in
+  new chapters.
+- `/handbook-sync` walks the whole post-feature pass.
 
 ## Gotchas
 

@@ -1,3 +1,17 @@
 {
-  "enableAllProjectMcpServers": true
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/handbook/tools/hook_check.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking the handbook is current"
+          }
+        ]
+      }
+    ]
+  }
 }

@@ -28,6 +28,15 @@ export interface UseSessionStreamOptions {
 export interface UseSessionStreamResult {
   /** The most recent coverage summary the stream has delivered. */
   coverage: CoverageSummary | null;
+  /**
+   * Whether the slow lane can reach a model. Starts `true` and is only ever
+   * lowered by the service saying so: a panel that assumed the worst until
+   * told otherwise would show the degraded banner for the first second of
+   * every meeting, and a banner that cries wolf stops being read.
+   */
+  modelReachable: boolean;
+  /** Why the lane is degraded, when it is. */
+  degradedReason: string | null;
 }
 
 /**
@@ -39,11 +48,20 @@ export interface UseSessionStreamResult {
  * since nudge queueing and rate-limiting belong to `panel/nudge`, not here.
  */
 export function useSessionStream(
-  meetingId: string,
+  /**
+   * The meeting to follow, or `null` before one has started. Null is a real
+   * state rather than an oversight: the panel exists before capture does, and
+   * opening a stream to nothing would reconnect in a loop against a 404.
+   */
+  meetingId: string | null,
   options: UseSessionStreamOptions = {},
 ): UseSessionStreamResult {
   const { onNudge, createSource = defaultCreateSource } = options;
   const [coverage, setCoverage] = useState<CoverageSummary | null>(null);
+  const [lane, setLane] = useState<{ reachable: boolean; reason: string | null }>({
+    reachable: true,
+    reason: null,
+  });
 
   // `onNudge` is read through a ref so a caller passing a fresh callback
   // each render does not tear down and reopen the stream connection.
@@ -51,6 +69,9 @@ export function useSessionStream(
   onNudgeRef.current = onNudge;
 
   useEffect(() => {
+    if (meetingId === null) {
+      return;
+    }
     const source = createSource(`/api/meetings/${encodeURIComponent(meetingId)}/session/stream`);
 
     const handleCoverage = (event: MessageEvent<string>) => {
@@ -67,15 +88,24 @@ export function useSessionStream(
       }
     };
 
+    const handleLane = (event: MessageEvent<string>) => {
+      const parsed = parseSessionStreamEvent('lane', event.data);
+      if (parsed?.type === 'lane') {
+        setLane({ reachable: parsed.lane.modelReachable, reason: parsed.lane.reason });
+      }
+    };
+
     source.addEventListener('coverage', handleCoverage);
     source.addEventListener('nudge', handleNudge);
+    source.addEventListener('lane', handleLane);
 
     return () => {
       source.removeEventListener('coverage', handleCoverage);
       source.removeEventListener('nudge', handleNudge);
+      source.removeEventListener('lane', handleLane);
       source.close();
     };
   }, [meetingId, createSource]);
 
-  return { coverage };
+  return { coverage, modelReachable: lane.reachable, degradedReason: lane.reason };
 }

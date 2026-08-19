@@ -1,55 +1,72 @@
-.nudge-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.nudge-stack__active {
-  opacity: 1;
-}
+/* The nudge, on the token layer.
+ *
+ * This component was written before the design system and kept its own rem
+ * sizes and bare opacities. The sizes are now the Apple text ramp, and — the
+ * part that matters — the ink comes from tokens that clear WCAG AA rather than
+ * from `opacity`, which dilutes text against whatever is behind it and cannot
+ * be reasoned about for contrast.
+ *
+ * The question is the line an operator reads aloud mid-meeting, so it gets
+ * full-strength ink. Nothing else on this surface competes with it.
+ */
+.nudge-stack { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .nudge-stack__stub {
-  font-weight: 700;
-  font-size: 1.1rem;
+  font-size: var(--text-title-1);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-snug);
+  line-height: var(--leading-tight);
+  color: var(--label);
+  text-wrap: balance;
 }
 
 .nudge-stack__question {
-  font-weight: 400;
-  font-size: 0.95rem;
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  color: var(--label);
+  text-wrap: pretty;
 }
 
 .nudge-stack__reason {
-  font-size: 0.75rem;
-  opacity: 0.7;
+  font-size: var(--text-caption-1);
+  letter-spacing: var(--tracking-wide);
+  color: var(--label-supporting);
 }
 
 .nudge-stack__empty {
-  opacity: 0.5;
-  font-style: italic;
+  font-size: var(--text-subhead);
+  color: var(--label-supporting);
 }
 
 .nudge-stack__history {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  /* FR-6.3 asks prior nudges to *recede*. Dimming alone does not achieve that
+     when they sit directly under the active question — they read as one block.
+     The space, and a hairline above it, are what make the separation
+     structural rather than a matter of degree. */
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--separator);
 }
 
 .nudge-stack__history-item {
-  /* Capped at 120ms: nudge entry is instant, no fade longer than 120ms
-     (design system, PRD FR-6.4). */
-  transition: opacity 120ms ease;
-  display: flex;
-  flex-direction: column;
+  /* Nudge entry is instant and never fades in (FR-6.4); this transition only
+     governs a nudge receding into history. */
+  transition: opacity var(--duration-instant) var(--ease-out);
+  display: flex; flex-direction: column;
 }
 
 .nudge-stack__history-stub {
-  font-size: 0.85rem;
+  font-size: var(--text-footnote);
+  /* Full-strength ink: the item's own opacity is what dims it, and two
+     reductions stacked is what put this text at 2.35:1. */
+  color: var(--label);
 }
 
 .nudge-stack__history-reason {
-  font-size: 0.7rem;
-  opacity: 0.7;
+  font-size: var(--text-caption-1);
+  letter-spacing: var(--tracking-wide);
+  color: var(--label);
 }

@@ -4,11 +4,11 @@ The 20 revisions in `versions/` describe the full schema and form one linear
 chain, but there was no `alembic.ini` and no `env.py`, so none of them could
 be run. This is that missing harness.
 
-`target_metadata` is `None` on purpose: there are no SQLAlchemy models yet,
-so `--autogenerate` is not supported. Every revision here is hand-written,
-which is what the chain already assumes. When ORM models land, point
-`target_metadata` at their `MetaData` and autogenerate starts working with
-no other change.
+`target_metadata` is the metadata of the engagement-continuity models in
+`app/persistence/models.py` — the five tables the running product reads and
+writes. The other fifteen revisions are hand-written and have no models, so
+autogenerate sees them as unknown and would propose dropping them; read its
+output, do not apply it blind.
 
 Both modes are supported:
 
@@ -33,8 +33,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# No ORM models yet — see the module docstring.
-target_metadata = None
+# The engagement-continuity tables now have ORM models, so `--autogenerate`
+# works for them and `test_migrations.py` can assert the chain and the models
+# still describe the same schema. The remaining fifteen tables are still
+# hand-written only, which is why autogenerate output must be read rather than
+# trusted: it will propose dropping every table it has no model for.
+from app.persistence.models import metadata as target_metadata  # noqa: E402
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://localhost/elicta"
 

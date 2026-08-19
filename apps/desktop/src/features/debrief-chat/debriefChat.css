@@ -1,0 +1,66 @@
+/* The debrief conversation reads as a document, not a chat app: no bubbles,
+   no tails, no avatars. The only distinction between speakers is a rule and a
+   label, because the content is what matters and decoration around a quoted
+   client requirement makes it harder to read, not easier. */
+.debrief-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debrief-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-inline-start: var(--space-4);
+  border-inline-start: 2px solid var(--separator);
+}
+
+/* The operator's own turns are marked by the accent rule alone — a fill would
+   make their question compete with the answer they are reading. */
+.debrief-turn--user {
+  border-inline-start-color: var(--accent-fill);
+}
+
+.debrief-speaker {
+  color: var(--label-supporting);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.debrief-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.debrief-input {
+  inline-size: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--fill-4);
+  color: var(--label);
+  font: inherit;
+  resize: vertical;
+}
+
+.debrief-input:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+.debrief-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-4);
+}
+
+.debrief-error {
+  color: var(--red-ink);
+}

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- The favicon uses the simplified two-ring mark: the four-ring master
+       loses its seams below ~24px. Colour follows the browser theme and
+       matches --blue in tokens.css. -->
+  <style>
+    :root { color: #007AFF }
+    @media (prefers-color-scheme: dark) { :root { color: #0A84FF } }
+  </style>
+  <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="8" cy="8" r="3"/>
+    <path d="M1.68 6.5A6.5 6.5 0 0 1 14.32 6.5"/>
+    <path d="M1.68 9.5A6.5 6.5 0 0 0 14.32 9.5"/>
+  </g>
+</svg>

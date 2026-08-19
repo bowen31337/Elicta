@@ -60,7 +60,44 @@ configured and its last four characters — never the value — so the settings
 form starts empty and leaving a field blank means "leave it unchanged".
 Clearing a credential is a separate, explicit action.
 
-With the default in-memory store, settings do not survive a service restart;
+**Storage.** Settings persist in SQLite at `ELICTA_SETTINGS_DB` (default
+`$XDG_DATA_HOME/elicta/settings.db`). Secret values are encrypted at rest with
+Fernet (NFR-2.5); the key comes from `ELICTA_SETTINGS_KEY`, or is generated
+once into a `0600` file beside the database. Point `ELICTA_SETTINGS_KEY` at a
+KMS or mounted secret in a managed deployment — the key file is the thing to
+protect, and it is deliberately not kept inside the database it protects. A
+secret that cannot be decrypted with the current key reads as *not configured*,
+so a rotated key degrades to "re-enter your credentials" rather than a service
+that will not start.
+
+**AI provider.** Claude calls route through any of: Anthropic direct, AWS
+Bedrock, Google Vertex AI, Microsoft Foundry, or any other endpoint that
+speaks the Anthropic Messages API (a self-hosted or third-party gateway).
+
+That list is closed to Messages-API surfaces on purpose. The compiler and
+debrief stages depend on schema-enforced structured outputs (§14.4) and
+explicit prompt-cache boundary control (§14.3), and `core/crates/slow-lane`
+builds a Messages API request shape directly. An OpenAI-shaped endpoint would
+not fail at configuration — it would fail per stage, in the middle of a
+debrief — so it is not offered.
+
+Bedrock and Vertex take no credential from settings: they authenticate through
+the host's own chain (an IAM role, GCP application-default credentials), which
+is a better mechanism than a long-lived key pasted into a form. Each provider's
+required fields are validated on save, so a misconfiguration is a form error
+rather than a stage failure hours later.
+
+**Speech connectors.** The live path and the record path are configured
+separately, because they are bought on different things: the live path on
+turn-detection latency (§14.2), the record path on two engines diverging
+independently (FR-2.6, T3). Any other speech service can be
+configured as a custom connector with its own endpoint — it carries no
+built-in feature mapping, so keyterm prompting and retention opt-out must be
+confirmed against that vendor's API. Configuring the same vendor twice for the
+record path is rejected — engines sharing a lineage agree on the same errors, so
+reconciliation would manufacture false assurance.
+
+The legacy in-memory store remains for tests. With it, settings do not survive a restart;
 the Settings screen says so. A durable store belongs on the platform secret
 store (`core/shared/crypto` already reaches the macOS Keychain and Windows
 Credential Manager for the database key).

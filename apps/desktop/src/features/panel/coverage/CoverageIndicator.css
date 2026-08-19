@@ -1,23 +1,22 @@
+/* Coverage indicator, on the token palette. The count fill was white-at-8%,
+   which is invisible on a light ground; `--fill-3` tracks the theme. */
 .coverage-indicator {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-caption-1);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .coverage-indicator__count {
-  padding: 0.125rem 0.4rem;
-  border-radius: 0.25rem;
-  background: rgba(255, 255, 255, 0.08);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-capsule);
+  background: var(--fill-3);
+  color: var(--label-supporting);
 }
 
 .coverage-indicator__time {
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
+  color: var(--label-supporting);
 }
 
-.coverage-indicator--pending .coverage-indicator__count {
-  opacity: 0.5;
-  font-style: italic;
-}
+.coverage-indicator--pending .coverage-indicator__count { color: var(--label-supporting); }

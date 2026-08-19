@@ -1,0 +1,71 @@
+/* Shared layout for the full-screen (non-panel) surfaces: prep, consent,
+   recording review, debrief, arc and replay. They are documents to read and
+   act on, so they use Apple's grouped-list idiom rather than the panel's
+   floating material. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-7) var(--space-6) var(--space-10);
+  max-width: 720px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.screen-head { display: flex; flex-direction: column; gap: var(--space-2); }
+.screen-head h1 { margin: 0; text-wrap: balance; }
+.screen-head p { margin: 0; }
+
+.screen section { display: flex; flex-direction: column; gap: var(--space-3); }
+.screen section > h2 { margin: 0 0 var(--space-1) var(--space-2); }
+
+.hint { margin: var(--space-1) var(--space-2) 0; }
+
+.row--header { background: var(--fill-4); justify-content: space-between; }
+.chips-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.bank-section + .bank-section { margin-top: var(--space-3); }
+
+/* A quoted utterance is evidence, so it is set apart rather than run in. */
+.quote {
+  margin: 0;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--separator);
+  color: var(--label-supporting);
+}
+
+.stat-row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.stat {
+  flex: 1 1 140px;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-tertiary); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.stat-value { font-size: var(--text-title-1); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug); font-variant-numeric: tabular-nums; }
+.stat--pass .stat-value { color: var(--green-ink); }
+.stat--fail .stat-value { color: var(--red-ink); }
+
+/* Divergence: the two engines' readings sit side by side because the reviewer
+   is comparing them, not reading them in turn. */
+.diverge { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.diverge-side { display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4); border-radius: var(--radius-md); background: var(--fill-4); }
+
+.timeline { display: flex; flex-direction: column; gap: 0; }
+.timeline-item { display: flex; gap: var(--space-4); padding: var(--space-4) 0; }
+.timeline-rail { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.timeline-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
+.timeline-line { flex: 1; width: 2px; background: var(--separator); border-radius: 1px; }
+.timeline-body { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-2); }
+
+/* The mark sits inline with the eyebrow so identity reads as part of the
+   screen's label, not as a separate banner competing with the title. */
+.eyebrow-row { display: flex; align-items: center; gap: var(--space-3); }
+.eyebrow-row .mark { color: var(--accent); flex: none; }
+
+.about-identity { display: flex; align-items: center; gap: var(--space-5); }
+.about-identity .mark { color: var(--accent); flex: none; }
+.about-identity h1 { margin: 0; }
+.about-identity p { margin: 2px 0 0; }

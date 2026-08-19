@@ -24,3 +24,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The shared capture core. Path-linked rather than vendored so the desktop
+# shell and the workspace crates cannot drift to different versions of the
+# pause guarantee.
+capture = { path = "../../../core/crates/capture" }
+tauri-plugin-updater = "2.10.1"
