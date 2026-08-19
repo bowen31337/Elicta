@@ -89,6 +89,16 @@ Run the service:
 cd apps/service && uv run uvicorn app.main:app --reload    # serves 42 API paths
 ```
 
+Run the whole system as a web app on `0.0.0.0` (service + panel, both processes, network-reachable
+— for browser-testing a build before packaging):
+```bash
+./start.sh                  # dev server on :1420, service on :8000
+./start.sh --prod           # build the bundle and serve it via `vite preview`
+./start.sh --help           # ports, host, --reload, dependency handling
+```
+The panel is served same-origin with an `/api` proxy to the service (`vite.config.ts`), because
+parts of the UI request `/api/...` relative to the page and the service mounts no CORS middleware.
+
 CI: `.github/workflows/` — `test.yml` gates every language (cargo test + clippy, ruff + pytest +
 the API integration suite, vitest + typecheck + build). `build.yml` produces Tauri artifacts,
 `parity.yml` checks cross-platform replay parity, `replay-gate.yml` enforces the precision and

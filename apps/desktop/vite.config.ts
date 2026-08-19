@@ -6,6 +6,23 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 
 const host = process.env.TAURI_DEV_HOST;
 
+// Where the service tier is listening, for the proxy below. `start.sh` sets
+// it; under `tauri dev` it is unset and the proxy simply goes unused.
+const serviceUrl = process.env.ELICTA_SERVICE_URL || "http://127.0.0.1:8000";
+
+// Serving the panel in a browser puts the page on a different origin from the
+// service, and two parts of the UI ask for `/api/...` relative to the page
+// (the session stream and the debrief chat) while the generated client uses an
+// absolute base URL. Proxying the prefix makes the whole app same-origin, so
+// both styles resolve and the service needs no CORS headers. Declared for the
+// preview server too, so the production bundle can be exercised the same way.
+const apiProxy = {
+  "/api": {
+    target: serviceUrl,
+    changeOrigin: true,
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -22,6 +39,7 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
+    proxy: apiProxy,
     hmr: host
       ? {
           protocol: "ws",
@@ -32,5 +50,8 @@ export default defineConfig({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+  },
+  preview: {
+    proxy: apiProxy,
   },
 });

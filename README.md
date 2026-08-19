@@ -120,6 +120,20 @@ cd apps/service && uv run uvicorn app.main:app --reload   # serves 42 API paths
 pnpm dev                                                  # tauri dev
 ```
 
+Or run the whole system as a web app, reachable from other machines on the network — useful for
+trying a build in a browser before packaging it for macOS, Windows or Linux:
+
+```bash
+./start.sh                    # service + panel on 0.0.0.0, dev server with hot reload
+./start.sh --prod             # build the bundle and serve that instead
+./start.sh --host 127.0.0.1   # this machine only
+```
+
+It prints the URLs to open, including the LAN addresses. The panel reaches the service through a
+same-origin `/api` proxy on the web port, so nothing has to be reconfigured per host. Capture,
+signature verification and update checks come from the desktop shell and are unavailable in a
+browser; those screens say so rather than failing.
+
 Apply database migrations from the repository root:
 
 ```bash
