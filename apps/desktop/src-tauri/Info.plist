@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Merged into the generated bundle Info.plist by tauri-bundler, which
+	  reads any Info.plist sitting beside tauri.conf.json.
+
+	  This key is not documentation. macOS TCC terminates a process that
+	  touches an audio input device without a usage description present —
+	  it does not deny the request, it aborts the app. The CoreAudio line-in
+	  backend (capture::device::macos_line_in) opens an AUHAL input unit, so
+	  the first start_capture on that path would kill the shell outright.
+
+	  Screen Recording, which the ScreenCaptureKit loopback backend needs,
+	  has no corresponding key on macOS — it is prompted for and granted in
+	  System Settings against the app's code signature. The MDM path that
+	  pre-grants both (packaging/mdm, PRD NFR-3.5) requires a Developer ID
+	  team and so does not cover locally installed builds.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Elicta listens to the meeting audio you select so it can track requirements coverage and surface follow-up questions while the conversation is still open.</string>
+</dict>
+</plist>
