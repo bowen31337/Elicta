@@ -120,13 +120,42 @@ done
 SERVICE_PID=""
 WEB_PID=""
 
+# Job control, so each server below starts as its own process-group leader.
+# Neither server is one process: `uv run` spawns the interpreter beneath it and
+# `pnpm exec` spawns node. Signalling only the child this script knows about
+# leaves the grandchild alive and still holding the port — the next run then
+# fails the port check against a server nobody can see.
+set -m
+
+# Signal the whole group, falling back to the single process if it turned out
+# not to lead one.
+stop_group() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  kill "-$2" -- "-$pid" 2>/dev/null || kill "-$2" "$pid" 2>/dev/null || true
+}
+
+alive() {
+  local pid="$1"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
 shutdown() {
   trap - INT TERM EXIT
   echo ""
   echo "→ stopping"
-  for pid in "$WEB_PID" "$SERVICE_PID"; do
-    if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
+  stop_group "$WEB_PID" TERM
+  stop_group "$SERVICE_PID" TERM
+
+  # A moment to close listeners and flush, then insist. Without the second
+  # pass a server that ignores TERM would keep the port for the next run.
+  local waited=0
+  while { alive "$WEB_PID" || alive "$SERVICE_PID"; } && [[ $waited -lt 20 ]]; do
+    sleep 0.25
+    waited=$((waited + 1))
   done
+  stop_group "$WEB_PID" KILL
+  stop_group "$SERVICE_PID" KILL
   wait 2>/dev/null || true
 }
 trap shutdown INT TERM EXIT
