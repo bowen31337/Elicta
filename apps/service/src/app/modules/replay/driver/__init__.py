@@ -14,7 +14,12 @@ unrelated pieces of functionality that both happen to live here:
 
 from __future__ import annotations
 
-from app.modules.replay.driver.clock import ReplayClock, RunClock, SystemClock, WallClock
+from app.modules.replay.driver.clock import (
+    ReplayClock,
+    RunClock,
+    SystemClock,
+    WallClock,
+)
 from app.modules.replay.driver.driver import ReplayDriver
 from app.modules.replay.driver.errors import ReplayRunLogError
 from app.modules.replay.driver.harness import ReplayHarness

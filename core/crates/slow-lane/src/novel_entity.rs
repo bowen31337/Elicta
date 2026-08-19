@@ -177,7 +177,7 @@ mod tests {
         let mut detector = NovelEntityDetector::new(ContextPackEntities::default());
         let mention = MentionedEntity::new("Shadow IT ticketing tool", EntityKind::System);
 
-        let first_tick = detector.on_tick(&[mention.clone()]);
+        let first_tick = detector.on_tick(std::slice::from_ref(&mention));
         let second_tick = detector.on_tick(&[mention]);
 
         assert_eq!(first_tick.len(), 1, "the first mention must fire");

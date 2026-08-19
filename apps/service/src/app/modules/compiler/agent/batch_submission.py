@@ -21,7 +21,7 @@ itself.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     AnalystContextPack,
@@ -52,7 +52,7 @@ async def submit_bmad_analyst_batch(
     attempt failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         batch_job_id = await submit(engagement_id, context_pack)
@@ -63,7 +63,7 @@ async def submit_bmad_analyst_batch(
             engine=engine,
             batch_job_id=None,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -75,7 +75,7 @@ async def submit_bmad_analyst_batch(
         engine=engine,
         batch_job_id=batch_job_id,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

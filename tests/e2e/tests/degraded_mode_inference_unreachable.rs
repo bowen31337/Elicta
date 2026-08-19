@@ -109,7 +109,7 @@ fn deterministic_triggers_keep_firing_and_the_panel_degrades_when_the_inference_
         token("call", "en"),
     ];
     let mut router = LexiconRouter::new();
-    router.register(Lexicon::new("en", ["several"]));
+    router.register(Lexicon::new("en-ambiguity-v1", "en", ["several"]));
     let transcript_window = "We need several fixes before the client call";
 
     // Control: a healthy endpoint produces a normal badge alongside the

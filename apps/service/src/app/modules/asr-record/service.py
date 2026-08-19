@@ -27,7 +27,7 @@ batch request to every engine here fetches it once and passes it to
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .alignment import align_completed_transcripts
 from .models import (
@@ -84,7 +84,7 @@ async def run_record_path_transcription(
     engine configured) doesn't need to supply it.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     async def persist_failure(engine_name: str, error: str) -> RecordPathTranscript:
         failed = RecordPathTranscript(
@@ -94,7 +94,7 @@ async def run_record_path_transcription(
             segments=[],
             text="",
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=error,
         )
         await save(failed)
@@ -120,7 +120,7 @@ async def run_record_path_transcription(
             segments=output.segments,
             text=output.text,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
         await save(transcript)
         return transcript
@@ -178,7 +178,7 @@ async def start_record_path_transcription_job(
     """
 
     job_id = job_id or uuid.uuid4().hex
-    created_at = created_at or datetime.now(timezone.utc)
+    created_at = created_at or datetime.now(UTC)
     job = RecordPathTranscriptionJob(
         job_id=job_id,
         meeting_id=meeting_id,

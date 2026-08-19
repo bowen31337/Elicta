@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .models import (
@@ -78,7 +78,7 @@ async def open_debrief_conversation(
     """
 
     session_id = session_id or uuid.uuid4().hex
-    opened_at = opened_at or datetime.now(timezone.utc)
+    opened_at = opened_at or datetime.now(UTC)
 
     conversation_ref = await open_conversation(meeting_id, session_id)
     nudge_dispositions = await load_nudge_signal(meeting_id)
@@ -121,7 +121,7 @@ async def send_debrief_message(
     update, and the whole session is re-persisted via `save`.
     """
 
-    recorded_at = recorded_at or datetime.now(timezone.utc)
+    recorded_at = recorded_at or datetime.now(UTC)
 
     session = await load_session(meeting_id)
     response_content = await send_message(session.conversation_ref, message)

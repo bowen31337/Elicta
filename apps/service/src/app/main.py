@@ -1,9 +1,17 @@
 """FastAPI application entrypoint.
 
-Mounts every feature router discovered by `module_loader.load_modules`,
-then emits the resulting route list as the app starts. That startup log is
-the route table: there is no separate, hand-maintained list of mounted
-routes for a feature to fall out of sync with.
+Two things mount routers here, and they cover different cases:
+
+* `app.composition.build_app` assembles every router whose factory needs
+  persistence callables injected — which is nearly all of them. That is the
+  composition root, and it is what the API integration suite drives.
+* `app.module_loader.load_modules` scans `app/modules/*` for packages that
+  expose an already-constructed router, for features that are self-sufficient
+  and need no wiring.
+
+Both report into the startup log, so that log remains the route table: there
+is no separate, hand-maintained list of mounted routes for a feature to fall
+out of sync with.
 """
 
 from __future__ import annotations
@@ -14,19 +22,53 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.composition import Backend, build_app
 from app.module_loader import MountedRouter, load_modules
+from app.modules.settings.store import InMemorySettingsStore, SettingsStore
+from app.orchestration.anthropic_engines import engines_from_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def create_app() -> FastAPI:
-    mounted: list[MountedRouter] = []
+def create_app(
+    backend: Backend | None = None, settings_store: SettingsStore | None = None
+) -> FastAPI:
+    """Build the service.
+
+    `backend` is the persistence surface every router is injected with. It
+    defaults to the in-memory implementation so the app is runnable — and the
+    full API reachable — without a database; a SQLAlchemy-backed `Backend`
+    substitutes here and nowhere else.
+    """
+
+    # ADR-012: the compiler and debrief workloads run on Claude. Credentials
+    # come from the settings store — administered in the desktop app's
+    # settings screen, falling back to the environment for headless
+    # deployments — and are re-read per call, so a key entered in the UI
+    # takes effect without a restart. Until one is configured, the stages
+    # that need a model fail closed and name what is missing; the service
+    # still starts and serves its full API.
+    store = settings_store or InMemorySettingsStore()
+    debrief_engines, compiler_engines = engines_from_settings(store)
+    app = build_app(
+        backend if backend is not None else Backend(),
+        debrief_engines=debrief_engines,
+        compiler_engines=compiler_engines,
+        settings_store=store,
+    )
+    mounted: list[MountedRouter] = load_modules(app)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        if not mounted:
-            logger.info("startup: no feature routers mounted")
+        # Counted from the OpenAPI schema rather than `app.routes`: this
+        # FastAPI version wraps included routers in `_IncludedRouter` objects
+        # that carry no `.path`, so walking `app.routes` reports zero however
+        # many routers are mounted.
+        api_routes = [
+            path for path in app.openapi()["paths"] if path.startswith("/api")
+        ]
+
         for entry in mounted:
             logger.info(
                 "startup: mounted %s -> %s (tags=%s)",
@@ -34,11 +76,14 @@ def create_app() -> FastAPI:
                 entry.prefix or "/",
                 ", ".join(entry.tags) or "-",
             )
-        logger.info("startup: %d feature router(s) mounted", len(mounted))
+        logger.info(
+            "startup: %d feature router(s) mounted, %d API route(s) served",
+            len(mounted) + len(api_routes),
+            len(api_routes),
+        )
         yield
 
-    app = FastAPI(title="Elicta Service", lifespan=lifespan)
-    mounted.extend(load_modules(app))
+    app.router.lifespan_context = lifespan
     return app
 
 

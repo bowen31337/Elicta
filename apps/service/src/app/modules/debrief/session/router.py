@@ -1,4 +1,7 @@
-"""HTTP surface for a meeting's debrief conversation (PRD FR-7.1, FR-7.4).
+"""HTTP surface for a meeting's debrief conversation (PRD FR-7.1, FR-7.3, FR-7.4).
+
+FR-7.3 is the free-form half: querying, drafting and challenging the
+meeting content conversationally, rather than only reading fixed artifacts.
 
 `build_debrief_session_router` takes the streaming conversation open, the
 live-mode nudge signal load, the persistence read/write, and the message

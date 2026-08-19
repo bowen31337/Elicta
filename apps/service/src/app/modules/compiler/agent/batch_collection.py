@@ -21,9 +21,14 @@ built on the Claude Agent SDK's Batch API per architecture §14.4 -- as
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .bmad_analyst import MAX_CANDIDATES, MIN_CANDIDATES, SaveEngagementBmadAnalystPass, build_bank_candidates
+from .bmad_analyst import (
+    MAX_CANDIDATES,
+    MIN_CANDIDATES,
+    SaveEngagementBmadAnalystPass,
+    build_bank_candidates,
+)
 from .models import AnalystBatchResult, BmadAnalystPassStatus, EngagementBmadAnalystPass
 
 FetchBmadAnalystBatchResults = Callable[[str], Awaitable[list[AnalystBatchResult]]]
@@ -47,7 +52,7 @@ async def collect_bmad_analyst_batch_results(
     job.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
     results: list[EngagementBmadAnalystPass] = []
 
     for raw_result in await fetch(batch_job_id):
@@ -62,7 +67,7 @@ async def collect_bmad_analyst_batch_results(
                 engine=engine,
                 candidates=None,
                 requested_at=requested_at,
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
                 error=str(exc),
             )
 
@@ -98,5 +103,5 @@ def _build_pass_record(
         engine=engine,
         candidates=candidates,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )

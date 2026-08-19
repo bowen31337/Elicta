@@ -22,9 +22,14 @@ says both stages are done.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .models import AudioDestructionEvent, AudioDestructionStatus, DiarizationStatus, SessionDiarization
+from .models import (
+    AudioDestructionEvent,
+    AudioDestructionStatus,
+    DiarizationStatus,
+    SessionDiarization,
+)
 
 DeleteAudio = Callable[[str, str], Awaitable[None]]
 EmitAudioDestructionEvent = Callable[[AudioDestructionEvent], Awaitable[None]]
@@ -71,7 +76,7 @@ async def destroy_retained_audio(
     distinguishable from one whose destruction attempt failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         await delete_audio(session_id, audio_ref)
@@ -81,7 +86,7 @@ async def destroy_retained_audio(
             audio_ref=audio_ref,
             status=AudioDestructionStatus.FAILED,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await emit(failed)
@@ -92,7 +97,7 @@ async def destroy_retained_audio(
         audio_ref=audio_ref,
         status=AudioDestructionStatus.COMPLETE,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await emit(event)
     return event

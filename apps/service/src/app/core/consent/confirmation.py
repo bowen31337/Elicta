@@ -9,7 +9,7 @@ app factory supplies the real, durable-storage-backed `save`.
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.consent.models import ConsentRecord
 
@@ -32,7 +32,7 @@ async def record_consent_confirmation(
     record = ConsentRecord(
         meeting_id=meeting_id,
         confirmed_by=confirmed_by,
-        confirmed_at=confirmed_at or datetime.now(timezone.utc),
+        confirmed_at=confirmed_at or datetime.now(UTC),
     )
     await save(record)
     return record

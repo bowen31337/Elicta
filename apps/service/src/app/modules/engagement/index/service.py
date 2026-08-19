@@ -23,7 +23,7 @@ store.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .chunking import DEFAULT_CHUNK_SIZE, chunk_text
 from .extraction import extract_text
@@ -62,7 +62,7 @@ async def index_document(
 
     await index_chunks(document_id, chunks)
 
-    resolved_indexed_at = indexed_at or datetime.now(timezone.utc)
+    resolved_indexed_at = indexed_at or datetime.now(UTC)
     digest = ContextPackDigest(
         document_id=document_id,
         indexed_at=resolved_indexed_at,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.engagement.state.generic_elicitation_bank import (
     BASELINE_TEMPLATE_SECTION,
@@ -12,7 +12,7 @@ from app.modules.engagement.state.generic_elicitation_bank import (
     select_fallback_bank,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_unrecognised_sector_and_project_type_still_returns_a_usable_baseline_only_bank():

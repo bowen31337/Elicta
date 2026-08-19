@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.compiler.agent.batch_submission import submit_bmad_analyst_batch
 from app.modules.compiler.agent.models import (
@@ -14,7 +14,7 @@ from app.modules.compiler.agent.models import (
 )
 from app.modules.engagement.documents.models import DocumentStatus
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_context_pack() -> AnalystContextPack:

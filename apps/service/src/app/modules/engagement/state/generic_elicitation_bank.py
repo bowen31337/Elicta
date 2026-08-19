@@ -24,7 +24,7 @@ submit in any casing.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -149,7 +149,7 @@ def build_generic_elicitation_bank(
     replaced with something empty.
     """
 
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
 
     blocks: list[tuple[str, list[str]]] = []
     sector_questions = _SECTOR_QUESTIONS.get(_normalize(sector))

@@ -8,3 +8,17 @@ publish.workspace = true
 [lib]
 name = "elicta_app"
 path = "src/lib.rs"
+
+# Mounted plugin crates. The workspace manifest globs `core/crates/*` into the
+# build; this is the other half of that wiring — the crates the shared core
+# actually depends on. One line per crate, appended, matching `registry.rs`.
+[dependencies]
+asr-live = { path = "../../crates/asr-live" }
+bank = { path = "../../crates/bank" }
+capture = { path = "../../crates/capture" }
+coverage = { path = "../../crates/coverage" }
+language = { path = "../../crates/language" }
+ranking = { path = "../../crates/ranking" }
+slow-lane = { path = "../../crates/slow-lane" }
+trigger-gate = { path = "../../crates/trigger-gate" }
+wer = { path = "../../crates/wer" }

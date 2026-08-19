@@ -32,7 +32,7 @@ schema-valid candidates.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .extraction import format_source_doc
 from .models import (
@@ -109,7 +109,7 @@ async def run_claim_structuring_pass(
     failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         output = await run_chain(engagement_id, claims)
@@ -120,7 +120,7 @@ async def run_claim_structuring_pass(
             status=ClaimStructuringPassStatus.FAILED,
             candidates=None,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -131,7 +131,7 @@ async def run_claim_structuring_pass(
         status=ClaimStructuringPassStatus.COMPLETE,
         candidates=candidates,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

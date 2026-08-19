@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import ContextPackDigest, DocumentChunk
 from .service import index_document
@@ -39,7 +39,7 @@ async def test_indexes_document_content_into_chunks():
 
 async def test_persists_indexed_at_timestamp_per_document():
     index_chunks, persist_digest, _, digest_calls = make_recorders()
-    fixed_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    fixed_time = datetime(2026, 1, 1, tzinfo=UTC)
 
     digest = await index_document(
         "doc-1",
@@ -57,13 +57,13 @@ async def test_persists_indexed_at_timestamp_per_document():
 
 async def test_defaults_indexed_at_to_now_when_not_supplied():
     index_chunks, persist_digest, _, digest_calls = make_recorders()
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
 
     digest = await index_document(
         "doc-1", b"some content", index_chunks, persist_digest
     )
 
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
     assert before <= digest.indexed_at <= after
     assert [document_id for document_id, _ in digest_calls] == ["doc-1"]
     assert digest_calls[0][1].indexed_at == digest.indexed_at

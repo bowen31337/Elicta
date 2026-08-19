@@ -68,8 +68,8 @@ fn code_switched_utterance_routes_tokens_and_gates_the_low_confidence_span() {
         .collect();
 
     let mut router = LexiconRouter::new();
-    router.register(Lexicon::new("en", ["several"]));
-    router.register(Lexicon::new("zh", ["大概", "也许"]));
+    router.register(Lexicon::new("en-ambiguity-v1", "en", ["several"]));
+    router.register(Lexicon::new("zh-ambiguity-v1", "zh", ["大概", "也许"]));
 
     let matches = router.run(&tokens, MIN_TAG_CONFIDENCE);
 

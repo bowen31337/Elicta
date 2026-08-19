@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +21,7 @@ from app.modules.compiler.citations.structuring import (
     run_claim_structuring_pass,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_citation(**overrides) -> CitedSpan:

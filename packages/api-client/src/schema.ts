@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/meetings/{meeting_id}/consent-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Consent */
+        post: operations["confirm_consent_api_meetings__meeting_id__consent_confirmation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/egress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Egress Audit Log */
+        get: operations["get_egress_audit_log_api_audit_egress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engagements": {
         parameters: {
             query?: never;
@@ -38,10 +72,1055 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/engagements/{engagement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Engagement Endpoint */
+        patch: operations["update_engagement_endpoint_api_engagements__engagement_id__patch"];
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Engagement Documents */
+        get: operations["get_engagement_documents_api_engagements__engagement_id__documents_get"];
+        put?: never;
+        /** Upload Engagement Document */
+        post: operations["upload_engagement_document_api_engagements__engagement_id__documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Meeting Endpoint */
+        post: operations["create_meeting_endpoint_api_meetings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Meeting Detail Endpoint */
+        get: operations["get_meeting_detail_endpoint_api_meetings__meeting_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Meeting Endpoint */
+        patch: operations["update_meeting_endpoint_api_meetings__meeting_id__patch"];
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/record-path-transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Record Path Transcript */
+        get: operations["get_record_path_transcript_api_sessions__session_id__record_path_transcript_get"];
+        put?: never;
+        /** Create Record Path Transcript */
+        post: operations["create_record_path_transcript_api_sessions__session_id__record_path_transcript_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/record-path-alignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Record Path Alignment */
+        get: operations["get_record_path_alignment_api_sessions__session_id__record_path_alignment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/record/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Meeting Record Path Transcription */
+        post: operations["start_meeting_record_path_transcription_api_meetings__meeting_id__record_transcribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/record/divergences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Meeting Record Divergences
+         * @description The divergent/low-confidence spans from this meeting's alignment (PRD FR-2.8).
+         *
+         *     Reuses `SessionAlignment` as the response shape rather than a
+         *     bespoke schema — `meeting_id` already lands in its `session_id`
+         *     field, the same way the async job path above already treats a
+         *     meeting id as the session id for every other persisted record.
+         *     Narrows `spans` down to `divergent_spans(alignment)` so a debrief
+         *     reviewer only sees what PRD FR-2.8 requires surfacing, not every
+         *     aligned span including the ones the two engines agreed on.
+         */
+        get: operations["get_meeting_record_divergences_api_meetings__meeting_id__record_divergences_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/citations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write Citation Row */
+        post: operations["write_citation_row_api_sessions__session_id__citations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/debrief/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Debrief Session */
+        post: operations["start_debrief_session_api_meetings__meeting_id__debrief_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/debrief/message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send Message To Debrief Session */
+        post: operations["send_message_to_debrief_session_api_meetings__meeting_id__debrief_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Meeting Artifacts */
+        get: operations["list_meeting_artifacts_api_meetings__meeting_id__artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Artifact Detail */
+        get: operations["get_artifact_detail_api_artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/prd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Full Prd */
+        post: operations["generate_full_prd_api_engagements__engagement_id__prd_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/requirements-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Engagement Requirements State */
+        get: operations["get_engagement_requirements_state_api_engagements__engagement_id__requirements_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/project-brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Project Brief */
+        get: operations["get_session_project_brief_api_sessions__session_id__project_brief_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/decision-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Decision Log */
+        get: operations["get_session_decision_log_api_sessions__session_id__decision_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/open-questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Open Questions */
+        get: operations["get_session_open_questions_api_sessions__session_id__open_questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/follow-up-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Follow Up Email */
+        get: operations["get_session_follow_up_email_api_sessions__session_id__follow_up_email_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/bank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Meeting Bank */
+        get: operations["get_meeting_bank_api_meetings__meeting_id__bank_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/replay/runs/{run_id}/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rate Suggestion */
+        post: operations["rate_suggestion_api_replay_runs__run_id__ratings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/replay/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Status */
+        get: operations["get_run_status_api_replay_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description Current settings. Secrets appear as presence and a hint, never as values.
+         */
+        get: operations["get_settings_api_admin_settings_get"];
+        /**
+         * Put Settings
+         * @description Apply a settings change and return the new state.
+         *
+         *     Returning the full settings rather than 204 lets the admin screen
+         *     re-render from the service's view instead of its own optimistic one —
+         *     which matters most for secrets, where the client cannot know the
+         *     resulting hint without being told.
+         */
+        put: operations["put_settings_api_admin_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/{key}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Connection
+         * @description Check that a configured credential actually works.
+         *
+         *     A 200 with `reachable: false` rather than an error status: the request
+         *     itself succeeded, and the operator needs the reason rendered in the
+         *     form next to the field, not an exception.
+         */
+        post: operations["test_connection_api_admin_settings__key__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Nudge Disposition Endpoint */
+        post: operations["record_nudge_disposition_endpoint_api_meetings__meeting_id__nudges__nudge_id__disposition_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/session/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Session Endpoint */
+        post: operations["start_session_endpoint_api_meetings__meeting_id__session_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/slow-lane/tick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Slow Lane Tick */
+        post: operations["accept_slow_lane_tick_api_meetings__meeting_id__slow_lane_tick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/replay/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Replay Run */
+        post: operations["start_replay_run_api_replay_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/replay/runs/{run_id}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Metrics */
+        get: operations["get_run_metrics_api_replay_runs__run_id__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/bank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Engagement Bank */
+        get: operations["get_engagement_bank_api_engagements__engagement_id__bank_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/bank/compile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compile Engagement Bank */
+        post: operations["compile_engagement_bank_api_engagements__engagement_id__bank_compile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/bank/candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Bank Candidate */
+        delete: operations["delete_bank_candidate_api_bank_candidates__candidate_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Bank Candidate */
+        patch: operations["patch_bank_candidate_api_bank_candidates__candidate_id__patch"];
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Engagement State */
+        get: operations["get_engagement_state_api_engagements__engagement_id__state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Vocabulary Term Endpoint */
+        post: operations["add_vocabulary_term_endpoint_api_engagements__engagement_id__vocabulary_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Attendee */
+        post: operations["create_attendee_api_meetings__meeting_id__attendees_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/attendees/from-calendar-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Attendees From Calendar Invite */
+        post: operations["create_attendees_from_calendar_invite_api_meetings__meeting_id__attendees_from_calendar_invite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{document_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Document Status */
+        patch: operations["patch_document_status_api_documents__document_id__status_patch"];
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/documents/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Attach Reference Document Link */
+        post: operations["attach_reference_document_link_api_engagements__engagement_id__documents_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AlignedSpan
+         * @description One time-aligned span comparing both engines' output over the same interval.
+         *
+         *     `reference_text`/`other_text` are what each engine produced for this
+         *     span — `other_text` is the concatenation of whatever the other engine's
+         *     segments overlap this interval, since the two engines rarely agree on
+         *     exact segment boundaries even when they agree on the words. `agreement_score`
+         *     is the confidence signal this feature exists to produce: 1.0 means the
+         *     two engines' normalized wording matched exactly here, 0.0 means they
+         *     shared no words at all (including the case where one engine transcribed
+         *     silence where the other transcribed speech) — it is never left null,
+         *     since a low or zero score is itself meaningful signal, not a missing value.
+         *
+         *     `is_divergent` is set alongside `agreement_score` by `alignment.py`
+         *     (PRD FR-2.8) whenever that score falls below the divergence threshold.
+         *     It is a separate persisted field rather than something a reader
+         *     recomputes from `agreement_score` at display time, so every disagreeing
+         *     span is flagged for operator review during debrief instead of the
+         *     service silently picking one engine's wording as the winner.
+         */
+        AlignedSpan: {
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Reference Engine */
+            reference_engine: string;
+            /** Reference Text */
+            reference_text: string;
+            /** Other Engine */
+            other_engine: string;
+            /** Other Text */
+            other_text: string;
+            /** Agreement Score */
+            agreement_score: number;
+            /** Is Divergent */
+            is_divergent: boolean;
+        };
+        /**
+         * ArtifactCitation
+         * @description One BMAD analyst artifact claim's grounding in an actual classified utterance (PRD FR-2.7, FR-8.7, FR-8.7a).
+         *
+         *     Never constructed from whatever timestamp, speaker, or wording the
+         *     analyst chain claims for a citation — `resolve_citations` in
+         *     `bmad_analyst.py` builds every field here by looking the cited
+         *     `utterance_id` up in the session's own `ClassifiedUtterance`s, the same
+         *     record-path-derived data every earlier debrief stage persisted. A chain
+         *     output citing an `utterance_id` that isn't one of them fails the run
+         *     rather than persisting a citation nothing backs.
+         *
+         *     `quoted_text` is always the original-language wording (`verbatim_text`),
+         *     never a translation — PRD FR-8.7a requires the original to remain
+         *     renderable, not replaced. `translated_text` is `None` when the cited
+         *     utterance's `original_language` already matches the session's document
+         *     language; where it differs, `translated_text` carries the translation
+         *     so a UI can display it by default and render `quoted_text` — the
+         *     original — on expand.
+         */
+        ArtifactCitation: {
+            /** Utterance Id */
+            utterance_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Speaker Tag */
+            speaker_tag: string;
+            /** Quoted Text */
+            quoted_text: string;
+            /** Original Language */
+            original_language: string;
+            /** Translated Text */
+            translated_text?: string | null;
+        };
+        /**
+         * ArtifactDetail
+         * @description One full `artifacts` table row, looked up by its own `id` (PRD FR-8.1 through FR-8.7).
+         *
+         *     `body` carries the artifact's full rendered content with every citation
+         *     it references already expanded into citation detail (utterance_id,
+         *     timestamps, speaker, quoted/translated text) rather than left as a bare
+         *     utterance_id — the same `ArtifactCitation`/`CitationRow` shape every
+         *     other debrief artifact route already returns its citations in.
+         */
+        ArtifactDetail: {
+            /** Id */
+            id: string;
+            /** Session Id */
+            session_id: string;
+            artifact_type: components["schemas"]["ArtifactType"];
+            /** Artifact Language */
+            artifact_language: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+        };
+        /**
+         * ArtifactSummary
+         * @description One artifact a meeting has produced, listed by kind and generation time.
+         */
+        ArtifactSummary: {
+            artifact_type: components["schemas"]["ArtifactType"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+        };
+        /**
+         * ArtifactType
+         * @description Which of the six PRD FR-8.1-8.6 durable artifact kinds a row holds.
+         * @enum {string}
+         */
+        ArtifactType: "transcript" | "coverage_matrix" | "open_questions" | "decision_log" | "project_brief" | "follow_up_email";
+        /**
+         * Attendee
+         * @description A persisted `attendees` row (PRD FR-3.9, FR-3.10).
+         */
+        Attendee: {
+            /** Id */
+            id: string;
+            /** Meeting Id */
+            meeting_id: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Business Function */
+            business_function?: string | null;
+            /** Decision Authority */
+            decision_authority?: string | null;
+            /** Domain Expertise */
+            domain_expertise?: string[];
+        };
+        /**
+         * AttendeeCreateRequest
+         * @description One attendee's structured profile, captured with no free-text assessment field (PRD FR-3.10).
+         */
+        AttendeeCreateRequest: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Business Function */
+            business_function?: string | null;
+            /** Decision Authority */
+            decision_authority?: string | null;
+            /** Domain Expertise */
+            domain_expertise?: string[];
+        };
+        /**
+         * AuthMode
+         * @description Which credential the service authenticates Claude calls with.
+         *
+         *     Both are "bring your own": an API key issued from the console, or an
+         *     OAuth token from `claude setup-token` / `ant auth login`. Which one an
+         *     operator has depends on how their organisation issues access, so this is
+         *     an explicit choice rather than an inference from whichever field happens
+         *     to be filled — an operator with both configured must be able to say which
+         *     one is live.
+         * @enum {string}
+         */
+        AuthMode: "api_key" | "oauth_token";
+        /**
+         * BankCompileTrigger
+         * @description Handle for one engagement's bank compile job, returned immediately on trigger (PRD FR-4.8).
+         *
+         *     Returned when `POST /api/engagements/{id}/bank/compile` is accepted,
+         *     before the actual compiling work (extraction, tagging, embedding -- all
+         *     out of this feature's footprint) has produced any candidates yet.
+         *     `job_id` is what a caller polls or correlates against later, mirroring
+         *     `RecordPathTranscriptionJob`'s (`asr-record/models.py`) job-handle
+         *     convention for an accepted, not-yet-finished run.
+         */
+        BankCompileTrigger: {
+            /** Job Id */
+            job_id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            /**
+             * Triggered At
+             * Format: date-time
+             */
+            triggered_at: string;
+        };
+        /**
+         * BmadArtifactSet
+         * @description The full set of artifacts one BMAD analyst chain run must produce to count as complete.
+         *
+         *     A run that produced only some of these — an open-questions list but no
+         *     project brief, say — is a vendor contract violation, not a partial
+         *     success: `run_bmad_analyst_chain` only ever persists a `BmadArtifactSet`
+         *     on a `COMPLETE` run, never a partially-populated one.
+         */
+        BmadArtifactSet: {
+            /** Open Questions */
+            open_questions: components["schemas"]["OpenQuestion"][];
+            /** Decisions */
+            decisions: components["schemas"]["DecisionLogEntry"][];
+            project_brief: components["schemas"]["ProjectBriefDraft"];
+            follow_up_email: components["schemas"]["FollowUpEmailDraft"];
+        };
+        /** Body_upload_engagement_document_api_engagements__engagement_id__documents_post */
+        Body_upload_engagement_document_api_engagements__engagement_id__documents_post: {
+            /** File */
+            file: string;
+            status: components["schemas"]["DocumentStatus"];
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * CalendarInvite
+         * @description A calendar invite's invitee list, used to pre-populate meeting attendees (PRD FR-3.9).
+         */
+        CalendarInvite: {
+            /** Invitees */
+            invitees?: components["schemas"]["CalendarInvitee"][];
+        };
+        /**
+         * CalendarInvitee
+         * @description One person invited via a calendar invite (PRD FR-3.9).
+         *
+         *     `email` is the only field a calendar invite reliably carries for every
+         *     invitee; `display_name` is the friendlier label most calendar systems
+         *     also include. Neither implies any of the structured profile fields
+         *     (`role`, `business_function`, `decision_authority`, `domain_expertise`)
+         *     from FR-3.10 -- those are unknowable from an invite and are filled in
+         *     later, so a pre-populated attendee starts with only a name.
+         */
+        CalendarInvitee: {
+            /** Email */
+            email: string;
+            /** Display Name */
+            display_name?: string | null;
+        };
+        /**
+         * CandidatePatchRequest
+         * @description A partial update to one bank candidate: edit its phrasing, reorder its priority, or prune it (PRD FR-4.8).
+         *
+         *     All fields are optional so a caller can change just one aspect at a
+         *     time, but at least one must be supplied, since a PATCH with nothing to
+         *     change has no meaningful effect to report as a 200.
+         */
+        CandidatePatchRequest: {
+            /** Phrasing */
+            phrasing?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Pruned */
+            pruned?: boolean | null;
+        };
+        /**
+         * CitationRow
+         * @description One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7, FR-8.7a).
+         *
+         *     `build_citation_rows` in `citations.py` is the only place these are
+         *     built, one per `ArtifactCitation` already nested on a `BmadArtifactSet`
+         *     claim — never re-derived from anything the chain reported directly, the
+         *     same grounding-in-persisted-data reasoning `resolve_citations` uses. A
+         *     claim with more than one citation gets one row per citation, all sharing
+         *     the same `claim_kind`/`claim_index`; a claim with none is a vendor
+         *     contract violation `build_citation_rows` raises on rather than silently
+         *     producing zero rows for it (PRD FR-8.7 requires a row for every claim).
+         *     `claim_index` is the claim's position within its own category's list —
+         *     always `0` for the singular `project_brief` and `follow_up_email`
+         *     claims, and the list index for `open_questions`/`decisions`.
+         *
+         *     `quoted_text` carries the citation's original-language wording and
+         *     `translated_text` its translation (`None` for a same-language citation),
+         *     both copied straight from the `ArtifactCitation` this row binds to — a
+         *     row for a cross-language claim carries both, exactly what PRD FR-8.7a
+         *     requires the citations table to persist.
+         */
+        CitationRow: {
+            /** Session Id */
+            session_id: string;
+            claim_kind: components["schemas"]["ClaimKind"];
+            /** Claim Index */
+            claim_index: number;
+            /** Utterance Id */
+            utterance_id: string;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Speaker Tag */
+            speaker_tag: string;
+            /** Quoted Text */
+            quoted_text: string;
+            /** Original Language */
+            original_language: string;
+            /** Translated Text */
+            translated_text?: string | null;
+        };
+        /**
+         * ClaimKind
+         * @description Which BMAD analyst artifact category a persisted citation row's claim belongs to (PRD FR-8.7).
+         * @enum {string}
+         */
+        ClaimKind: "open_question" | "decision" | "project_brief" | "follow_up_email";
+        /**
+         * ClaimProvenance
+         * @description Whether a BMAD analyst artifact claim was directly heard or inferred by the chain (PRD FR-8.8).
+         *
+         *     PRD FR-8.8 requires anything the system inferred rather than heard to be
+         *     visually flagged as inference. `normalize_provenance` in `bmad_analyst.py`
+         *     only ever returns `STATED` for a chain output the caller explicitly
+         *     marked as such; anything else — an unrecognized value, a typo, a vendor
+         *     that omitted the field — falls back to `INFERRED`, the same
+         *     fail-safe-to-the-visible-flag reasoning `UNKNOWN_SPEAKER_TAG` and
+         *     `UNCLASSIFIED_SECTION_KEY` use elsewhere in this package: an operator
+         *     wrongly told "the client said this" cannot un-hear it, while an operator
+         *     wrongly told "the system inferred this" only has to double-check.
+         * @enum {string}
+         */
+        ClaimProvenance: "stated" | "inferred";
+        /**
+         * ConfirmedRequirement
+         * @description One BMAD taxonomy section an engagement's standing requirements state treats as confirmed (PRD FR-8.9).
+         *
+         *     Sourced only from a `FILLED` `CoverageMatrixEntry` of a `COMPLETE`
+         *     `RequirementsCoverageMatrix` — never from the chain's own account of what
+         *     it discussed — so `citations` always carries at least one grounding
+         *     citation, the same grounding-in-persisted-data reasoning `matrix.py` uses
+         *     for a filled coverage slot.
+         */
+        ConfirmedRequirement: {
+            /** Section Key */
+            section_key: string;
+            /** Title */
+            title: string;
+            /** Citations */
+            citations: components["schemas"]["CoverageCitation"][];
+        };
+        /**
+         * ConnectionCheck
+         * @description The result of testing a configured vendor credential.
+         *
+         *     `detail` is a human-readable reason on failure. It is built from the
+         *     vendor's error type, never from the credential.
+         */
+        ConnectionCheck: {
+            key: components["schemas"]["SecretKey"];
+            /** Reachable */
+            reachable: boolean;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * ConsentConfirmationRequest
+         * @description Payload for an operator confirming the consent prompt (PRD feature 246).
+         */
+        ConsentConfirmationRequest: {
+            /** Confirmed By */
+            confirmed_by: string;
+        };
         /**
          * ConsentGate
          * @description Result of evaluating whether a meeting may begin capture.
@@ -73,6 +1152,261 @@ export interface components {
             legal_basis: string;
         };
         /**
+         * ConsentRecord
+         * @description Durable proof that consent was confirmed for one meeting (PRD feature 246).
+         *
+         *     ``confirmed_by`` identifies the operator who confirmed the prompt, not
+         *     the meeting participants — this records accountability for having
+         *     disclosed and confirmed consent, which is what a later audit needs.
+         */
+        ConsentRecord: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Confirmed By */
+            confirmed_by: string;
+            /**
+             * Confirmed At
+             * Format: date-time
+             */
+            confirmed_at: string;
+        };
+        /**
+         * CoverageCitation
+         * @description One record-path source reference grounding a filled coverage slot (PRD FR-2.7/FR-8.7).
+         *
+         *     Shaped like `asr-record`'s `RecordPathSourceReference`, but defined here
+         *     rather than imported from it: this package stays decoupled from
+         *     `asr-record`'s internals the same way `debrief/pipeline` does, taking the
+         *     actual citation lookup as an injected callable (`CiteFilledSlot` in
+         *     `matrix.py`) instead of importing a concrete transcript type.
+         */
+        CoverageCitation: {
+            /** Session Id */
+            session_id: string;
+            /** Engine */
+            engine: string;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Quoted Text */
+            quoted_text: string;
+            /**
+             * Transcript Completed At
+             * Format: date-time
+             */
+            transcript_completed_at: string;
+        };
+        /**
+         * CoverageSlotUpdate
+         * @description One coverage matrix cell a slow-lane pass updated (architecture §4: `CoverageSlot[]`).
+         *
+         *     `satisfied_at` is `None` unless this pass is the one that moved the slot
+         *     to `FILLED` -- mirroring `core/crates/coverage::CoverageStore`'s
+         *     `satisfied_at`, which only a fill transition (not merely remaining
+         *     filled) sets.
+         */
+        CoverageSlotUpdate: {
+            /** Template Section */
+            template_section: string;
+            fill_state: components["schemas"]["FillState"];
+            /** Satisfied At */
+            satisfied_at?: string | null;
+        };
+        /**
+         * DebriefConversationSession
+         * @description One meeting's open debrief conversation (PRD FR-7.1, FR-7.4).
+         *
+         *     `conversation_ref` is the opaque handle the injected
+         *     `OpenStreamingConversation` call returns for the underlying streaming
+         *     conversation (backed by the Claude Agent SDK per the PRD) — this package
+         *     never inspects it, just carries it so a later message-exchange stage can
+         *     address the right conversation.
+         *
+         *     `nudge_dispositions` is the inherited live-mode signal (FR-7.4): every
+         *     nudge that fired during the call, each carrying whichever disposition —
+         *     fired, taken, or parked — it ended live mode with. It is persisted as
+         *     part of the session itself rather than fetched separately, so the
+         *     debrief context always has that history the moment the session opens.
+         *
+         *     `history` is every turn exchanged in the conversation so far, in order,
+         *     each carrying its raw content blocks rather than extracted text (see
+         *     `DebriefMessage`). It opens empty and grows one user turn plus one
+         *     assistant turn per message sent.
+         */
+        DebriefConversationSession: {
+            /** Session Id */
+            session_id: string;
+            /** Meeting Id */
+            meeting_id: string;
+            /** Conversation Ref */
+            conversation_ref: string;
+            status: components["schemas"]["DebriefSessionStatus"];
+            /** Streaming Enabled */
+            streaming_enabled: boolean;
+            /** Length Cap */
+            length_cap: number | null;
+            /** Latency Budget Seconds */
+            latency_budget_seconds: number | null;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Nudge Dispositions */
+            nudge_dispositions: components["schemas"]["NudgeDispositionRecord"][];
+            /** History */
+            history: components["schemas"]["DebriefMessage"][];
+        };
+        /**
+         * DebriefMessage
+         * @description One turn of the debrief conversation, persisted verbatim.
+         *
+         *     `content` is the underlying streaming conversation's own list of content
+         *     blocks — for an assistant turn, the full `response.content` the Claude
+         *     Agent SDK returns — rather than a text extraction of it. This package
+         *     never inspects the blocks, only carries them, since it has no way to
+         *     know which ones the vendor's server-side compaction has attached state
+         *     to.
+         */
+        DebriefMessage: {
+            role: components["schemas"]["DebriefMessageRole"];
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+        };
+        /**
+         * DebriefMessageRequest
+         * @description Request body for sending a free-form message into an open debrief conversation.
+         */
+        DebriefMessageRequest: {
+            /** Message */
+            message: string;
+        };
+        /**
+         * DebriefMessageRole
+         * @description Who authored one turn of the debrief conversation history.
+         * @enum {string}
+         */
+        DebriefMessageRole: "user" | "assistant";
+        /**
+         * DebriefSessionStatus
+         * @description Lifecycle state of a debrief conversation session.
+         *
+         *     Only `OPEN` is ever produced by this package — closing or resuming a
+         *     debrief conversation is a separate concern from opening one.
+         * @enum {string}
+         */
+        DebriefSessionStatus: "open";
+        /**
+         * DecisionLogEntry
+         * @description One decision or commitment the BMAD analyst chain identified in the session (PRD FR-8.4).
+         */
+        DecisionLogEntry: {
+            /** Text */
+            text: string;
+            /** Decided By */
+            decided_by: string;
+            provenance: components["schemas"]["ClaimProvenance"];
+            /** Citations */
+            citations: components["schemas"]["ArtifactCitation"][];
+        };
+        /**
+         * DocumentLinkAttachmentRequest
+         * @description Body for attaching a reference document by link (PRD FR-3.2).
+         *
+         *     `url` is validated against known SharePoint and Microsoft Teams
+         *     hostnames rather than accepted as any URL: FR-3.2 asks specifically for
+         *     those two sources, so an unsupported host fails validation with a 422
+         *     naming the field, the same style FR-3.4 uses for a missing `status`.
+         */
+        DocumentLinkAttachmentRequest: {
+            /** Url */
+            url: string;
+            status: components["schemas"]["DocumentStatus"];
+        };
+        /**
+         * DocumentStatus
+         * @description Status tag required on every reference document (PRD FR-3.4).
+         * @enum {string}
+         */
+        DocumentStatus: "ground truth" | "hypothesis" | "superseded";
+        /**
+         * DocumentStatusUpdateRequest
+         * @description Body for retagging a document's status (PATCH .../documents/{id}/status).
+         */
+        DocumentStatusUpdateRequest: {
+            status: components["schemas"]["DocumentStatus"];
+        };
+        /**
+         * EgressLogRow
+         * @description One row as written to the `egress_log` table.
+         *
+         *     ``engagement_id`` identifies which engagement the call was made on
+         *     behalf of. It is always present — even for the regionless row of a call
+         *     the chokepoint refused outright — since the request carries it before
+         *     the region lookup happens, and it is what the audit log at
+         *     `GET /api/audit/egress` filters rows by.
+         *
+         *     ``region`` is the processing region pinned for the call's engagement
+         *     (PRD NFR-2.2), recorded on every row so residency can be audited after
+         *     the fact rather than only enforced at call time. It is ``None`` only
+         *     for the row of a call the chokepoint refused outright because its
+         *     engagement had no region pinned — such a call never reaches the
+         *     transport, so there is no region to record.
+         *
+         *     ``byte_count`` is the total bytes moved for this call: the request body
+         *     sent, plus the response body received when the call succeeded. A failed
+         *     call still counts the bytes that were sent before it failed.
+         */
+        EgressLogRow: {
+            /** Timestamp Ms */
+            timestamp_ms: number;
+            /** Engagement Id */
+            engagement_id: string;
+            /** Processor Name */
+            processor_name: string;
+            /** Region */
+            region?: string | null;
+            /** Byte Count */
+            byte_count: number;
+            /** Success */
+            success: boolean;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * EngagementContext
+         * @description The engagement-level context a new meeting inherits automatically (PRD FR-3.1, FR-3.5, FR-3.7).
+         *
+         *     Mirrors the engagement's own context fields -- three captured at
+         *     engagement creation (`client_organisation`, `sector`,
+         *     `commercial_context`), three filled in later (`purpose`,
+         *     `scope_boundary`, `target_requirements_template`) -- so a meeting-create
+         *     response can echo them back for confirmation without this package
+         *     importing the engagement package's persistence-backed record type.
+         */
+        EngagementContext: {
+            /** Client Organisation */
+            client_organisation: string;
+            /** Sector */
+            sector: string;
+            /** Commercial Context */
+            commercial_context: string;
+            /** Purpose */
+            purpose?: string | null;
+            /** Scope Boundary */
+            scope_boundary?: string | null;
+            /** Target Requirements Template */
+            target_requirements_template?: string | null;
+        };
+        /**
          * EngagementCreateRequest
          * @description Client background captured once, at engagement creation (PRD FR-3.1).
          */
@@ -89,11 +1423,808 @@ export interface components {
             /** Engagement Id */
             engagement_id: string;
         };
+        /**
+         * EngagementDocument
+         * @description One reference document attached to an engagement, with its status tag.
+         */
+        EngagementDocument: {
+            /** Document Id */
+            document_id: string;
+            /** Name */
+            name: string;
+            status: components["schemas"]["DocumentStatus"];
+        };
+        /**
+         * EngagementDocumentListResponse
+         * @description The full document list for one engagement (GET .../documents).
+         */
+        EngagementDocumentListResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Documents */
+            documents: components["schemas"]["EngagementDocument"][];
+        };
+        /**
+         * EngagementQuestionBank
+         * @description An engagement's compiled question bank, rendered as a reviewable tree grouped by template section (PRD FR-4.8).
+         *
+         *     Grouped into `sections` rather than returned as `MeetingQuestionBank`'s
+         *     flat candidate list: this is the engagement's own compiled set (from
+         *     `POST /api/engagements/{id}/bank/compile`, out of this feature's
+         *     footprint) as a reviewer inspects it once, before any individual
+         *     meeting recompiles from it -- so it renders as branches a reviewer can
+         *     expand and act on rather than one long list.
+         */
+        EngagementQuestionBank: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Sections */
+            sections: components["schemas"]["QuestionBankSection"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+        };
+        /**
+         * EngagementStateResponse
+         * @description An engagement's inherited open questions plus its standing requirements state (PRD FR-4.8, FR-8.9).
+         *
+         *     `inherited_open_questions` is ranked ascending by `impact_rank` — the
+         *     highest-impact question a prior meeting left open comes first, the same
+         *     convention `compiler/bank/recompile.py` and `debrief/artifacts/router.py`'s
+         *     `build_open_questions_router` use. `requirements_state` is `None` for an
+         *     engagement with no prior meetings: there is nothing yet to carry forward,
+         *     not a 404-worthy absence — `router.py`'s route always answers 200.
+         */
+        EngagementStateResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Inherited Open Questions */
+            inherited_open_questions: components["schemas"]["InheritedOpenQuestion"][];
+            requirements_state?: components["schemas"]["RequirementsState"] | null;
+        };
+        /**
+         * EngagementUpdateRequest
+         * @description Engagement purpose, scope boundary, and target requirements template (PRD FR-3.5).
+         *
+         *     All three fields are optional so a caller can update any subset of them
+         *     in a single PATCH; at least one must be supplied, since a PATCH with
+         *     nothing to change has no meaningful effect to report as a 200.
+         */
+        EngagementUpdateRequest: {
+            /** Purpose */
+            purpose?: string | null;
+            /** Scope Boundary */
+            scope_boundary?: string | null;
+            /** Target Requirements Template */
+            target_requirements_template?: string | null;
+        };
+        /** EngagementUpdateResponse */
+        EngagementUpdateResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Purpose */
+            purpose?: string | null;
+            /** Scope Boundary */
+            scope_boundary?: string | null;
+            /** Target Requirements Template */
+            target_requirements_template?: string | null;
+        };
+        /**
+         * FillState
+         * @description How much of a template section the meeting has covered so far (PRD FR-8.2; architecture §4).
+         * @enum {string}
+         */
+        FillState: "empty" | "partial" | "filled";
+        /**
+         * FollowUpEmailDraft
+         * @description The BMAD analyst chain's draft follow-up email for the session (PRD FR-8.6).
+         */
+        FollowUpEmailDraft: {
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            provenance: components["schemas"]["ClaimProvenance"];
+            /** Citations */
+            citations: components["schemas"]["ArtifactCitation"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * InferenceSettings
+         * @description Non-secret inference configuration (architecture ADR-012, §3.10).
+         */
+        InferenceSettings: {
+            /**
+             * @description Whether calls authenticate with an API key or an OAuth token.
+             * @default api_key
+             */
+            auth_mode: components["schemas"]["AuthMode"];
+            /**
+             * Model
+             * @description Model used for the context compiler and debrief pipeline.
+             * @default claude-opus-5
+             */
+            model: string;
+            /**
+             * Base Url
+             * @description Override the Anthropic API endpoint. Leave unset for the default.
+             */
+            base_url?: string | null;
+        };
+        /**
+         * InheritedOpenQuestion
+         * @description One prior meeting's open question, carried onto the engagement's standing state (PRD FR-4.8).
+         *
+         *     Mirrors `compiler/bank/recompile.py`'s type of the same name and for the
+         *     same reason: this package stays decoupled from `debrief`'s internals,
+         *     taking the prior meeting's open questions as this small local shape
+         *     instead of importing `debrief/pipeline/models.py`'s `OpenQuestion`.
+         */
+        InheritedOpenQuestion: {
+            /** Text */
+            text: string;
+            /** Impact Rank */
+            impact_rank: number;
+        };
+        /**
+         * LanguagePrecision
+         * @description M1 for one language: precision@surfaced over its rated suggestions.
+         */
+        LanguagePrecision: {
+            /** Language */
+            language: string;
+            /** Surfaced Count */
+            surfaced_count: number;
+            /** Useful Count */
+            useful_count: number;
+            /** Precision At Surfaced */
+            precision_at_surfaced: number;
+        };
+        /**
+         * MeetingAttendee
+         * @description One attendee on the meeting being read back (PRD FR-3.9, FR-3.10).
+         *
+         *     Mirrors `engagement/meetings`'s persisted `Attendee` row rather than
+         *     importing it, since that package's record type does not live in this
+         *     package (`app/modules/debrief/api`) -- the same cross-module boundary
+         *     `EngagementContext` draws in `engagement/meetings/models.py`.
+         */
+        MeetingAttendee: {
+            /** Id */
+            id: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Business Function */
+            business_function?: string | null;
+            /** Decision Authority */
+            decision_authority?: string | null;
+            /** Domain Expertise */
+            domain_expertise?: string[];
+        };
+        /**
+         * MeetingCoverageSummary
+         * @description A condensed readout of one meeting's requirements coverage matrix (PRD FR-8.2).
+         *
+         *     Carries only the counts a meeting-detail caller needs to gauge progress
+         *     at a glance -- how many BMAD taxonomy sections this meeting has filled
+         *     versus how many exist -- rather than the full per-section
+         *     `CoverageMatrixEntry` list `debrief/artifacts` already exposes on its own
+         *     routes. `is_fully_covered` mirrors `RequirementsCoverageMatrix`'s own
+         *     field of the same name.
+         */
+        MeetingCoverageSummary: {
+            /** Filled Sections */
+            filled_sections: number;
+            /** Total Sections */
+            total_sections: number;
+            /** Is Fully Covered */
+            is_fully_covered: boolean;
+        };
+        /**
+         * MeetingCreateRequest
+         * @description What's specific to a new meeting -- its engagement, capture mode, and schedule (PRD FR-3.7, FR-3.8).
+         *
+         *     Deliberately excludes every engagement-level context field: those are
+         *     inherited automatically from `engagement_id` rather than re-entered
+         *     here. `capture_mode` is required since the `meetings` table declares it
+         *     `NOT NULL` with no default; `scheduled_at` is optional since a meeting
+         *     can be created before a time is settled.
+         */
+        MeetingCreateRequest: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Capture Mode */
+            capture_mode: string;
+            /** Scheduled At */
+            scheduled_at?: string | null;
+        };
+        /**
+         * MeetingCreateResponse
+         * @description A newly created meeting, with its inherited engagement context attached for confirmation (PRD FR-3.7).
+         */
+        MeetingCreateResponse: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            /** State */
+            state: string;
+            /** Capture Mode */
+            capture_mode: string;
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            engagement_context: components["schemas"]["EngagementContext"];
+        };
+        /**
+         * MeetingDetail
+         * @description A single meeting read back with its attendees, coverage summary, and nudge count.
+         *
+         *     Aggregates across the `meetings` and `attendees` tables and the
+         *     coverage-matrix/nudge-disposition state, none of which this package
+         *     owns, so it is assembled by a single injected lookup rather than three
+         *     separate reads -- the same "no transformation, just an injected lookup"
+         *     contract `ArtifactDetail`'s router uses. `coverage_summary` is `None`
+         *     until the meeting's debrief pipeline has run a section classification;
+         *     `nudge_count` is the number of live-mode nudges that fired during the
+         *     meeting's capture (PRD FR-7.4), `0` for a meeting with no live-mode
+         *     capture yet.
+         */
+        MeetingDetail: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            /** State */
+            state: string;
+            /** Capture Mode */
+            capture_mode: string;
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            /** Attendees */
+            attendees: components["schemas"]["MeetingAttendee"][];
+            coverage_summary?: components["schemas"]["MeetingCoverageSummary"] | null;
+            /** Nudge Count */
+            nudge_count: number;
+        };
+        /**
+         * MeetingQuestionBank
+         * @description The fresh, per-meeting recompiled question bank (PRD FR-4.8).
+         *
+         *     Recomputed by `recompile_meeting_bank` for every meeting rather than
+         *     reused across an engagement's meetings — "the bank" a live meeting reads
+         *     from is always this meeting's own recompile, not the engagement's
+         *     original compile from `POST /api/engagements/{id}/bank/compile`.
+         */
+        MeetingQuestionBank: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Candidates */
+            candidates: components["schemas"]["app__modules__compiler__bank__models__BankCandidate"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+        };
+        /**
+         * MeetingUpdateRequest
+         * @description This session's purpose and target template sections (PRD FR-3.8).
+         *
+         *     Both fields are optional so a caller can update either one alone; at
+         *     least one must be supplied, since a PATCH with nothing to change has no
+         *     meaningful effect to report as a 200.
+         */
+        MeetingUpdateRequest: {
+            /** Session Purpose */
+            session_purpose?: string | null;
+            /** Target Template Sections */
+            target_template_sections?: string[] | null;
+        };
+        /**
+         * MeetingUpdateResponse
+         * @description A meeting's session purpose and target template sections after a PATCH (PRD FR-3.8).
+         */
+        MeetingUpdateResponse: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Session Purpose */
+            session_purpose?: string | null;
+            /** Target Template Sections */
+            target_template_sections?: string[] | null;
+        };
+        /**
+         * NudgeDisposition
+         * @description How one live-mode nudge was resolved by the time the call ended (PRD FR-7.4).
+         *
+         *     `FIRED` is itself a disposition, not a placeholder for a missing one —
+         *     it means the nudge surfaced and the call ended before the operator took
+         *     or parked it.
+         * @enum {string}
+         */
+        NudgeDisposition: "fired" | "taken" | "parked";
+        /**
+         * NudgeDispositionRecord
+         * @description One live-mode nudge as inherited into the debrief thread (PRD FR-7.4).
+         *
+         *     Mirrors the live nudge assistant's own surfaced nudge (a stub headline,
+         *     the full question, and the reason it fired — PRD FR-6.2/6.3/5.11) plus
+         *     the `disposition` it ended live mode with, so the debrief conversation
+         *     can discuss a specific nudge without a further round trip to the
+         *     live-mode store.
+         */
+        NudgeDispositionRecord: {
+            /** Nudge Id */
+            nudge_id: string;
+            /** Stub */
+            stub: string;
+            /** Question */
+            question: string;
+            /** Trigger Reason */
+            trigger_reason: string;
+            /**
+             * Fired At
+             * Format: date-time
+             */
+            fired_at: string;
+            disposition: components["schemas"]["NudgeDisposition"];
+        };
+        /**
+         * NudgeDispositionRequest
+         * @description Request body for recording an operator's disposition of one nudge.
+         */
+        NudgeDispositionRequest: {
+            disposition: components["schemas"]["OperatorNudgeDisposition"];
+        };
+        /**
+         * NudgeDispositionResponse
+         * @description A recorded operator disposition, echoed back for confirmation.
+         */
+        NudgeDispositionResponse: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Nudge Id */
+            nudge_id: string;
+            disposition: components["schemas"]["OperatorNudgeDisposition"];
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+        };
+        /**
+         * OpenQuestion
+         * @description One ranked open question the BMAD analyst chain raised for the client (PRD FR-8.3).
+         */
+        OpenQuestion: {
+            /** Text */
+            text: string;
+            /** Impact Rank */
+            impact_rank: number;
+            provenance: components["schemas"]["ClaimProvenance"];
+            /** Citations */
+            citations: components["schemas"]["ArtifactCitation"][];
+        };
+        /**
+         * OperatorNudgeDisposition
+         * @description What an operator explicitly did with a surfaced nudge (PRD FR-6.6/6.7).
+         * @enum {string}
+         */
+        OperatorNudgeDisposition: "taken" | "parked";
+        /**
+         * ProjectBriefDraft
+         * @description The BMAD analyst chain's draft project brief for the session (PRD FR-8.5).
+         */
+        ProjectBriefDraft: {
+            /** Body */
+            body: string;
+            provenance: components["schemas"]["ClaimProvenance"];
+            /** Citations */
+            citations: components["schemas"]["ArtifactCitation"][];
+        };
+        /**
+         * QuestionBankSection
+         * @description One template section's branch in the reviewable question bank tree (PRD FR-4.8).
+         *
+         *     `candidates` carries a section's candidates in the same relative order
+         *     they arrived in from the compiled candidate set -- the same ascending,
+         *     lower-ranks-higher `priority` convention `BankCandidate` already uses --
+         *     so a section's order in the tree matches the order a reviewer would rank
+         *     them in.
+         */
+        QuestionBankSection: {
+            /** Template Section */
+            template_section: string;
+            /** Candidates */
+            candidates: components["schemas"]["app__modules__compiler__api__models__BankCandidate"][];
+        };
+        /**
+         * RecordPathTranscript
+         * @description Durable record-path transcript for one (session, engine) pair (PRD FR-2.5/2.6/2.7).
+         *
+         *     One of these persists per engine configured for the session (PRD FR-2.6
+         *     runs two independent engines), not one per session — `engine` plus
+         *     `session_id` together identify a given transcript. Persisted whether the
+         *     batch run succeeded or failed, since a session with no record-path
+         *     transcript at all is indistinguishable from one that simply hasn't been
+         *     re-transcribed yet — `status` and `error` make a failed attempt visible
+         *     instead of silent.
+         */
+        RecordPathTranscript: {
+            /** Session Id */
+            session_id: string;
+            status: components["schemas"]["TranscriptionStatus"];
+            /** Engine */
+            engine: string;
+            /** Segments */
+            segments: components["schemas"]["TranscriptSegment"][];
+            /** Text */
+            text: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * RecordPathTranscriptionJob
+         * @description Handle for one meeting's record-path transcription job (PRD FR-2.5).
+         *
+         *     Returned immediately when a meeting's full-recording re-transcription is
+         *     accepted, before the (potentially long-running) batch engine call has
+         *     finished — `job_id` is what a caller polls or correlates against later,
+         *     since the transcript itself is not ready yet.
+         *
+         *     `engine_lineages` records both engine identifiers configured for this run
+         *     on the job itself, not just on each engine's own `RecordPathTranscript`
+         *     (PRD FR-2.6). Reconciling the two engines' output only tells you anything
+         *     if they're actually independent — sharing training data would make
+         *     agreement between them meaningless — so the run record needs to show
+         *     which two lineages were used together without having to join across the
+         *     separate per-engine transcripts, which may not both exist yet (one may
+         *     still be running, or may have failed before producing one).
+         */
+        RecordPathTranscriptionJob: {
+            /** Job Id */
+            job_id: string;
+            /** Meeting Id */
+            meeting_id: string;
+            status: components["schemas"]["TranscriptionJobStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Engine Lineages */
+            engine_lineages: string[];
+        };
+        /**
+         * RecordPathTranscriptionRequest
+         * @description Kicks off a batch re-transcription of one full session's recording.
+         *
+         *     `audio_ref` points at the full-session recording (e.g. a storage key or
+         *     URI) rather than carrying audio bytes inline — the recording store lives
+         *     outside this package, same reasoning as the injected callables in
+         *     `service.py`.
+         */
+        RecordPathTranscriptionRequest: {
+            /** Audio Ref */
+            audio_ref: string;
+        };
+        /**
+         * ReferenceDocument
+         * @description One reference document row as persisted from a link attachment
+         *     (mirrors the `reference_documents` table: PRD FR-3.2).
+         */
+        ReferenceDocument: {
+            /** Id */
+            id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            status: components["schemas"]["DocumentStatus"];
+            /** Source Uri */
+            source_uri: string;
+        };
+        /**
+         * ReplayRunMetricsResponse
+         * @description M1, broken out per language, for one replay run (T13: never blended).
+         */
+        ReplayRunMetricsResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Languages */
+            languages: components["schemas"]["LanguagePrecision"][];
+        };
+        /**
+         * ReplayRunStatus
+         * @description Lifecycle state of a replay run.
+         * @enum {string}
+         */
+        ReplayRunStatus: "pending" | "running" | "completed" | "failed";
+        /**
+         * ReplayRunStatusResponse
+         * @description Progress snapshot for one replay run.
+         */
+        ReplayRunStatusResponse: {
+            /** Run Id */
+            run_id: string;
+            status: components["schemas"]["ReplayRunStatus"];
+            /** Progress */
+            progress: number;
+            /** Suggestion Count */
+            suggestion_count: number;
+        };
+        /**
+         * RequirementsContradiction
+         * @description One section a later meeting confirmed differently than the standing requirements state already had it (PRD FR-8.9).
+         *
+         *     `merge_requirements_state_forward` in `state.py` raises this whenever a
+         *     meeting's confirmation of `section_key` quotes something other than the
+         *     citation already on record for it — the state merge does not silently let
+         *     the newer meeting overwrite the earlier one, it keeps both citations
+         *     visible as a contradiction the operator can resolve.
+         */
+        RequirementsContradiction: {
+            /** Section Key */
+            section_key: string;
+            previous_citation: components["schemas"]["CoverageCitation"];
+            new_citation: components["schemas"]["CoverageCitation"];
+        };
+        /**
+         * RequirementsState
+         * @description Durable, engagement-scoped standing requirements state carried forward across meetings (PRD FR-8.9).
+         *
+         *     Unlike every other artifact in this package, this is not scoped to one
+         *     session/meeting: there is exactly one `RequirementsState` per engagement,
+         *     upserted by `merge_requirements_state_forward` each time a meeting's
+         *     debrief pipeline completes, so the next meeting in the engagement always
+         *     reads the latest merged state rather than starting from nothing (PRD G4).
+         */
+        RequirementsState: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Confirmed Requirements */
+            confirmed_requirements: components["schemas"]["ConfirmedRequirement"][];
+            /** Contradictions */
+            contradictions: components["schemas"]["RequirementsContradiction"][];
+            /** Decisions */
+            decisions: components["schemas"]["DecisionLogEntry"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SecretKey
+         * @description The secrets an operator can configure.
+         *
+         *     An enum rather than free-form strings: a typo'd key name would otherwise
+         *     silently create a second, never-read secret while the real one stayed
+         *     unset.
+         * @enum {string}
+         */
+        SecretKey: "anthropic_api_key" | "anthropic_oauth_token" | "asr_vendor_api_key" | "capture_vendor_api_key";
+        /**
+         * SecretStatus
+         * @description What a read of a secret returns: presence, not value.
+         */
+        SecretStatus: {
+            key: components["schemas"]["SecretKey"];
+            /** Configured */
+            configured: boolean;
+            /**
+             * Hint
+             * @description Last four characters of the stored secret, to confirm which one is set.
+             */
+            hint?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * SecretUpdate
+         * @description One secret being set or cleared.
+         *
+         *     An empty `value` clears the secret. That is the only way to remove one,
+         *     and it is deliberately distinct from omitting the entry entirely, which
+         *     leaves the stored secret alone.
+         */
+        SecretUpdate: {
+            key: components["schemas"]["SecretKey"];
+            /**
+             * Value
+             * @description The secret, or an empty string to clear it.
+             */
+            value: string;
+        };
+        /**
+         * ServiceSettings
+         * @description Everything an operator can administer, with no secret values in it.
+         */
+        ServiceSettings: {
+            inference?: components["schemas"]["InferenceSettings"];
+            vendors?: components["schemas"]["VendorSettings"];
+            /** Secrets */
+            secrets?: components["schemas"]["SecretStatus"][];
+            /**
+             * Durable
+             * @description Whether these settings survive a service restart. Surfaced so the admin screen can say so plainly, rather than letting an operator discover it after a restart.
+             * @default false
+             */
+            durable: boolean;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * SessionAlignment
+         * @description Durable record of aligning one session's two record-path transcripts (PRD FR-2.6 follow-on).
+         *
+         *     Persisted once both engines configured for a session have produced a
+         *     `COMPLETE` `RecordPathTranscript` — reconciling the two engines' output
+         *     only means something once both independent results exist, so this is a
+         *     separate artifact from either transcript rather than a field on one of them.
+         */
+        SessionAlignment: {
+            /** Session Id */
+            session_id: string;
+            /** Reference Engine */
+            reference_engine: string;
+            /** Other Engine */
+            other_engine: string;
+            /** Spans */
+            spans: components["schemas"]["AlignedSpan"][];
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
+        /**
+         * SessionStart
+         * @description A newly opened live capture session for one meeting.
+         */
+        SessionStart: {
+            /** Session Id */
+            session_id: string;
+            /** Meeting Id */
+            meeting_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
+        /**
+         * SettingsUpdateRequest
+         * @description A settings save from the admin UI.
+         *
+         *     Every field is optional so the UI can save one section without having to
+         *     resend the others — and, more importantly, so it never has to resend a
+         *     secret it does not have.
+         */
+        SettingsUpdateRequest: {
+            inference?: components["schemas"]["InferenceSettings"] | null;
+            vendors?: components["schemas"]["VendorSettings"] | null;
+            /** Secrets */
+            secrets?: components["schemas"]["SecretUpdate"][];
+        };
+        /**
+         * SlowLaneCandidate
+         * @description One new candidate question a slow-lane pass surfaced (architecture §3.6, §3.8).
+         */
+        SlowLaneCandidate: {
+            /** Id */
+            id: string;
+            /** Template Section */
+            template_section: string;
+            /** Phrasing */
+            phrasing: string;
+            /** Priority */
+            priority: number;
+        };
+        /**
+         * SlowLaneTickResult
+         * @description What accepting one slow-lane tick for a meeting produced (PRD FR-5.10).
+         *
+         *     `coverage_updates` is empty when the pass changed no slot's fill state,
+         *     and `new_candidates` is empty when it surfaced nothing new -- a tick
+         *     that runs but produces neither is still a 200, not an error: PRD FR-5.10
+         *     and architecture §3.8 make failure non-fatal, and "nothing changed this
+         *     pass" is not a failure.
+         */
+        SlowLaneTickResult: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Coverage Updates */
+            coverage_updates: components["schemas"]["CoverageSlotUpdate"][];
+            /** New Candidates */
+            new_candidates: components["schemas"]["SlowLaneCandidate"][];
+            /**
+             * Ticked At
+             * Format: date-time
+             */
+            ticked_at: string;
+        };
+        /**
+         * StartReplayRunRequest
+         * @description A request to start a replay run against an already-uploaded recording.
+         */
+        StartReplayRunRequest: {
+            /** Recording Id */
+            recording_id: string;
+        };
+        /**
+         * StartReplayRunResponse
+         * @description Acknowledgement that a replay run has been queued.
+         */
+        StartReplayRunResponse: {
+            /** Run Id */
+            run_id: string;
+        };
+        /**
+         * SuggestionRatingRequest
+         * @description One senior analyst rating of a single suggestion from a replay run.
+         */
+        SuggestionRatingRequest: {
+            /** Suggestion Id */
+            suggestion_id: string;
+            verdict: components["schemas"]["SuggestionVerdict"];
+        };
+        /** SuggestionRatingResponse */
+        SuggestionRatingResponse: {
+            /** Rating Id */
+            rating_id: string;
+        };
+        /**
+         * SuggestionVerdict
+         * @description A senior analyst's judgement of one suggestion surfaced during a replay run.
+         * @enum {string}
+         */
+        SuggestionVerdict: "useful" | "timely" | "embarrassing";
+        /**
+         * TranscriptSegment
+         * @description One timed span of the full-session transcript.
+         */
+        TranscriptSegment: {
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Text */
+            text: string;
+            /** Speaker */
+            speaker?: string | null;
+        };
+        /**
+         * TranscriptionJobStatus
+         * @description Where one record-path transcription job sits in its lifecycle.
+         *
+         *     Distinct from `TranscriptionStatus`, which only describes a finished
+         *     batch run's outcome — a job also has a `QUEUED`/`RUNNING` state between
+         *     being accepted and the batch engine actually finishing.
+         * @enum {string}
+         */
+        TranscriptionJobStatus: "queued" | "running" | "complete" | "failed";
+        /**
+         * TranscriptionStatus
+         * @description Terminal state of one record-path batch transcription run.
+         * @enum {string}
+         */
+        TranscriptionStatus: "complete" | "failed";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -106,6 +2237,103 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VendorSettings
+         * @description Non-secret endpoints for the speech vendors (ADR-004, ADR-011).
+         */
+        VendorSettings: {
+            /** Asr Base Url */
+            asr_base_url?: string | null;
+            /** Capture Base Url */
+            capture_base_url?: string | null;
+        };
+        /** VocabularyTermCreateRequest */
+        VocabularyTermCreateRequest: {
+            /** Term */
+            term: string;
+            term_type: components["schemas"]["VocabularyTermType"];
+        };
+        /** VocabularyTermResponse */
+        VocabularyTermResponse: {
+            /** Term Id */
+            term_id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            /** Term */
+            term: string;
+            term_type: components["schemas"]["VocabularyTermType"];
+        };
+        /**
+         * VocabularyTermType
+         * @description The categories FR-3.6 asks the vocabulary list to distinguish.
+         * @enum {string}
+         */
+        VocabularyTermType: "product_name" | "internal_system" | "acronym";
+        /**
+         * BankCandidate
+         * @description One candidate question in a meeting's recompiled bank (PRD FR-4.8, architecture section 3.6).
+         *
+         *     `priority` orders candidates within the bank -- lower is ranked higher --
+         *     mirroring the ascending `impact_rank` convention `OpenQuestion` already
+         *     uses elsewhere in this codebase (`debrief/pipeline/models.py`).
+         *     `inherited_from_open_question` is `True` only for a candidate
+         *     `recompile_meeting_bank` derived directly from a prior meeting's open
+         *     question rather than from the engagement's own compiled candidate set, so
+         *     a caller can render "carried forward from last time" distinctly from a
+         *     freshly compiled candidate. `pruned` is `True` once a caller has excluded
+         *     the candidate from the bank via `PATCH /api/bank/candidates/{id}` --
+         *     whoever supplies `get_base_candidates` (out of this feature's footprint)
+         *     is responsible for leaving pruned candidates out of what it returns, the
+         *     same way it would leave out a hard-deleted one.
+         */
+        app__modules__compiler__api__models__BankCandidate: {
+            /** Id */
+            id: string;
+            /** Template Section */
+            template_section: string;
+            /** Phrasing */
+            phrasing: string;
+            /** Priority */
+            priority: number;
+            /**
+             * Inherited From Open Question
+             * @default false
+             */
+            inherited_from_open_question: boolean;
+            /**
+             * Pruned
+             * @default false
+             */
+            pruned: boolean;
+        };
+        /**
+         * BankCandidate
+         * @description One candidate question in a meeting's recompiled bank (PRD FR-4.8, architecture section 3.6).
+         *
+         *     `priority` orders candidates within the bank — lower is ranked higher —
+         *     mirroring the ascending `impact_rank` convention `OpenQuestion` already
+         *     uses elsewhere in this codebase (`debrief/pipeline/models.py`).
+         *     `inherited_from_open_question` is `True` only for a candidate
+         *     `recompile_meeting_bank` derived directly from a prior meeting's open
+         *     question rather than from the engagement's own compiled candidate set,
+         *     so a caller can render "carried forward from last time" distinctly from
+         *     a freshly compiled candidate.
+         */
+        app__modules__compiler__bank__models__BankCandidate: {
+            /** Id */
+            id: string;
+            /** Template Section */
+            template_section: string;
+            /** Phrasing */
+            phrasing: string;
+            /** Priority */
+            priority: number;
+            /**
+             * Inherited From Open Question
+             * @default false
+             */
+            inherited_from_open_question: boolean;
         };
     };
     responses: never;
@@ -149,6 +2377,74 @@ export interface operations {
             };
         };
     };
+    confirm_consent_api_meetings__meeting_id__consent_confirmation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentConfirmationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_egress_audit_log_api_audit_egress_get: {
+        parameters: {
+            query: {
+                engagement_id: string;
+                start_ms: number;
+                end_ms: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EgressLogRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_engagement_endpoint_api_engagements_post: {
         parameters: {
             query?: never;
@@ -169,6 +2465,1393 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EngagementCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_engagement_endpoint_api_engagements__engagement_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EngagementUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_documents_api_engagements__engagement_id__documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementDocumentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_engagement_document_api_engagements__engagement_id__documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_engagement_document_api_engagements__engagement_id__documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_meeting_endpoint_api_meetings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_meeting_detail_endpoint_api_meetings__meeting_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_meeting_endpoint_api_meetings__meeting_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_record_path_transcript_api_sessions__session_id__record_path_transcript_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordPathTranscript"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_record_path_transcript_api_sessions__session_id__record_path_transcript_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordPathTranscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordPathTranscript"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_record_path_alignment_api_sessions__session_id__record_path_alignment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAlignment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_meeting_record_path_transcription_api_meetings__meeting_id__record_transcribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordPathTranscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordPathTranscriptionJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_meeting_record_divergences_api_meetings__meeting_id__record_divergences_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAlignment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_citation_row_api_sessions__session_id__citations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CitationRow"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitationRow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_debrief_session_api_meetings__meeting_id__debrief_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebriefConversationSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_message_to_debrief_session_api_meetings__meeting_id__debrief_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DebriefMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebriefConversationSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_meeting_artifacts_api_meetings__meeting_id__artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_detail_api_artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_full_prd_api_engagements__engagement_id__prd_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BmadArtifactSet"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_requirements_state_api_engagements__engagement_id__requirements_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementsState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_project_brief_api_sessions__session_id__project_brief_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectBriefDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_decision_log_api_sessions__session_id__decision_log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionLogEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_open_questions_api_sessions__session_id__open_questions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenQuestion"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_follow_up_email_api_sessions__session_id__follow_up_email_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowUpEmailDraft"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_meeting_bank_api_meetings__meeting_id__bank_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingQuestionBank"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rate_suggestion_api_replay_runs__run_id__ratings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestionRatingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionRatingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_status_api_replay_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayRunStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_api_admin_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceSettings"];
+                };
+            };
+        };
+    };
+    put_settings_api_admin_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_api_admin_settings__key__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: components["schemas"]["SecretKey"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionCheck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_nudge_disposition_endpoint_api_meetings__meeting_id__nudges__nudge_id__disposition_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+                nudge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NudgeDispositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NudgeDispositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_session_endpoint_api_meetings__meeting_id__session_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_slow_lane_tick_api_meetings__meeting_id__slow_lane_tick_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SlowLaneTickResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_replay_run_api_replay_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartReplayRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartReplayRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_metrics_api_replay_runs__run_id__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayRunMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_bank_api_engagements__engagement_id__bank_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementQuestionBank"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compile_engagement_bank_api_engagements__engagement_id__bank_compile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankCompileTrigger"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_bank_candidate_api_bank_candidates__candidate_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_bank_candidate_api_bank_candidates__candidate_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidatePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__modules__compiler__api__models__BankCandidate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_state_api_engagements__engagement_id__state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_vocabulary_term_endpoint_api_engagements__engagement_id__vocabulary_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VocabularyTermCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VocabularyTermResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_attendee_api_meetings__meeting_id__attendees_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttendeeCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attendee"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_attendees_from_calendar_invite_api_meetings__meeting_id__attendees_from_calendar_invite_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarInvite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attendee"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_document_status_api_documents__document_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentStatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_reference_document_link_api_engagements__engagement_id__documents_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentLinkAttachmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceDocument"];
                 };
             };
             /** @description Validation Error */

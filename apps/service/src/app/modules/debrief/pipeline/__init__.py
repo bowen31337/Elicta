@@ -56,7 +56,10 @@ from app.modules.debrief.pipeline.cleaning import (
     SaveSessionTranscriptCleaning,
     run_transcript_cleaning,
 )
-from app.modules.debrief.pipeline.diarization import tag_span_speaker, tag_spans_with_speakers
+from app.modules.debrief.pipeline.diarization import (
+    tag_span_speaker,
+    tag_spans_with_speakers,
+)
 from app.modules.debrief.pipeline.models import (
     UNCLASSIFIED_SECTION_KEY,
     UNKNOWN_SPEAKER_TAG,
@@ -102,8 +105,15 @@ from app.modules.debrief.pipeline.retention import (
     destroy_retained_audio,
     is_ready_for_audio_destruction,
 )
-from app.modules.debrief.pipeline.router import SaveCitationRow, build_citation_row_router
-from app.modules.debrief.pipeline.service import DiarizeAudio, SaveSessionDiarization, run_diarization
+from app.modules.debrief.pipeline.router import (
+    SaveCitationRow,
+    build_citation_row_router,
+)
+from app.modules.debrief.pipeline.service import (
+    DiarizeAudio,
+    SaveSessionDiarization,
+    run_diarization,
+)
 
 __all__ = [
     "UNCLASSIFIED_SECTION_KEY",

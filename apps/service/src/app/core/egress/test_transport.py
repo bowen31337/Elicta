@@ -4,7 +4,10 @@ from app.core.egress.errors import EgressTransportError
 from app.core.egress.models import ProcessorRequest, ProcessorSuccess
 from app.core.egress.pinning import CertificatePin, ProcessorPinRegistry
 from app.core.egress.retention import ProcessorRetentionRegistry, RetentionParameter
-from app.core.egress.transport import PinningEgressTransport, RetentionEnforcingEgressTransport
+from app.core.egress.transport import (
+    PinningEgressTransport,
+    RetentionEnforcingEgressTransport,
+)
 
 
 class StubInnerTransport:

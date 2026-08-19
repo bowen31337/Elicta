@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from app.modules.debrief.pipeline.citations import build_citation_rows, persist_citation_table
+from app.modules.debrief.pipeline.citations import (
+    build_citation_rows,
+    persist_citation_table,
+)
 from app.modules.debrief.pipeline.models import (
     ArtifactCitation,
     BmadArtifactSet,
@@ -21,7 +24,7 @@ from app.modules.debrief.pipeline.models import (
     SessionCitationTable,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_citation(

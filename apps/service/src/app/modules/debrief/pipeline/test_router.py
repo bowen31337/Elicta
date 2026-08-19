@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from app.modules.debrief.pipeline.models import CitationRow, ClaimKind
-from app.modules.debrief.pipeline.router import build_citation_row_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.modules.debrief.pipeline.models import CitationRow, ClaimKind
+from app.modules.debrief.pipeline.router import build_citation_row_router
 
 
 def make_client() -> tuple[TestClient, list[CitationRow]]:

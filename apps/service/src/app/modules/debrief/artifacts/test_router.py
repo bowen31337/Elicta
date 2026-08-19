@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -33,7 +33,7 @@ from app.modules.debrief.pipeline.models import (
     SessionBmadAnalystChain,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_entry(section_key: str, title: str, fill_state: FillState) -> CoverageMatrixEntry:

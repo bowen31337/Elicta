@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.session.models import (
     DebriefConversationSession,
@@ -12,9 +12,12 @@ from app.modules.debrief.session.models import (
     NudgeDisposition,
     NudgeDispositionRecord,
 )
-from app.modules.debrief.session.service import open_debrief_conversation, send_debrief_message
+from app.modules.debrief.session.service import (
+    open_debrief_conversation,
+    send_debrief_message,
+)
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_open_conversation(conversation_ref: str = "conv-1"):
@@ -137,11 +140,11 @@ def test_opened_at_defaults_to_now_when_not_supplied():
     open_conversation, _ = make_open_conversation()
     load_nudge_signal, _ = make_load_nudge_signal()
 
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     result = asyncio.run(
         open_debrief_conversation("meeting-1", open_conversation, load_nudge_signal, save)
     )
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
 
     assert before <= result.opened_at <= after
 

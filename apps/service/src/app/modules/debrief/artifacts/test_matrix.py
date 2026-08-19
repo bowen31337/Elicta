@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.artifacts.matrix import build_coverage_matrix
-from app.modules.debrief.artifacts.models import CoverageCitation, CoverageMatrixStatus, RequirementsCoverageMatrix
+from app.modules.debrief.artifacts.models import (
+    CoverageCitation,
+    CoverageMatrixStatus,
+    RequirementsCoverageMatrix,
+)
 from app.modules.debrief.pipeline.models import (
     ClassifiedUtterance,
     CoverageSlotState,
@@ -15,7 +19,7 @@ from app.modules.debrief.pipeline.models import (
     SessionSectionClassification,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_utterance(utterance_id: str, section_key: str, start: float, end: float) -> ClassifiedUtterance:

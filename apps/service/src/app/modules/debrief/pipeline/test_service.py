@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-
-import pytest
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.models import (
     UNKNOWN_SPEAKER_TAG,
@@ -17,7 +15,7 @@ from app.modules.debrief.pipeline.models import (
 )
 from app.modules.debrief.pipeline.service import run_diarization
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_spans() -> list[TranscriptSpan]:

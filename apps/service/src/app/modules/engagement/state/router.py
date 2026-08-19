@@ -1,4 +1,8 @@
-"""HTTP surface for an engagement's standing state: inherited open questions plus requirements state (PRD FR-4.8, FR-8.9).
+"""HTTP surface for an engagement's standing state: inherited open questions plus requirements state (PRD FR-3.11, FR-4.8, FR-8.9).
+
+FR-3.11 is what this serves directly: a meeting inherits the standing
+open-questions list and requirements state from the meetings before it,
+rather than the operator re-entering that context.
 
 `build_engagement_state_router` takes `get_inherited_open_questions` and
 `get_requirements_state` as injected callables, mirroring every other router

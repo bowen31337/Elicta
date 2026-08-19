@@ -15,11 +15,18 @@ order, with the run's `document_language` persisted as this artifact's
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from app.modules.debrief.pipeline.models import SessionTranscriptTranslation, TranscriptTranslationStatus
+from app.modules.debrief.pipeline.models import (
+    SessionTranscriptTranslation,
+    TranscriptTranslationStatus,
+)
 
-from .models import TranscriptArtifact, TranscriptArtifactEntry, TranscriptArtifactStatus
+from .models import (
+    TranscriptArtifact,
+    TranscriptArtifactEntry,
+    TranscriptArtifactStatus,
+)
 
 SaveTranscriptArtifact = Callable[[TranscriptArtifact], Awaitable[None]]
 
@@ -45,7 +52,7 @@ async def build_transcript_artifact(
     rendering of the text.
     """
 
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
 
     if translation.status != TranscriptTranslationStatus.COMPLETE:
         failed = TranscriptArtifact(

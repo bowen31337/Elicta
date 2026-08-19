@@ -1,7 +1,8 @@
-from app.core.consent.models import ConsentModel, ConsentRecord
-from app.core.consent.router import build_consent_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.core.consent.models import ConsentModel, ConsentRecord
+from app.core.consent.router import build_consent_router
 
 
 def make_client(

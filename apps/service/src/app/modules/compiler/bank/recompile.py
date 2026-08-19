@@ -19,7 +19,7 @@ turning the prior meeting's real `OpenQuestion` list into this shape.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ def recompile_meeting_bank(
     recompiles a bank identical in ranking to its base candidates.
     """
 
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
 
     inherited_candidates = [
         BankCandidate(

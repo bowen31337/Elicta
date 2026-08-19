@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
-from app.modules.debrief.pipeline.diarization import tag_span_speaker, tag_spans_with_speakers
-from app.modules.debrief.pipeline.models import UNKNOWN_SPEAKER_TAG, SpeakerTurn, TranscriptSpan
+from app.modules.debrief.pipeline.diarization import (
+    tag_span_speaker,
+    tag_spans_with_speakers,
+)
+from app.modules.debrief.pipeline.models import (
+    UNKNOWN_SPEAKER_TAG,
+    SpeakerTurn,
+    TranscriptSpan,
+)
 
 
 def test_a_span_fully_inside_one_turn_is_tagged_with_that_speaker():

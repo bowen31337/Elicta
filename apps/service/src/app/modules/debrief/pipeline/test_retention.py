@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.models import (
     AudioDestructionEvent,
@@ -11,9 +11,12 @@ from app.modules.debrief.pipeline.models import (
     DiarizationStatus,
     SessionDiarization,
 )
-from app.modules.debrief.pipeline.retention import destroy_retained_audio, is_ready_for_audio_destruction
+from app.modules.debrief.pipeline.retention import (
+    destroy_retained_audio,
+    is_ready_for_audio_destruction,
+)
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_diarization(status: DiarizationStatus) -> SessionDiarization:

@@ -31,7 +31,7 @@ classification.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     ArtifactCitation,
@@ -171,7 +171,7 @@ async def run_bmad_analyst_chain(
     failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
     utterances_by_id = {utterance.utterance_id: utterance for utterance in utterances}
 
     try:
@@ -189,7 +189,7 @@ async def run_bmad_analyst_chain(
             engine=engine,
             artifacts=None,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -201,7 +201,7 @@ async def run_bmad_analyst_chain(
         engine=engine,
         artifacts=artifacts,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

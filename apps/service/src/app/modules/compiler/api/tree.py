@@ -1,4 +1,8 @@
-"""Groups an engagement's compiled candidate set into a reviewable tree by template section (PRD FR-4.8).
+"""Groups an engagement's compiled candidate set into a reviewable tree by template section (PRD FR-4.5, FR-4.8).
+
+FR-4.5 is the phase 0 deliverable this produces: the compiled bank presented
+to the operator pre-meeting as a tree they can review, reorder and prune
+(pruning and editing are `build_bank_candidates_router`'s two endpoints).
 
 The engagement-level compile (`POST /api/engagements/{id}/bank/compile`, out
 of this feature's footprint) produces the flat, priority-ordered candidate
@@ -9,7 +13,7 @@ list into branches a reviewer can act on, one per `template_section`.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import BankCandidate, EngagementQuestionBank, QuestionBankSection
 
@@ -31,7 +35,7 @@ def build_question_bank_tree(
     branch.
     """
 
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
 
     sections: dict[str, list[BankCandidate]] = {}
     for candidate in candidates:

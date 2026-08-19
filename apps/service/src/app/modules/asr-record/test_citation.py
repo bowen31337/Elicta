@@ -8,7 +8,7 @@ relative import cannot be resolved by pytest's default collection mode.
 from __future__ import annotations
 
 import importlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +21,7 @@ TranscriptionStatus = _models.TranscriptionStatus
 cite_record_path_span = _citation.cite_record_path_span
 record_path_covers_span = _citation.record_path_covers_span
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_transcript(

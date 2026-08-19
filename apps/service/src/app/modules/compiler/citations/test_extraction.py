@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,7 +21,7 @@ from app.modules.compiler.citations.models import (
     ExtractionSourceDocument,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 DOC_TEXT = "The client wants a new billing system by Q3."
 

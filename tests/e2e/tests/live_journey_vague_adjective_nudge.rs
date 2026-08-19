@@ -41,7 +41,7 @@ use trigger_gate::lexicon::{Lexicon, LexiconMatch, LexiconRouter, TaggedToken};
 /// quantifiers, curated into one lexicon exactly the way section 8.2a
 /// describes — a lexicon per language, not a translation of another one.
 fn vague_adjective_lexicon() -> Lexicon {
-    Lexicon::new("en", ["fast", "scalable", "user-friendly", "a lot", "soon"])
+    Lexicon::new("en-ambiguity-v1", "en", ["fast", "scalable", "user-friendly", "a lot", "soon"])
 }
 
 /// The operator-facing panel's rendered nudge (PRD FR-6.2/FR-5.11). No
@@ -92,6 +92,14 @@ fn capture_start_to_panel_nudge_for_a_vague_adjective_stays_inside_the_determini
     let mut segment_store = SegmentStore::new();
     let mut backend = ImmutablePartialFakeBackend::new();
     let stream_id: String = "stream-1".to_string();
+
+    // FR-2.9: the keyterm handshake hands the engagement vocabulary to the
+    // backend before the first frame. `send_audio` rejects any stream that
+    // skipped it, so this is part of the pipeline, not test setup noise.
+    let keyterms: Vec<String> = vec!["Acme Corp".to_string(), "Zephyr API".to_string()];
+    backend
+        .start_stream(&stream_id, &keyterms)
+        .expect("the keyterm handshake opens the stream");
 
     let mut retained_samples: Vec<i16> = Vec::new();
     let mut finals = Vec::new();

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.consent.confirmation import record_consent_confirmation
 from app.core.consent.models import ConsentRecord
@@ -11,7 +11,7 @@ def test_record_consent_confirmation_persists_meeting_operator_and_timestamp():
     async def save(record: ConsentRecord) -> None:
         saved.append(record)
 
-    fixed_time = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
+    fixed_time = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
 
     record = asyncio.run(
         record_consent_confirmation("m1", "operator-42", save, confirmed_at=fixed_time)
@@ -27,8 +27,8 @@ def test_record_consent_confirmation_defaults_to_current_time():
     async def save(record: ConsentRecord) -> None:
         pass
 
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     record = asyncio.run(record_consent_confirmation("m1", "operator-1", save))
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
 
     assert before <= record.confirmed_at <= after

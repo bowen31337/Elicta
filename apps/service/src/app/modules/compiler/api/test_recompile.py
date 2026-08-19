@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.compiler.api.models import BankCandidate
 from app.modules.compiler.api.recompile import (
@@ -11,7 +11,7 @@ from app.modules.compiler.api.recompile import (
     recompile_meeting_bank,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_candidate(candidate_id: str, priority: int, template_section: str = "scope") -> BankCandidate:

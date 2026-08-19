@@ -24,7 +24,7 @@ citation naming an unknown utterance_id.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     ArtifactCitation,
@@ -103,7 +103,7 @@ async def persist_citation_table(
     yet stays distinguishable from one whose build failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         rows = build_citation_rows(session_id, artifacts)
@@ -113,7 +113,7 @@ async def persist_citation_table(
             status=CitationTableStatus.FAILED,
             rows=[],
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -124,7 +124,7 @@ async def persist_citation_table(
         status=CitationTableStatus.COMPLETE,
         rows=rows,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

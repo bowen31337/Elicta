@@ -35,11 +35,31 @@ This turns a missing-credential mistake into an immediate, actionable error
 at boot instead of a confusing failure the first time that variable would
 have been used.
 
+## Settings: the UI is the primary route
+
+Vendor credentials and endpoints are administered in the desktop app's
+**Settings** screen, which writes to the service over
+`PUT /api/admin/settings`. Environment variables remain supported as a
+**fallback** for headless deployments; a value configured in the UI wins over
+the environment, and takes effect without restarting the service.
+
+Secrets are write-only across that API. A read returns whether a credential is
+configured and its last four characters — never the value — so the settings
+form starts empty and leaving a field blank means "leave it unchanged".
+Clearing a credential is a separate, explicit action.
+
+With the default in-memory store, settings do not survive a service restart;
+the Settings screen says so. A durable store belongs on the platform secret
+store (`core/shared/crypto` already reaches the macOS Keychain and Windows
+Credential Manager for the database key).
+
 ## Variable reference
 
 | Variable | Required? | Used by | Purpose |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | **Required** (unless `CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX` is set instead) | claw-forge CLI; `apps/service` (context compiler, debrief engine — architecture §9 "Deployment") | Anthropic API key used to authenticate Claude Agent SDK / Messages API calls. |
+| `ELICTA_INFERENCE_MODEL` | Optional — defaults to `claude-opus-5` | `apps/service` (context compiler, debrief pipeline) | Model used for the compiler and debrief stages (architecture ADR-012, §3.10). Only takes effect when one of the Anthropic auth routes above is configured; with none set those stages fail closed and name the missing setting. |
+| `DATABASE_URL` | Optional — defaults to `postgresql+asyncpg://localhost/elicta` | `apps/service`; `alembic upgrade` | Postgres URL for the service tier and the migration harness. Must use the `asyncpg` driver, since both connect asynchronously. Offline SQL rendering (`alembic upgrade head --sql`) needs no reachable database. |
 | `CLAUDE_CODE_USE_BEDROCK` | Optional — alternate auth path for `apps/service` | `apps/service` | Routes Claude Agent SDK authentication through AWS Bedrock instead of a direct API key (architecture §9). Requires the usual AWS credentials in the environment. |
 | `CLAUDE_CODE_USE_VERTEX` | Optional — alternate auth path for `apps/service` | `apps/service` | Routes Claude Agent SDK authentication through GCP Vertex instead of a direct API key (architecture §9). Requires the usual GCP credentials in the environment. |
 | `MODEL_DEFAULT`, `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, `MODEL_FAST` | Optional | claw-forge CLI | Override the model aliases used by `claw-forge.yaml` without editing that file. Each falls back to a built-in default when unset. |

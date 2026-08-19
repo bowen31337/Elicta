@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.models import (
     CleanedUtterance,
@@ -11,9 +11,12 @@ from app.modules.debrief.pipeline.models import (
     TranscriptTranslationStatus,
     TranslationOutcome,
 )
-from app.modules.debrief.pipeline.translation import normalize_translated_text, run_transcript_translation
+from app.modules.debrief.pipeline.translation import (
+    normalize_translated_text,
+    run_transcript_translation,
+)
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_utterances() -> list[CleanedUtterance]:

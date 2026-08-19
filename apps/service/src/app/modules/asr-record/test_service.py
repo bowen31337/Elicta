@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -146,7 +146,7 @@ def test_the_engagement_vocabulary_is_sent_as_keyterms_on_every_engines_request(
 
 
 def test_requested_at_is_deterministic_when_supplied():
-    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    fixed = datetime(2026, 1, 1, tzinfo=UTC)
     engines = [make_engine("engine-a"), make_engine("engine-b")]
 
     async def save(transcript: RecordPathTranscript) -> None:
@@ -333,7 +333,7 @@ def make_job_deps(*, fail_a: bool = False, fail_b: bool = False):
 
 def test_starting_a_job_persists_it_as_queued_and_returns_without_waiting():
     deps = make_job_deps()
-    fixed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    fixed = datetime(2026, 1, 1, tzinfo=UTC)
 
     job = asyncio.run(
         start_record_path_transcription_job(

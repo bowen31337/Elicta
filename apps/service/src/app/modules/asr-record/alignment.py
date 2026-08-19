@@ -24,9 +24,15 @@ from __future__ import annotations
 
 import difflib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .models import AlignedSpan, RecordPathTranscript, SessionAlignment, TranscriptSegment, TranscriptionStatus
+from .models import (
+    AlignedSpan,
+    RecordPathTranscript,
+    SessionAlignment,
+    TranscriptionStatus,
+    TranscriptSegment,
+)
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
 
@@ -96,7 +102,7 @@ def align_transcripts(
         reference_engine=reference.engine,
         other_engine=other.engine,
         spans=spans,
-        computed_at=computed_at or datetime.now(timezone.utc),
+        computed_at=computed_at or datetime.now(UTC),
     )
 
 

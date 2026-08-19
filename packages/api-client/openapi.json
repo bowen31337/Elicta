@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Elicta Service",
-    "version": "0.0.0"
+    "version": "0.1.0"
   },
   "paths": {
     "/api/meetings/{meeting_id}/consent-gate": {
@@ -39,6 +39,124 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConsentGate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/consent-confirmation": {
+      "post": {
+        "tags": [
+          "consent"
+        ],
+        "summary": "Confirm Consent",
+        "operationId": "confirm_consent_api_meetings__meeting_id__consent_confirmation_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentConfirmationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit/egress": {
+      "get": {
+        "tags": [
+          "egress-audit"
+        ],
+        "summary": "Get Egress Audit Log",
+        "operationId": "get_egress_audit_log_api_audit_egress_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Start Ms"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "End Ms"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EgressLogRow"
+                  },
+                  "title": "Response Get Egress Audit Log Api Audit Egress Get"
                 }
               }
             }
@@ -96,10 +214,2608 @@
           }
         }
       }
+    },
+    "/api/engagements/{engagement_id}": {
+      "patch": {
+        "tags": [
+          "engagements"
+        ],
+        "summary": "Update Engagement Endpoint",
+        "operationId": "update_engagement_endpoint_api_engagements__engagement_id__patch",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EngagementUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/documents": {
+      "get": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Get Engagement Documents",
+        "operationId": "get_engagement_documents_api_engagements__engagement_id__documents_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementDocumentListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Upload Engagement Document",
+        "operationId": "upload_engagement_document_api_engagements__engagement_id__documents_post",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_engagement_document_api_engagements__engagement_id__documents_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementDocument"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings": {
+      "post": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Create Meeting Endpoint",
+        "operationId": "create_meeting_endpoint_api_meetings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetingCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}": {
+      "patch": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Update Meeting Endpoint",
+        "operationId": "update_meeting_endpoint_api_meetings__meeting_id__patch",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeetingUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Get Meeting Detail Endpoint",
+        "operationId": "get_meeting_detail_endpoint_api_meetings__meeting_id__get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/record-path-transcript": {
+      "post": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Create Record Path Transcript",
+        "operationId": "create_record_path_transcript_api_sessions__session_id__record_path_transcript_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordPathTranscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecordPathTranscript"
+                  },
+                  "title": "Response Create Record Path Transcript Api Sessions  Session Id  Record Path Transcript Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Get Record Path Transcript",
+        "operationId": "get_record_path_transcript_api_sessions__session_id__record_path_transcript_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RecordPathTranscript"
+                  },
+                  "title": "Response Get Record Path Transcript Api Sessions  Session Id  Record Path Transcript Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/record-path-alignment": {
+      "get": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Get Record Path Alignment",
+        "operationId": "get_record_path_alignment_api_sessions__session_id__record_path_alignment_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAlignment"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/record/transcribe": {
+      "post": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Start Meeting Record Path Transcription",
+        "operationId": "start_meeting_record_path_transcription_api_meetings__meeting_id__record_transcribe_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordPathTranscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordPathTranscriptionJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/record/divergences": {
+      "get": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Get Meeting Record Divergences",
+        "description": "The divergent/low-confidence spans from this meeting's alignment (PRD FR-2.8).\n\nReuses `SessionAlignment` as the response shape rather than a\nbespoke schema \u2014 `meeting_id` already lands in its `session_id`\nfield, the same way the async job path above already treats a\nmeeting id as the session id for every other persisted record.\nNarrows `spans` down to `divergent_spans(alignment)` so a debrief\nreviewer only sees what PRD FR-2.8 requires surfacing, not every\naligned span including the ones the two engines agreed on.",
+        "operationId": "get_meeting_record_divergences_api_meetings__meeting_id__record_divergences_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAlignment"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/citations": {
+      "post": {
+        "tags": [
+          "debrief-citations"
+        ],
+        "summary": "Write Citation Row",
+        "operationId": "write_citation_row_api_sessions__session_id__citations_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CitationRow"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitationRow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/debrief/start": {
+      "post": {
+        "tags": [
+          "debrief-session"
+        ],
+        "summary": "Start Debrief Session",
+        "operationId": "start_debrief_session_api_meetings__meeting_id__debrief_start_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebriefConversationSession"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/debrief/message": {
+      "post": {
+        "tags": [
+          "debrief-session"
+        ],
+        "summary": "Send Message To Debrief Session",
+        "operationId": "send_message_to_debrief_session_api_meetings__meeting_id__debrief_message_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DebriefMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebriefConversationSession"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/artifacts": {
+      "get": {
+        "tags": [
+          "debrief-artifacts"
+        ],
+        "summary": "List Meeting Artifacts",
+        "operationId": "list_meeting_artifacts_api_meetings__meeting_id__artifacts_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactSummary"
+                  },
+                  "title": "Response List Meeting Artifacts Api Meetings  Meeting Id  Artifacts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifact_id}": {
+      "get": {
+        "tags": [
+          "debrief-artifacts"
+        ],
+        "summary": "Get Artifact Detail",
+        "operationId": "get_artifact_detail_api_artifacts__artifact_id__get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/prd": {
+      "post": {
+        "tags": [
+          "debrief-prd"
+        ],
+        "summary": "Generate Full Prd",
+        "operationId": "generate_full_prd_api_engagements__engagement_id__prd_post",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BmadArtifactSet"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/requirements-state": {
+      "get": {
+        "tags": [
+          "debrief-prd"
+        ],
+        "summary": "Get Engagement Requirements State",
+        "operationId": "get_engagement_requirements_state_api_engagements__engagement_id__requirements_state_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementsState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/project-brief": {
+      "get": {
+        "tags": [
+          "debrief-project-brief"
+        ],
+        "summary": "Get Session Project Brief",
+        "operationId": "get_session_project_brief_api_sessions__session_id__project_brief_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectBriefDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/decision-log": {
+      "get": {
+        "tags": [
+          "debrief-decision-log"
+        ],
+        "summary": "Get Session Decision Log",
+        "operationId": "get_session_decision_log_api_sessions__session_id__decision_log_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DecisionLogEntry"
+                  },
+                  "title": "Response Get Session Decision Log Api Sessions  Session Id  Decision Log Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/open-questions": {
+      "get": {
+        "tags": [
+          "debrief-open-questions"
+        ],
+        "summary": "Get Session Open Questions",
+        "operationId": "get_session_open_questions_api_sessions__session_id__open_questions_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenQuestion"
+                  },
+                  "title": "Response Get Session Open Questions Api Sessions  Session Id  Open Questions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/follow-up-email": {
+      "get": {
+        "tags": [
+          "debrief-follow-up-email"
+        ],
+        "summary": "Get Session Follow Up Email",
+        "operationId": "get_session_follow_up_email_api_sessions__session_id__follow_up_email_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowUpEmailDraft"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/bank": {
+      "get": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Get Meeting Bank",
+        "operationId": "get_meeting_bank_api_meetings__meeting_id__bank_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingQuestionBank"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/runs/{run_id}/ratings": {
+      "post": {
+        "tags": [
+          "replay-ratings"
+        ],
+        "summary": "Rate Suggestion",
+        "operationId": "rate_suggestion_api_replay_runs__run_id__ratings_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionRatingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionRatingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "replay-status"
+        ],
+        "summary": "Get Run Status",
+        "operationId": "get_run_status_api_replay_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayRunStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings": {
+      "get": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Get Settings",
+        "description": "Current settings. Secrets appear as presence and a hint, never as values.",
+        "operationId": "get_settings_api_admin_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Put Settings",
+        "description": "Apply a settings change and return the new state.\n\nReturning the full settings rather than 204 lets the admin screen\nre-render from the service's view instead of its own optimistic one \u2014\nwhich matters most for secrets, where the client cannot know the\nresulting hint without being told.",
+        "operationId": "put_settings_api_admin_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings/{key}/test": {
+      "post": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Test Connection",
+        "description": "Check that a configured credential actually works.\n\nA 200 with `reachable: false` rather than an error status: the request\nitself succeeded, and the operator needs the reason rendered in the\nform next to the field, not an exception.",
+        "operationId": "test_connection_api_admin_settings__key__test_post",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SecretKey"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionCheck"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition": {
+      "post": {
+        "tags": [
+          "nudges"
+        ],
+        "summary": "Record Nudge Disposition Endpoint",
+        "operationId": "record_nudge_disposition_endpoint_api_meetings__meeting_id__nudges__nudge_id__disposition_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          },
+          {
+            "name": "nudge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Nudge Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NudgeDispositionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NudgeDispositionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/session/start": {
+      "post": {
+        "tags": [
+          "live-session"
+        ],
+        "summary": "Start Session Endpoint",
+        "operationId": "start_session_endpoint_api_meetings__meeting_id__session_start_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStart"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/slow-lane/tick": {
+      "post": {
+        "tags": [
+          "slow-lane"
+        ],
+        "summary": "Accept Slow Lane Tick",
+        "operationId": "accept_slow_lane_tick_api_meetings__meeting_id__slow_lane_tick_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlowLaneTickResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/runs": {
+      "post": {
+        "tags": [
+          "replay-runs"
+        ],
+        "summary": "Start Replay Run",
+        "operationId": "start_replay_run_api_replay_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartReplayRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartReplayRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/replay/runs/{run_id}/metrics": {
+      "get": {
+        "tags": [
+          "replay-metrics"
+        ],
+        "summary": "Get Run Metrics",
+        "operationId": "get_run_metrics_api_replay_runs__run_id__metrics_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayRunMetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/bank": {
+      "get": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Get Engagement Bank",
+        "operationId": "get_engagement_bank_api_engagements__engagement_id__bank_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementQuestionBank"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/bank/compile": {
+      "post": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Compile Engagement Bank",
+        "operationId": "compile_engagement_bank_api_engagements__engagement_id__bank_compile_post",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankCompileTrigger"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bank/candidates/{candidate_id}": {
+      "delete": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Delete Bank Candidate",
+        "operationId": "delete_bank_candidate_api_bank_candidates__candidate_id__delete",
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Patch Bank Candidate",
+        "operationId": "patch_bank_candidate_api_bank_candidates__candidate_id__patch",
+        "parameters": [
+          {
+            "name": "candidate_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Candidate Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidatePatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/app__modules__compiler__api__models__BankCandidate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/state": {
+      "get": {
+        "tags": [
+          "engagement-state"
+        ],
+        "summary": "Get Engagement State",
+        "operationId": "get_engagement_state_api_engagements__engagement_id__state_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementStateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/vocabulary": {
+      "post": {
+        "tags": [
+          "engagement-vocabulary"
+        ],
+        "summary": "Add Vocabulary Term Endpoint",
+        "operationId": "add_vocabulary_term_endpoint_api_engagements__engagement_id__vocabulary_post",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabularyTermCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyTermResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/attendees": {
+      "post": {
+        "tags": [
+          "meeting-attendees"
+        ],
+        "summary": "Create Attendee",
+        "operationId": "create_attendee_api_meetings__meeting_id__attendees_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttendeeCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attendee"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/attendees/from-calendar-invite": {
+      "post": {
+        "tags": [
+          "meeting-attendees"
+        ],
+        "summary": "Create Attendees From Calendar Invite",
+        "operationId": "create_attendees_from_calendar_invite_api_meetings__meeting_id__attendees_from_calendar_invite_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarInvite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Attendee"
+                  },
+                  "title": "Response Create Attendees From Calendar Invite Api Meetings  Meeting Id  Attendees From Calendar Invite Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{document_id}/status": {
+      "patch": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Patch Document Status",
+        "operationId": "patch_document_status_api_documents__document_id__status_patch",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentStatusUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementDocument"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/documents/link": {
+      "post": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Attach Reference Document Link",
+        "operationId": "attach_reference_document_link_api_engagements__engagement_id__documents_link_post",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentLinkAttachmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferenceDocument"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AlignedSpan": {
+        "properties": {
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "End Seconds"
+          },
+          "reference_engine": {
+            "type": "string",
+            "title": "Reference Engine"
+          },
+          "reference_text": {
+            "type": "string",
+            "title": "Reference Text"
+          },
+          "other_engine": {
+            "type": "string",
+            "title": "Other Engine"
+          },
+          "other_text": {
+            "type": "string",
+            "title": "Other Text"
+          },
+          "agreement_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreement Score"
+          },
+          "is_divergent": {
+            "type": "boolean",
+            "title": "Is Divergent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_seconds",
+          "end_seconds",
+          "reference_engine",
+          "reference_text",
+          "other_engine",
+          "other_text",
+          "agreement_score",
+          "is_divergent"
+        ],
+        "title": "AlignedSpan",
+        "description": "One time-aligned span comparing both engines' output over the same interval.\n\n`reference_text`/`other_text` are what each engine produced for this\nspan \u2014 `other_text` is the concatenation of whatever the other engine's\nsegments overlap this interval, since the two engines rarely agree on\nexact segment boundaries even when they agree on the words. `agreement_score`\nis the confidence signal this feature exists to produce: 1.0 means the\ntwo engines' normalized wording matched exactly here, 0.0 means they\nshared no words at all (including the case where one engine transcribed\nsilence where the other transcribed speech) \u2014 it is never left null,\nsince a low or zero score is itself meaningful signal, not a missing value.\n\n`is_divergent` is set alongside `agreement_score` by `alignment.py`\n(PRD FR-2.8) whenever that score falls below the divergence threshold.\nIt is a separate persisted field rather than something a reader\nrecomputes from `agreement_score` at display time, so every disagreeing\nspan is flagged for operator review during debrief instead of the\nservice silently picking one engine's wording as the winner."
+      },
+      "ArtifactCitation": {
+        "properties": {
+          "utterance_id": {
+            "type": "string",
+            "title": "Utterance Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "End Seconds"
+          },
+          "speaker_tag": {
+            "type": "string",
+            "title": "Speaker Tag"
+          },
+          "quoted_text": {
+            "type": "string",
+            "title": "Quoted Text"
+          },
+          "original_language": {
+            "type": "string",
+            "title": "Original Language"
+          },
+          "translated_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "utterance_id",
+          "session_id",
+          "start_seconds",
+          "end_seconds",
+          "speaker_tag",
+          "quoted_text",
+          "original_language"
+        ],
+        "title": "ArtifactCitation",
+        "description": "One BMAD analyst artifact claim's grounding in an actual classified utterance (PRD FR-2.7, FR-8.7, FR-8.7a).\n\nNever constructed from whatever timestamp, speaker, or wording the\nanalyst chain claims for a citation \u2014 `resolve_citations` in\n`bmad_analyst.py` builds every field here by looking the cited\n`utterance_id` up in the session's own `ClassifiedUtterance`s, the same\nrecord-path-derived data every earlier debrief stage persisted. A chain\noutput citing an `utterance_id` that isn't one of them fails the run\nrather than persisting a citation nothing backs.\n\n`quoted_text` is always the original-language wording (`verbatim_text`),\nnever a translation \u2014 PRD FR-8.7a requires the original to remain\nrenderable, not replaced. `translated_text` is `None` when the cited\nutterance's `original_language` already matches the session's document\nlanguage; where it differs, `translated_text` carries the translation\nso a UI can display it by default and render `quoted_text` \u2014 the\noriginal \u2014 on expand."
+      },
+      "ArtifactDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "artifact_type": {
+            "$ref": "#/components/schemas/ArtifactType"
+          },
+          "artifact_language": {
+            "type": "string",
+            "title": "Artifact Language"
+          },
+          "body": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Body"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "artifact_type",
+          "artifact_language",
+          "body",
+          "generated_at"
+        ],
+        "title": "ArtifactDetail",
+        "description": "One full `artifacts` table row, looked up by its own `id` (PRD FR-8.1 through FR-8.7).\n\n`body` carries the artifact's full rendered content with every citation\nit references already expanded into citation detail (utterance_id,\ntimestamps, speaker, quoted/translated text) rather than left as a bare\nutterance_id \u2014 the same `ArtifactCitation`/`CitationRow` shape every\nother debrief artifact route already returns its citations in."
+      },
+      "ArtifactSummary": {
+        "properties": {
+          "artifact_type": {
+            "$ref": "#/components/schemas/ArtifactType"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_type",
+          "generated_at"
+        ],
+        "title": "ArtifactSummary",
+        "description": "One artifact a meeting has produced, listed by kind and generation time."
+      },
+      "ArtifactType": {
+        "type": "string",
+        "enum": [
+          "transcript",
+          "coverage_matrix",
+          "open_questions",
+          "decision_log",
+          "project_brief",
+          "follow_up_email"
+        ],
+        "title": "ArtifactType",
+        "description": "Which of the six PRD FR-8.1-8.6 durable artifact kinds a row holds."
+      },
+      "Attendee": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "business_function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Function"
+          },
+          "decision_authority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Authority"
+          },
+          "domain_expertise": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Domain Expertise"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "meeting_id"
+        ],
+        "title": "Attendee",
+        "description": "A persisted `attendees` row (PRD FR-3.9, FR-3.10)."
+      },
+      "AttendeeCreateRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "business_function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Function"
+          },
+          "decision_authority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Authority"
+          },
+          "domain_expertise": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Domain Expertise"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AttendeeCreateRequest",
+        "description": "One attendee's structured profile, captured with no free-text assessment field (PRD FR-3.10)."
+      },
+      "AuthMode": {
+        "type": "string",
+        "enum": [
+          "api_key",
+          "oauth_token"
+        ],
+        "title": "AuthMode",
+        "description": "Which credential the service authenticates Claude calls with.\n\nBoth are \"bring your own\": an API key issued from the console, or an\nOAuth token from `claude setup-token` / `ant auth login`. Which one an\noperator has depends on how their organisation issues access, so this is\nan explicit choice rather than an inference from whichever field happens\nto be filled \u2014 an operator with both configured must be able to say which\none is live."
+      },
+      "BankCompileTrigger": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Job Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "triggered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Triggered At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "engagement_id",
+          "triggered_at"
+        ],
+        "title": "BankCompileTrigger",
+        "description": "Handle for one engagement's bank compile job, returned immediately on trigger (PRD FR-4.8).\n\nReturned when `POST /api/engagements/{id}/bank/compile` is accepted,\nbefore the actual compiling work (extraction, tagging, embedding -- all\nout of this feature's footprint) has produced any candidates yet.\n`job_id` is what a caller polls or correlates against later, mirroring\n`RecordPathTranscriptionJob`'s (`asr-record/models.py`) job-handle\nconvention for an accepted, not-yet-finished run."
+      },
+      "BmadArtifactSet": {
+        "properties": {
+          "open_questions": {
+            "items": {
+              "$ref": "#/components/schemas/OpenQuestion"
+            },
+            "type": "array",
+            "title": "Open Questions"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionLogEntry"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "project_brief": {
+            "$ref": "#/components/schemas/ProjectBriefDraft"
+          },
+          "follow_up_email": {
+            "$ref": "#/components/schemas/FollowUpEmailDraft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open_questions",
+          "decisions",
+          "project_brief",
+          "follow_up_email"
+        ],
+        "title": "BmadArtifactSet",
+        "description": "The full set of artifacts one BMAD analyst chain run must produce to count as complete.\n\nA run that produced only some of these \u2014 an open-questions list but no\nproject brief, say \u2014 is a vendor contract violation, not a partial\nsuccess: `run_bmad_analyst_chain` only ever persists a `BmadArtifactSet`\non a `COMPLETE` run, never a partially-populated one."
+      },
+      "Body_upload_engagement_document_api_engagements__engagement_id__documents_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "status"
+        ],
+        "title": "Body_upload_engagement_document_api_engagements__engagement_id__documents_post"
+      },
+      "CalendarInvite": {
+        "properties": {
+          "invitees": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarInvitee"
+            },
+            "type": "array",
+            "title": "Invitees"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CalendarInvite",
+        "description": "A calendar invite's invitee list, used to pre-populate meeting attendees (PRD FR-3.9)."
+      },
+      "CalendarInvitee": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Email"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "CalendarInvitee",
+        "description": "One person invited via a calendar invite (PRD FR-3.9).\n\n`email` is the only field a calendar invite reliably carries for every\ninvitee; `display_name` is the friendlier label most calendar systems\nalso include. Neither implies any of the structured profile fields\n(`role`, `business_function`, `decision_authority`, `domain_expertise`)\nfrom FR-3.10 -- those are unknowable from an invite and are filled in\nlater, so a pre-populated attendee starts with only a name."
+      },
+      "CandidatePatchRequest": {
+        "properties": {
+          "phrasing": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phrasing"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "pruned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pruned"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CandidatePatchRequest",
+        "description": "A partial update to one bank candidate: edit its phrasing, reorder its priority, or prune it (PRD FR-4.8).\n\nAll fields are optional so a caller can change just one aspect at a\ntime, but at least one must be supplied, since a PATCH with nothing to\nchange has no meaningful effect to report as a 200."
+      },
+      "CitationRow": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "claim_kind": {
+            "$ref": "#/components/schemas/ClaimKind"
+          },
+          "claim_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Claim Index"
+          },
+          "utterance_id": {
+            "type": "string",
+            "title": "Utterance Id"
+          },
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "End Seconds"
+          },
+          "speaker_tag": {
+            "type": "string",
+            "title": "Speaker Tag"
+          },
+          "quoted_text": {
+            "type": "string",
+            "title": "Quoted Text"
+          },
+          "original_language": {
+            "type": "string",
+            "title": "Original Language"
+          },
+          "translated_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "claim_kind",
+          "claim_index",
+          "utterance_id",
+          "start_seconds",
+          "end_seconds",
+          "speaker_tag",
+          "quoted_text",
+          "original_language"
+        ],
+        "title": "CitationRow",
+        "description": "One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7, FR-8.7a).\n\n`build_citation_rows` in `citations.py` is the only place these are\nbuilt, one per `ArtifactCitation` already nested on a `BmadArtifactSet`\nclaim \u2014 never re-derived from anything the chain reported directly, the\nsame grounding-in-persisted-data reasoning `resolve_citations` uses. A\nclaim with more than one citation gets one row per citation, all sharing\nthe same `claim_kind`/`claim_index`; a claim with none is a vendor\ncontract violation `build_citation_rows` raises on rather than silently\nproducing zero rows for it (PRD FR-8.7 requires a row for every claim).\n`claim_index` is the claim's position within its own category's list \u2014\nalways `0` for the singular `project_brief` and `follow_up_email`\nclaims, and the list index for `open_questions`/`decisions`.\n\n`quoted_text` carries the citation's original-language wording and\n`translated_text` its translation (`None` for a same-language citation),\nboth copied straight from the `ArtifactCitation` this row binds to \u2014 a\nrow for a cross-language claim carries both, exactly what PRD FR-8.7a\nrequires the citations table to persist."
+      },
+      "ClaimKind": {
+        "type": "string",
+        "enum": [
+          "open_question",
+          "decision",
+          "project_brief",
+          "follow_up_email"
+        ],
+        "title": "ClaimKind",
+        "description": "Which BMAD analyst artifact category a persisted citation row's claim belongs to (PRD FR-8.7)."
+      },
+      "ClaimProvenance": {
+        "type": "string",
+        "enum": [
+          "stated",
+          "inferred"
+        ],
+        "title": "ClaimProvenance",
+        "description": "Whether a BMAD analyst artifact claim was directly heard or inferred by the chain (PRD FR-8.8).\n\nPRD FR-8.8 requires anything the system inferred rather than heard to be\nvisually flagged as inference. `normalize_provenance` in `bmad_analyst.py`\nonly ever returns `STATED` for a chain output the caller explicitly\nmarked as such; anything else \u2014 an unrecognized value, a typo, a vendor\nthat omitted the field \u2014 falls back to `INFERRED`, the same\nfail-safe-to-the-visible-flag reasoning `UNKNOWN_SPEAKER_TAG` and\n`UNCLASSIFIED_SECTION_KEY` use elsewhere in this package: an operator\nwrongly told \"the client said this\" cannot un-hear it, while an operator\nwrongly told \"the system inferred this\" only has to double-check."
+      },
+      "ConfirmedRequirement": {
+        "properties": {
+          "section_key": {
+            "type": "string",
+            "title": "Section Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageCitation"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_key",
+          "title",
+          "citations"
+        ],
+        "title": "ConfirmedRequirement",
+        "description": "One BMAD taxonomy section an engagement's standing requirements state treats as confirmed (PRD FR-8.9).\n\nSourced only from a `FILLED` `CoverageMatrixEntry` of a `COMPLETE`\n`RequirementsCoverageMatrix` \u2014 never from the chain's own account of what\nit discussed \u2014 so `citations` always carries at least one grounding\ncitation, the same grounding-in-persisted-data reasoning `matrix.py` uses\nfor a filled coverage slot."
+      },
+      "ConnectionCheck": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/SecretKey"
+          },
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "reachable",
+          "detail"
+        ],
+        "title": "ConnectionCheck",
+        "description": "The result of testing a configured vendor credential.\n\n`detail` is a human-readable reason on failure. It is built from the\nvendor's error type, never from the credential."
+      },
+      "ConsentConfirmationRequest": {
+        "properties": {
+          "confirmed_by": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Confirmed By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirmed_by"
+        ],
+        "title": "ConsentConfirmationRequest",
+        "description": "Payload for an operator confirming the consent prompt (PRD feature 246)."
+      },
       "ConsentGate": {
         "properties": {
           "status": {
@@ -157,6 +2873,429 @@
         "title": "ConsentPrompt",
         "description": "Operator-facing copy shown before capture begins (PRD L2)."
       },
+      "ConsentRecord": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "confirmed_by": {
+            "type": "string",
+            "title": "Confirmed By"
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Confirmed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "confirmed_by",
+          "confirmed_at"
+        ],
+        "title": "ConsentRecord",
+        "description": "Durable proof that consent was confirmed for one meeting (PRD feature 246).\n\n``confirmed_by`` identifies the operator who confirmed the prompt, not\nthe meeting participants \u2014 this records accountability for having\ndisclosed and confirmed consent, which is what a later audit needs."
+      },
+      "CoverageCitation": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine"
+          },
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "End Seconds"
+          },
+          "quoted_text": {
+            "type": "string",
+            "title": "Quoted Text"
+          },
+          "transcript_completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Transcript Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "engine",
+          "start_seconds",
+          "end_seconds",
+          "quoted_text",
+          "transcript_completed_at"
+        ],
+        "title": "CoverageCitation",
+        "description": "One record-path source reference grounding a filled coverage slot (PRD FR-2.7/FR-8.7).\n\nShaped like `asr-record`'s `RecordPathSourceReference`, but defined here\nrather than imported from it: this package stays decoupled from\n`asr-record`'s internals the same way `debrief/pipeline` does, taking the\nactual citation lookup as an injected callable (`CiteFilledSlot` in\n`matrix.py`) instead of importing a concrete transcript type."
+      },
+      "CoverageSlotUpdate": {
+        "properties": {
+          "template_section": {
+            "type": "string",
+            "title": "Template Section"
+          },
+          "fill_state": {
+            "$ref": "#/components/schemas/FillState"
+          },
+          "satisfied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Satisfied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_section",
+          "fill_state"
+        ],
+        "title": "CoverageSlotUpdate",
+        "description": "One coverage matrix cell a slow-lane pass updated (architecture \u00a74: `CoverageSlot[]`).\n\n`satisfied_at` is `None` unless this pass is the one that moved the slot\nto `FILLED` -- mirroring `core/crates/coverage::CoverageStore`'s\n`satisfied_at`, which only a fill transition (not merely remaining\nfilled) sets."
+      },
+      "DebriefConversationSession": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "conversation_ref": {
+            "type": "string",
+            "title": "Conversation Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DebriefSessionStatus"
+          },
+          "streaming_enabled": {
+            "type": "boolean",
+            "title": "Streaming Enabled"
+          },
+          "length_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length Cap"
+          },
+          "latency_budget_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Budget Seconds"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opened At"
+          },
+          "nudge_dispositions": {
+            "items": {
+              "$ref": "#/components/schemas/NudgeDispositionRecord"
+            },
+            "type": "array",
+            "title": "Nudge Dispositions"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/DebriefMessage"
+            },
+            "type": "array",
+            "title": "History"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "meeting_id",
+          "conversation_ref",
+          "status",
+          "streaming_enabled",
+          "length_cap",
+          "latency_budget_seconds",
+          "opened_at",
+          "nudge_dispositions",
+          "history"
+        ],
+        "title": "DebriefConversationSession",
+        "description": "One meeting's open debrief conversation (PRD FR-7.1, FR-7.4).\n\n`conversation_ref` is the opaque handle the injected\n`OpenStreamingConversation` call returns for the underlying streaming\nconversation (backed by the Claude Agent SDK per the PRD) \u2014 this package\nnever inspects it, just carries it so a later message-exchange stage can\naddress the right conversation.\n\n`nudge_dispositions` is the inherited live-mode signal (FR-7.4): every\nnudge that fired during the call, each carrying whichever disposition \u2014\nfired, taken, or parked \u2014 it ended live mode with. It is persisted as\npart of the session itself rather than fetched separately, so the\ndebrief context always has that history the moment the session opens.\n\n`history` is every turn exchanged in the conversation so far, in order,\neach carrying its raw content blocks rather than extracted text (see\n`DebriefMessage`). It opens empty and grows one user turn plus one\nassistant turn per message sent."
+      },
+      "DebriefMessage": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/DebriefMessageRole"
+          },
+          "content": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Content"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "content",
+          "recorded_at"
+        ],
+        "title": "DebriefMessage",
+        "description": "One turn of the debrief conversation, persisted verbatim.\n\n`content` is the underlying streaming conversation's own list of content\nblocks \u2014 for an assistant turn, the full `response.content` the Claude\nAgent SDK returns \u2014 rather than a text extraction of it. This package\nnever inspects the blocks, only carries them, since it has no way to\nknow which ones the vendor's server-side compaction has attached state\nto."
+      },
+      "DebriefMessageRequest": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "DebriefMessageRequest",
+        "description": "Request body for sending a free-form message into an open debrief conversation."
+      },
+      "DebriefMessageRole": {
+        "type": "string",
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "title": "DebriefMessageRole",
+        "description": "Who authored one turn of the debrief conversation history."
+      },
+      "DebriefSessionStatus": {
+        "type": "string",
+        "enum": [
+          "open"
+        ],
+        "title": "DebriefSessionStatus",
+        "description": "Lifecycle state of a debrief conversation session.\n\nOnly `OPEN` is ever produced by this package \u2014 closing or resuming a\ndebrief conversation is a separate concern from opening one."
+      },
+      "DecisionLogEntry": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "decided_by": {
+            "type": "string",
+            "title": "Decided By"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ClaimProvenance"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactCitation"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "decided_by",
+          "provenance",
+          "citations"
+        ],
+        "title": "DecisionLogEntry",
+        "description": "One decision or commitment the BMAD analyst chain identified in the session (PRD FR-8.4)."
+      },
+      "DocumentLinkAttachmentRequest": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Url"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url",
+          "status"
+        ],
+        "title": "DocumentLinkAttachmentRequest",
+        "description": "Body for attaching a reference document by link (PRD FR-3.2).\n\n`url` is validated against known SharePoint and Microsoft Teams\nhostnames rather than accepted as any URL: FR-3.2 asks specifically for\nthose two sources, so an unsupported host fails validation with a 422\nnaming the field, the same style FR-3.4 uses for a missing `status`."
+      },
+      "DocumentStatus": {
+        "type": "string",
+        "enum": [
+          "ground truth",
+          "hypothesis",
+          "superseded"
+        ],
+        "title": "DocumentStatus",
+        "description": "Status tag required on every reference document (PRD FR-3.4)."
+      },
+      "DocumentStatusUpdateRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DocumentStatusUpdateRequest",
+        "description": "Body for retagging a document's status (PATCH .../documents/{id}/status)."
+      },
+      "EgressLogRow": {
+        "properties": {
+          "timestamp_ms": {
+            "type": "integer",
+            "title": "Timestamp Ms"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "processor_name": {
+            "type": "string",
+            "title": "Processor Name"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "byte_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Byte Count"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp_ms",
+          "engagement_id",
+          "processor_name",
+          "byte_count",
+          "success"
+        ],
+        "title": "EgressLogRow",
+        "description": "One row as written to the `egress_log` table.\n\n``engagement_id`` identifies which engagement the call was made on\nbehalf of. It is always present \u2014 even for the regionless row of a call\nthe chokepoint refused outright \u2014 since the request carries it before\nthe region lookup happens, and it is what the audit log at\n`GET /api/audit/egress` filters rows by.\n\n``region`` is the processing region pinned for the call's engagement\n(PRD NFR-2.2), recorded on every row so residency can be audited after\nthe fact rather than only enforced at call time. It is ``None`` only\nfor the row of a call the chokepoint refused outright because its\nengagement had no region pinned \u2014 such a call never reaches the\ntransport, so there is no region to record.\n\n``byte_count`` is the total bytes moved for this call: the request body\nsent, plus the response body received when the call succeeded. A failed\ncall still counts the bytes that were sent before it failed."
+      },
+      "EngagementContext": {
+        "properties": {
+          "client_organisation": {
+            "type": "string",
+            "title": "Client Organisation"
+          },
+          "sector": {
+            "type": "string",
+            "title": "Sector"
+          },
+          "commercial_context": {
+            "type": "string",
+            "title": "Commercial Context"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "scope_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Boundary"
+          },
+          "target_requirements_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Requirements Template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_organisation",
+          "sector",
+          "commercial_context"
+        ],
+        "title": "EngagementContext",
+        "description": "The engagement-level context a new meeting inherits automatically (PRD FR-3.1, FR-3.5, FR-3.7).\n\nMirrors the engagement's own context fields -- three captured at\nengagement creation (`client_organisation`, `sector`,\n`commercial_context`), three filled in later (`purpose`,\n`scope_boundary`, `target_requirements_template`) -- so a meeting-create\nresponse can echo them back for confirmation without this package\nimporting the engagement package's persistence-backed record type."
+      },
       "EngagementCreateRequest": {
         "properties": {
           "client_organisation": {
@@ -197,6 +3336,245 @@
         ],
         "title": "EngagementCreateResponse"
       },
+      "EngagementDocument": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Document Id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "name",
+          "status"
+        ],
+        "title": "EngagementDocument",
+        "description": "One reference document attached to an engagement, with its status tag."
+      },
+      "EngagementDocumentListResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Engagement Id"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/EngagementDocument"
+            },
+            "type": "array",
+            "title": "Documents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "documents"
+        ],
+        "title": "EngagementDocumentListResponse",
+        "description": "The full document list for one engagement (GET .../documents)."
+      },
+      "EngagementQuestionBank": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionBankSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "sections",
+          "generated_at"
+        ],
+        "title": "EngagementQuestionBank",
+        "description": "An engagement's compiled question bank, rendered as a reviewable tree grouped by template section (PRD FR-4.8).\n\nGrouped into `sections` rather than returned as `MeetingQuestionBank`'s\nflat candidate list: this is the engagement's own compiled set (from\n`POST /api/engagements/{id}/bank/compile`, out of this feature's\nfootprint) as a reviewer inspects it once, before any individual\nmeeting recompiles from it -- so it renders as branches a reviewer can\nexpand and act on rather than one long list."
+      },
+      "EngagementStateResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Engagement Id"
+          },
+          "inherited_open_questions": {
+            "items": {
+              "$ref": "#/components/schemas/InheritedOpenQuestion"
+            },
+            "type": "array",
+            "title": "Inherited Open Questions"
+          },
+          "requirements_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementsState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "inherited_open_questions"
+        ],
+        "title": "EngagementStateResponse",
+        "description": "An engagement's inherited open questions plus its standing requirements state (PRD FR-4.8, FR-8.9).\n\n`inherited_open_questions` is ranked ascending by `impact_rank` \u2014 the\nhighest-impact question a prior meeting left open comes first, the same\nconvention `compiler/bank/recompile.py` and `debrief/artifacts/router.py`'s\n`build_open_questions_router` use. `requirements_state` is `None` for an\nengagement with no prior meetings: there is nothing yet to carry forward,\nnot a 404-worthy absence \u2014 `router.py`'s route always answers 200."
+      },
+      "EngagementUpdateRequest": {
+        "properties": {
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "scope_boundary": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Boundary"
+          },
+          "target_requirements_template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Requirements Template"
+          }
+        },
+        "type": "object",
+        "title": "EngagementUpdateRequest",
+        "description": "Engagement purpose, scope boundary, and target requirements template (PRD FR-3.5).\n\nAll three fields are optional so a caller can update any subset of them\nin a single PATCH; at least one must be supplied, since a PATCH with\nnothing to change has no meaningful effect to report as a 200."
+      },
+      "EngagementUpdateResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "scope_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Boundary"
+          },
+          "target_requirements_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Requirements Template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id"
+        ],
+        "title": "EngagementUpdateResponse"
+      },
+      "FillState": {
+        "type": "string",
+        "enum": [
+          "empty",
+          "partial",
+          "filled"
+        ],
+        "title": "FillState",
+        "description": "How much of a template section the meeting has covered so far (PRD FR-8.2; architecture \u00a74)."
+      },
+      "FollowUpEmailDraft": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ClaimProvenance"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactCitation"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "body",
+          "provenance",
+          "citations"
+        ],
+        "title": "FollowUpEmailDraft",
+        "description": "The BMAD analyst chain's draft follow-up email for the session (PRD FR-8.6)."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -209,6 +3587,1290 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "InferenceSettings": {
+        "properties": {
+          "auth_mode": {
+            "$ref": "#/components/schemas/AuthMode",
+            "description": "Whether calls authenticate with an API key or an OAuth token.",
+            "default": "api_key"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model",
+            "description": "Model used for the context compiler and debrief pipeline.",
+            "default": "claude-opus-5"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "Override the Anthropic API endpoint. Leave unset for the default."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InferenceSettings",
+        "description": "Non-secret inference configuration (architecture ADR-012, \u00a73.10)."
+      },
+      "InheritedOpenQuestion": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "impact_rank": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Impact Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "impact_rank"
+        ],
+        "title": "InheritedOpenQuestion",
+        "description": "One prior meeting's open question, carried onto the engagement's standing state (PRD FR-4.8).\n\nMirrors `compiler/bank/recompile.py`'s type of the same name and for the\nsame reason: this package stays decoupled from `debrief`'s internals,\ntaking the prior meeting's open questions as this small local shape\ninstead of importing `debrief/pipeline/models.py`'s `OpenQuestion`."
+      },
+      "LanguagePrecision": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Language"
+          },
+          "surfaced_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Surfaced Count"
+          },
+          "useful_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Useful Count"
+          },
+          "precision_at_surfaced": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Precision At Surfaced"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "surfaced_count",
+          "useful_count",
+          "precision_at_surfaced"
+        ],
+        "title": "LanguagePrecision",
+        "description": "M1 for one language: precision@surfaced over its rated suggestions."
+      },
+      "MeetingAttendee": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "business_function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Business Function"
+          },
+          "decision_authority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Authority"
+          },
+          "domain_expertise": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Domain Expertise"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "MeetingAttendee",
+        "description": "One attendee on the meeting being read back (PRD FR-3.9, FR-3.10).\n\nMirrors `engagement/meetings`'s persisted `Attendee` row rather than\nimporting it, since that package's record type does not live in this\npackage (`app/modules/debrief/api`) -- the same cross-module boundary\n`EngagementContext` draws in `engagement/meetings/models.py`."
+      },
+      "MeetingCoverageSummary": {
+        "properties": {
+          "filled_sections": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Filled Sections"
+          },
+          "total_sections": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Sections"
+          },
+          "is_fully_covered": {
+            "type": "boolean",
+            "title": "Is Fully Covered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filled_sections",
+          "total_sections",
+          "is_fully_covered"
+        ],
+        "title": "MeetingCoverageSummary",
+        "description": "A condensed readout of one meeting's requirements coverage matrix (PRD FR-8.2).\n\nCarries only the counts a meeting-detail caller needs to gauge progress\nat a glance -- how many BMAD taxonomy sections this meeting has filled\nversus how many exist -- rather than the full per-section\n`CoverageMatrixEntry` list `debrief/artifacts` already exposes on its own\nroutes. `is_fully_covered` mirrors `RequirementsCoverageMatrix`'s own\nfield of the same name."
+      },
+      "MeetingCreateRequest": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Engagement Id"
+          },
+          "capture_mode": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Capture Mode"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "capture_mode"
+        ],
+        "title": "MeetingCreateRequest",
+        "description": "What's specific to a new meeting -- its engagement, capture mode, and schedule (PRD FR-3.7, FR-3.8).\n\nDeliberately excludes every engagement-level context field: those are\ninherited automatically from `engagement_id` rather than re-entered\nhere. `capture_mode` is required since the `meetings` table declares it\n`NOT NULL` with no default; `scheduled_at` is optional since a meeting\ncan be created before a time is settled."
+      },
+      "MeetingCreateResponse": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "capture_mode": {
+            "type": "string",
+            "title": "Capture Mode"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "engagement_context": {
+            "$ref": "#/components/schemas/EngagementContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "engagement_id",
+          "state",
+          "capture_mode",
+          "engagement_context"
+        ],
+        "title": "MeetingCreateResponse",
+        "description": "A newly created meeting, with its inherited engagement context attached for confirmation (PRD FR-3.7)."
+      },
+      "MeetingDetail": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "capture_mode": {
+            "type": "string",
+            "title": "Capture Mode"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "attendees": {
+            "items": {
+              "$ref": "#/components/schemas/MeetingAttendee"
+            },
+            "type": "array",
+            "title": "Attendees"
+          },
+          "coverage_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeetingCoverageSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nudge_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Nudge Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "engagement_id",
+          "state",
+          "capture_mode",
+          "attendees",
+          "nudge_count"
+        ],
+        "title": "MeetingDetail",
+        "description": "A single meeting read back with its attendees, coverage summary, and nudge count.\n\nAggregates across the `meetings` and `attendees` tables and the\ncoverage-matrix/nudge-disposition state, none of which this package\nowns, so it is assembled by a single injected lookup rather than three\nseparate reads -- the same \"no transformation, just an injected lookup\"\ncontract `ArtifactDetail`'s router uses. `coverage_summary` is `None`\nuntil the meeting's debrief pipeline has run a section classification;\n`nudge_count` is the number of live-mode nudges that fired during the\nmeeting's capture (PRD FR-7.4), `0` for a meeting with no live-mode\ncapture yet."
+      },
+      "MeetingQuestionBank": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/app__modules__compiler__bank__models__BankCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "candidates",
+          "generated_at"
+        ],
+        "title": "MeetingQuestionBank",
+        "description": "The fresh, per-meeting recompiled question bank (PRD FR-4.8).\n\nRecomputed by `recompile_meeting_bank` for every meeting rather than\nreused across an engagement's meetings \u2014 \"the bank\" a live meeting reads\nfrom is always this meeting's own recompile, not the engagement's\noriginal compile from `POST /api/engagements/{id}/bank/compile`."
+      },
+      "MeetingUpdateRequest": {
+        "properties": {
+          "session_purpose": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Purpose"
+          },
+          "target_template_sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Template Sections"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MeetingUpdateRequest",
+        "description": "This session's purpose and target template sections (PRD FR-3.8).\n\nBoth fields are optional so a caller can update either one alone; at\nleast one must be supplied, since a PATCH with nothing to change has no\nmeaningful effect to report as a 200."
+      },
+      "MeetingUpdateResponse": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "session_purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Purpose"
+          },
+          "target_template_sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Template Sections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id"
+        ],
+        "title": "MeetingUpdateResponse",
+        "description": "A meeting's session purpose and target template sections after a PATCH (PRD FR-3.8)."
+      },
+      "NudgeDisposition": {
+        "type": "string",
+        "enum": [
+          "fired",
+          "taken",
+          "parked"
+        ],
+        "title": "NudgeDisposition",
+        "description": "How one live-mode nudge was resolved by the time the call ended (PRD FR-7.4).\n\n`FIRED` is itself a disposition, not a placeholder for a missing one \u2014\nit means the nudge surfaced and the call ended before the operator took\nor parked it."
+      },
+      "NudgeDispositionRecord": {
+        "properties": {
+          "nudge_id": {
+            "type": "string",
+            "title": "Nudge Id"
+          },
+          "stub": {
+            "type": "string",
+            "title": "Stub"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "trigger_reason": {
+            "type": "string",
+            "title": "Trigger Reason"
+          },
+          "fired_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fired At"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/NudgeDisposition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nudge_id",
+          "stub",
+          "question",
+          "trigger_reason",
+          "fired_at",
+          "disposition"
+        ],
+        "title": "NudgeDispositionRecord",
+        "description": "One live-mode nudge as inherited into the debrief thread (PRD FR-7.4).\n\nMirrors the live nudge assistant's own surfaced nudge (a stub headline,\nthe full question, and the reason it fired \u2014 PRD FR-6.2/6.3/5.11) plus\nthe `disposition` it ended live mode with, so the debrief conversation\ncan discuss a specific nudge without a further round trip to the\nlive-mode store."
+      },
+      "NudgeDispositionRequest": {
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/OperatorNudgeDisposition"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "disposition"
+        ],
+        "title": "NudgeDispositionRequest",
+        "description": "Request body for recording an operator's disposition of one nudge."
+      },
+      "NudgeDispositionResponse": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "nudge_id": {
+            "type": "string",
+            "title": "Nudge Id"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/OperatorNudgeDisposition"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "nudge_id",
+          "disposition",
+          "recorded_at"
+        ],
+        "title": "NudgeDispositionResponse",
+        "description": "A recorded operator disposition, echoed back for confirmation."
+      },
+      "OpenQuestion": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "impact_rank": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Impact Rank"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ClaimProvenance"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactCitation"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "impact_rank",
+          "provenance",
+          "citations"
+        ],
+        "title": "OpenQuestion",
+        "description": "One ranked open question the BMAD analyst chain raised for the client (PRD FR-8.3)."
+      },
+      "OperatorNudgeDisposition": {
+        "type": "string",
+        "enum": [
+          "taken",
+          "parked"
+        ],
+        "title": "OperatorNudgeDisposition",
+        "description": "What an operator explicitly did with a surfaced nudge (PRD FR-6.6/6.7)."
+      },
+      "ProjectBriefDraft": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ClaimProvenance"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactCitation"
+            },
+            "type": "array",
+            "title": "Citations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body",
+          "provenance",
+          "citations"
+        ],
+        "title": "ProjectBriefDraft",
+        "description": "The BMAD analyst chain's draft project brief for the session (PRD FR-8.5)."
+      },
+      "QuestionBankSection": {
+        "properties": {
+          "template_section": {
+            "type": "string",
+            "title": "Template Section"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/app__modules__compiler__api__models__BankCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_section",
+          "candidates"
+        ],
+        "title": "QuestionBankSection",
+        "description": "One template section's branch in the reviewable question bank tree (PRD FR-4.8).\n\n`candidates` carries a section's candidates in the same relative order\nthey arrived in from the compiled candidate set -- the same ascending,\nlower-ranks-higher `priority` convention `BankCandidate` already uses --\nso a section's order in the tree matches the order a reviewer would rank\nthem in."
+      },
+      "RecordPathTranscript": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TranscriptionStatus"
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptSegment"
+            },
+            "type": "array",
+            "title": "Segments"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status",
+          "engine",
+          "segments",
+          "text",
+          "requested_at",
+          "completed_at"
+        ],
+        "title": "RecordPathTranscript",
+        "description": "Durable record-path transcript for one (session, engine) pair (PRD FR-2.5/2.6/2.7).\n\nOne of these persists per engine configured for the session (PRD FR-2.6\nruns two independent engines), not one per session \u2014 `engine` plus\n`session_id` together identify a given transcript. Persisted whether the\nbatch run succeeded or failed, since a session with no record-path\ntranscript at all is indistinguishable from one that simply hasn't been\nre-transcribed yet \u2014 `status` and `error` make a failed attempt visible\ninstead of silent."
+      },
+      "RecordPathTranscriptionJob": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TranscriptionJobStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "engine_lineages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Engine Lineages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "meeting_id",
+          "status",
+          "created_at",
+          "engine_lineages"
+        ],
+        "title": "RecordPathTranscriptionJob",
+        "description": "Handle for one meeting's record-path transcription job (PRD FR-2.5).\n\nReturned immediately when a meeting's full-recording re-transcription is\naccepted, before the (potentially long-running) batch engine call has\nfinished \u2014 `job_id` is what a caller polls or correlates against later,\nsince the transcript itself is not ready yet.\n\n`engine_lineages` records both engine identifiers configured for this run\non the job itself, not just on each engine's own `RecordPathTranscript`\n(PRD FR-2.6). Reconciling the two engines' output only tells you anything\nif they're actually independent \u2014 sharing training data would make\nagreement between them meaningless \u2014 so the run record needs to show\nwhich two lineages were used together without having to join across the\nseparate per-engine transcripts, which may not both exist yet (one may\nstill be running, or may have failed before producing one)."
+      },
+      "RecordPathTranscriptionRequest": {
+        "properties": {
+          "audio_ref": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Audio Ref"
+          }
+        },
+        "type": "object",
+        "required": [
+          "audio_ref"
+        ],
+        "title": "RecordPathTranscriptionRequest",
+        "description": "Kicks off a batch re-transcription of one full session's recording.\n\n`audio_ref` points at the full-session recording (e.g. a storage key or\nURI) rather than carrying audio bytes inline \u2014 the recording store lives\noutside this package, same reasoning as the injected callables in\n`service.py`."
+      },
+      "ReferenceDocument": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Engagement Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "source_uri": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Uri"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "engagement_id",
+          "status",
+          "source_uri"
+        ],
+        "title": "ReferenceDocument",
+        "description": "One reference document row as persisted from a link attachment\n(mirrors the `reference_documents` table: PRD FR-3.2)."
+      },
+      "ReplayRunMetricsResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Run Id"
+          },
+          "languages": {
+            "items": {
+              "$ref": "#/components/schemas/LanguagePrecision"
+            },
+            "type": "array",
+            "title": "Languages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "languages"
+        ],
+        "title": "ReplayRunMetricsResponse",
+        "description": "M1, broken out per language, for one replay run (T13: never blended)."
+      },
+      "ReplayRunStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "ReplayRunStatus",
+        "description": "Lifecycle state of a replay run."
+      },
+      "ReplayRunStatusResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Run Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReplayRunStatus"
+          },
+          "progress": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Progress"
+          },
+          "suggestion_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Suggestion Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "suggestion_count"
+        ],
+        "title": "ReplayRunStatusResponse",
+        "description": "Progress snapshot for one replay run."
+      },
+      "RequirementsContradiction": {
+        "properties": {
+          "section_key": {
+            "type": "string",
+            "title": "Section Key"
+          },
+          "previous_citation": {
+            "$ref": "#/components/schemas/CoverageCitation"
+          },
+          "new_citation": {
+            "$ref": "#/components/schemas/CoverageCitation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_key",
+          "previous_citation",
+          "new_citation"
+        ],
+        "title": "RequirementsContradiction",
+        "description": "One section a later meeting confirmed differently than the standing requirements state already had it (PRD FR-8.9).\n\n`merge_requirements_state_forward` in `state.py` raises this whenever a\nmeeting's confirmation of `section_key` quotes something other than the\ncitation already on record for it \u2014 the state merge does not silently let\nthe newer meeting overwrite the earlier one, it keeps both citations\nvisible as a contradiction the operator can resolve."
+      },
+      "RequirementsState": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "confirmed_requirements": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedRequirement"
+            },
+            "type": "array",
+            "title": "Confirmed Requirements"
+          },
+          "contradictions": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementsContradiction"
+            },
+            "type": "array",
+            "title": "Contradictions"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionLogEntry"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "confirmed_requirements",
+          "contradictions",
+          "decisions",
+          "updated_at"
+        ],
+        "title": "RequirementsState",
+        "description": "Durable, engagement-scoped standing requirements state carried forward across meetings (PRD FR-8.9).\n\nUnlike every other artifact in this package, this is not scoped to one\nsession/meeting: there is exactly one `RequirementsState` per engagement,\nupserted by `merge_requirements_state_forward` each time a meeting's\ndebrief pipeline completes, so the next meeting in the engagement always\nreads the latest merged state rather than starting from nothing (PRD G4)."
+      },
+      "SecretKey": {
+        "type": "string",
+        "enum": [
+          "anthropic_api_key",
+          "anthropic_oauth_token",
+          "asr_vendor_api_key",
+          "capture_vendor_api_key"
+        ],
+        "title": "SecretKey",
+        "description": "The secrets an operator can configure.\n\nAn enum rather than free-form strings: a typo'd key name would otherwise\nsilently create a second, never-read secret while the real one stayed\nunset."
+      },
+      "SecretStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/SecretKey"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint",
+            "description": "Last four characters of the stored secret, to confirm which one is set."
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "configured"
+        ],
+        "title": "SecretStatus",
+        "description": "What a read of a secret returns: presence, not value."
+      },
+      "SecretUpdate": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/SecretKey"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "The secret, or an empty string to clear it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "SecretUpdate",
+        "description": "One secret being set or cleared.\n\nAn empty `value` clears the secret. That is the only way to remove one,\nand it is deliberately distinct from omitting the entry entirely, which\nleaves the stored secret alone."
+      },
+      "ServiceSettings": {
+        "properties": {
+          "inference": {
+            "$ref": "#/components/schemas/InferenceSettings"
+          },
+          "vendors": {
+            "$ref": "#/components/schemas/VendorSettings"
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/SecretStatus"
+            },
+            "type": "array",
+            "title": "Secrets"
+          },
+          "durable": {
+            "type": "boolean",
+            "title": "Durable",
+            "description": "Whether these settings survive a service restart. Surfaced so the admin screen can say so plainly, rather than letting an operator discover it after a restart.",
+            "default": false
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ServiceSettings",
+        "description": "Everything an operator can administer, with no secret values in it."
+      },
+      "SessionAlignment": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "reference_engine": {
+            "type": "string",
+            "title": "Reference Engine"
+          },
+          "other_engine": {
+            "type": "string",
+            "title": "Other Engine"
+          },
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/AlignedSpan"
+            },
+            "type": "array",
+            "title": "Spans"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "reference_engine",
+          "other_engine",
+          "spans",
+          "computed_at"
+        ],
+        "title": "SessionAlignment",
+        "description": "Durable record of aligning one session's two record-path transcripts (PRD FR-2.6 follow-on).\n\nPersisted once both engines configured for a session have produced a\n`COMPLETE` `RecordPathTranscript` \u2014 reconciling the two engines' output\nonly means something once both independent results exist, so this is a\nseparate artifact from either transcript rather than a field on one of them."
+      },
+      "SessionStart": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "meeting_id",
+          "started_at"
+        ],
+        "title": "SessionStart",
+        "description": "A newly opened live capture session for one meeting."
+      },
+      "SettingsUpdateRequest": {
+        "properties": {
+          "inference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vendors": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VendorSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/SecretUpdate"
+            },
+            "type": "array",
+            "title": "Secrets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SettingsUpdateRequest",
+        "description": "A settings save from the admin UI.\n\nEvery field is optional so the UI can save one section without having to\nresend the others \u2014 and, more importantly, so it never has to resend a\nsecret it does not have."
+      },
+      "SlowLaneCandidate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "template_section": {
+            "type": "string",
+            "title": "Template Section"
+          },
+          "phrasing": {
+            "type": "string",
+            "title": "Phrasing"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Priority"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "template_section",
+          "phrasing",
+          "priority"
+        ],
+        "title": "SlowLaneCandidate",
+        "description": "One new candidate question a slow-lane pass surfaced (architecture \u00a73.6, \u00a73.8)."
+      },
+      "SlowLaneTickResult": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "coverage_updates": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageSlotUpdate"
+            },
+            "type": "array",
+            "title": "Coverage Updates"
+          },
+          "new_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/SlowLaneCandidate"
+            },
+            "type": "array",
+            "title": "New Candidates"
+          },
+          "ticked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ticked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "coverage_updates",
+          "new_candidates",
+          "ticked_at"
+        ],
+        "title": "SlowLaneTickResult",
+        "description": "What accepting one slow-lane tick for a meeting produced (PRD FR-5.10).\n\n`coverage_updates` is empty when the pass changed no slot's fill state,\nand `new_candidates` is empty when it surfaced nothing new -- a tick\nthat runs but produces neither is still a 200, not an error: PRD FR-5.10\nand architecture \u00a73.8 make failure non-fatal, and \"nothing changed this\npass\" is not a failure."
+      },
+      "StartReplayRunRequest": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Recording Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id"
+        ],
+        "title": "StartReplayRunRequest",
+        "description": "A request to start a replay run against an already-uploaded recording."
+      },
+      "StartReplayRunResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "StartReplayRunResponse",
+        "description": "Acknowledgement that a replay run has been queued."
+      },
+      "SuggestionRatingRequest": {
+        "properties": {
+          "suggestion_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Suggestion Id"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/SuggestionVerdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestion_id",
+          "verdict"
+        ],
+        "title": "SuggestionRatingRequest",
+        "description": "One senior analyst rating of a single suggestion from a replay run."
+      },
+      "SuggestionRatingResponse": {
+        "properties": {
+          "rating_id": {
+            "type": "string",
+            "title": "Rating Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating_id"
+        ],
+        "title": "SuggestionRatingResponse"
+      },
+      "SuggestionVerdict": {
+        "type": "string",
+        "enum": [
+          "useful",
+          "timely",
+          "embarrassing"
+        ],
+        "title": "SuggestionVerdict",
+        "description": "A senior analyst's judgement of one suggestion surfaced during a replay run."
+      },
+      "TranscriptSegment": {
+        "properties": {
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "End Seconds"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_seconds",
+          "end_seconds",
+          "text"
+        ],
+        "title": "TranscriptSegment",
+        "description": "One timed span of the full-session transcript."
+      },
+      "TranscriptionJobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "complete",
+          "failed"
+        ],
+        "title": "TranscriptionJobStatus",
+        "description": "Where one record-path transcription job sits in its lifecycle.\n\nDistinct from `TranscriptionStatus`, which only describes a finished\nbatch run's outcome \u2014 a job also has a `QUEUED`/`RUNNING` state between\nbeing accepted and the batch engine actually finishing."
+      },
+      "TranscriptionStatus": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "failed"
+        ],
+        "title": "TranscriptionStatus",
+        "description": "Terminal state of one record-path batch transcription run."
       },
       "ValidationError": {
         "properties": {
@@ -249,6 +4911,166 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VendorSettings": {
+        "properties": {
+          "asr_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asr Base Url"
+          },
+          "capture_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Base Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "VendorSettings",
+        "description": "Non-secret endpoints for the speech vendors (ADR-004, ADR-011)."
+      },
+      "VocabularyTermCreateRequest": {
+        "properties": {
+          "term": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Term"
+          },
+          "term_type": {
+            "$ref": "#/components/schemas/VocabularyTermType"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term",
+          "term_type"
+        ],
+        "title": "VocabularyTermCreateRequest"
+      },
+      "VocabularyTermResponse": {
+        "properties": {
+          "term_id": {
+            "type": "string",
+            "title": "Term Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "term": {
+            "type": "string",
+            "title": "Term"
+          },
+          "term_type": {
+            "$ref": "#/components/schemas/VocabularyTermType"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term_id",
+          "engagement_id",
+          "term",
+          "term_type"
+        ],
+        "title": "VocabularyTermResponse"
+      },
+      "VocabularyTermType": {
+        "type": "string",
+        "enum": [
+          "product_name",
+          "internal_system",
+          "acronym"
+        ],
+        "title": "VocabularyTermType",
+        "description": "The categories FR-3.6 asks the vocabulary list to distinguish."
+      },
+      "app__modules__compiler__api__models__BankCandidate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "template_section": {
+            "type": "string",
+            "title": "Template Section"
+          },
+          "phrasing": {
+            "type": "string",
+            "title": "Phrasing"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Priority"
+          },
+          "inherited_from_open_question": {
+            "type": "boolean",
+            "title": "Inherited From Open Question",
+            "default": false
+          },
+          "pruned": {
+            "type": "boolean",
+            "title": "Pruned",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "template_section",
+          "phrasing",
+          "priority"
+        ],
+        "title": "BankCandidate",
+        "description": "One candidate question in a meeting's recompiled bank (PRD FR-4.8, architecture section 3.6).\n\n`priority` orders candidates within the bank -- lower is ranked higher --\nmirroring the ascending `impact_rank` convention `OpenQuestion` already\nuses elsewhere in this codebase (`debrief/pipeline/models.py`).\n`inherited_from_open_question` is `True` only for a candidate\n`recompile_meeting_bank` derived directly from a prior meeting's open\nquestion rather than from the engagement's own compiled candidate set, so\na caller can render \"carried forward from last time\" distinctly from a\nfreshly compiled candidate. `pruned` is `True` once a caller has excluded\nthe candidate from the bank via `PATCH /api/bank/candidates/{id}` --\nwhoever supplies `get_base_candidates` (out of this feature's footprint)\nis responsible for leaving pruned candidates out of what it returns, the\nsame way it would leave out a hard-deleted one."
+      },
+      "app__modules__compiler__bank__models__BankCandidate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "template_section": {
+            "type": "string",
+            "title": "Template Section"
+          },
+          "phrasing": {
+            "type": "string",
+            "title": "Phrasing"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Priority"
+          },
+          "inherited_from_open_question": {
+            "type": "boolean",
+            "title": "Inherited From Open Question",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "template_section",
+          "phrasing",
+          "priority"
+        ],
+        "title": "BankCandidate",
+        "description": "One candidate question in a meeting's recompiled bank (PRD FR-4.8, architecture section 3.6).\n\n`priority` orders candidates within the bank \u2014 lower is ranked higher \u2014\nmirroring the ascending `impact_rank` convention `OpenQuestion` already\nuses elsewhere in this codebase (`debrief/pipeline/models.py`).\n`inherited_from_open_question` is `True` only for a candidate\n`recompile_meeting_bank` derived directly from a prior meeting's open\nquestion rather than from the engagement's own compiled candidate set,\nso a caller can render \"carried forward from last time\" distinctly from\na freshly compiled candidate."
       }
     }
   }

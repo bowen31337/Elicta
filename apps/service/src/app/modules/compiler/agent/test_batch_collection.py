@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from app.modules.compiler.agent.batch_collection import collect_bmad_analyst_batch_results
+from app.modules.compiler.agent.batch_collection import (
+    collect_bmad_analyst_batch_results,
+)
 from app.modules.compiler.agent.bmad_analyst import MAX_CANDIDATES, MIN_CANDIDATES
 from app.modules.compiler.agent.models import (
     AnalystBatchResult,
@@ -17,7 +19,7 @@ from app.modules.compiler.agent.models import (
     EngagementBmadAnalystPass,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_draft(index: int, **overrides) -> BmadCandidateDraft:

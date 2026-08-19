@@ -50,7 +50,7 @@ yet at the returned URL -- only accepted for processing.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 
@@ -133,7 +133,7 @@ def build_engagement_bank_compile_router(trigger_bank_compile: TriggerBankCompil
         return BankCompileTrigger(
             job_id=job_id,
             engagement_id=engagement_id,
-            triggered_at=datetime.now(timezone.utc),
+            triggered_at=datetime.now(UTC),
         )
 
     return router

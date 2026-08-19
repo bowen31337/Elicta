@@ -17,7 +17,7 @@ source document, and persisting the durable pass record.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     CitedSpan,
@@ -131,7 +131,7 @@ async def run_document_extraction_pass(
     had this pass run yet stays distinguishable from one whose run failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         output = await run_chain(engagement_id, documents)
@@ -142,7 +142,7 @@ async def run_document_extraction_pass(
             status=ExtractionPassStatus.FAILED,
             claims=None,
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -153,7 +153,7 @@ async def run_document_extraction_pass(
         status=ExtractionPassStatus.COMPLETE,
         claims=claims,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

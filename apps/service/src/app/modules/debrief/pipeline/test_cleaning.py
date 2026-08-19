@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.cleaning import run_transcript_cleaning
-from app.modules.debrief.pipeline.models import SessionTranscriptCleaning, TranscriptCleaningStatus, Utterance
+from app.modules.debrief.pipeline.models import (
+    SessionTranscriptCleaning,
+    TranscriptCleaningStatus,
+    Utterance,
+)
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_utterances() -> list[Utterance]:

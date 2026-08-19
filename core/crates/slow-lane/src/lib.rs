@@ -50,6 +50,7 @@ pub mod prompt;
 pub mod replay;
 pub mod request;
 pub mod ticker;
+pub mod transport;
 
 pub use bank_write_back::{BankWriteBackStore, NovelCandidate, WriteBackError};
 pub use cache_lifetime::{CacheLifetime, CacheLifetimeSettings};
@@ -64,6 +65,9 @@ pub use prewarm::{PreWarmRequest, UnwarmedMeeting, WarmedMeeting};
 pub use prompt::{MeetingPromptContext, PromptBlock, SlowLanePrompt};
 pub use replay::ReplayRun;
 pub use request::{Effort, ResponseSchema, SlowLaneRequestConfig};
+pub use transport::{
+    RecordedTransport, SlowLaneResponse, SlowLaneTransport, TransportError,
+};
 pub use ticker::{SlowLaneTicker, TickEvent, DEFAULT_TICK_INTERVAL};
 
 /// End-to-end proof that the two halves of this crate compose into what
@@ -486,7 +490,7 @@ mod orchestrator_ticks_end_to_end {
             "client said budget is $2M, contradicting the signed SOW",
             ContradictionSource::ReferenceDocument { doc_id: "doc-sow".to_string(), status: DocumentStatus::GroundTruth },
         );
-        let against_ground_truth = detector.on_tick(&[candidate.clone()]);
+        let against_ground_truth = detector.on_tick(std::slice::from_ref(&candidate));
         assert_eq!(
             against_ground_truth,
             vec![ContradictionTrigger {

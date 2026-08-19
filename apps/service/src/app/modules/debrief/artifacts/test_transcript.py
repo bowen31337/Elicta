@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from app.modules.debrief.artifacts.models import TranscriptArtifact, TranscriptArtifactStatus
+from app.modules.debrief.artifacts.models import (
+    TranscriptArtifact,
+    TranscriptArtifactStatus,
+)
 from app.modules.debrief.artifacts.transcript import build_transcript_artifact
-from app.modules.debrief.pipeline.models import SessionTranscriptTranslation, TranscriptTranslationStatus, TranslatedUtterance
+from app.modules.debrief.pipeline.models import (
+    SessionTranscriptTranslation,
+    TranscriptTranslationStatus,
+    TranslatedUtterance,
+)
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_utterance(

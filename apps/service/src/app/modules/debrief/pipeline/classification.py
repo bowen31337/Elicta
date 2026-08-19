@@ -29,7 +29,7 @@ diarization turn doesn't get its own speaker slot.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     UNCLASSIFIED_SECTION_KEY,
@@ -111,7 +111,7 @@ async def run_section_classification(
     distinguishable from one whose classification run failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
     known_keys = {slot.key for slot in slots}
 
     try:
@@ -143,7 +143,7 @@ async def run_section_classification(
             utterances=[],
             slots=[],
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -156,7 +156,7 @@ async def run_section_classification(
         utterances=classified_utterances,
         slots=compute_slot_fill_states(slots, classified_utterances),
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

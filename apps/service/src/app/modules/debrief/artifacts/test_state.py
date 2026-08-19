@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.artifacts.models import (
     ConfirmedRequirement,
@@ -24,7 +24,7 @@ from app.modules.debrief.pipeline.models import (
     ProjectBriefDraft,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_citation(quoted_text: str = "quoted", session_id: str = "session-1") -> CoverageCitation:

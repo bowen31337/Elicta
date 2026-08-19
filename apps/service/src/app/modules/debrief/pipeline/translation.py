@@ -19,7 +19,7 @@ without those later stages having to know translation happened at all.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .models import (
     CleanedUtterance,
@@ -86,7 +86,7 @@ async def run_transcript_translation(
     one whose translation run failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         outcomes = await translate(session_id, utterances, document_language)
@@ -116,7 +116,7 @@ async def run_transcript_translation(
             document_language=document_language,
             utterances=[],
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -129,7 +129,7 @@ async def run_transcript_translation(
         document_language=document_language,
         utterances=translated_utterances,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

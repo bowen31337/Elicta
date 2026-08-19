@@ -64,7 +64,14 @@ def test_prep_journey_creates_engagement_uploads_ground_truth_and_renders_questi
     # 2. Upload a ground-truth reference document (PRD FR-3.4), over the real HTTP surface.
     response = client.post(
         f"/api/engagements/{engagement_id}/documents",
-        json={"name": "Current-state scoping deck", "status": "ground truth"},
+        files={
+            "file": (
+                "scoping-deck.pdf",
+                b"%PDF-1.4 current-state scoping deck",
+                "application/pdf",
+            )
+        },
+        data={"name": "Current-state scoping deck", "status": "ground truth"},
     )
     assert response.status_code == 201
     document = response.json()

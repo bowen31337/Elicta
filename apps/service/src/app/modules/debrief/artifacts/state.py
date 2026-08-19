@@ -20,7 +20,7 @@ resolve.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.models import BmadArtifactSet
 
@@ -28,8 +28,8 @@ from .models import (
     ConfirmedRequirement,
     CoverageMatrixStatus,
     FillState,
-    RequirementsCoverageMatrix,
     RequirementsContradiction,
+    RequirementsCoverageMatrix,
     RequirementsState,
 )
 
@@ -115,7 +115,7 @@ async def merge_requirements_state_forward(
     returns.
     """
 
-    merged_at = merged_at or datetime.now(timezone.utc)
+    merged_at = merged_at or datetime.now(UTC)
 
     previous_confirmed = previous_state.confirmed_requirements if previous_state else []
     previous_contradictions = previous_state.contradictions if previous_state else []

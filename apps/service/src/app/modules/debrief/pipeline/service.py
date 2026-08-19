@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .diarization import tag_span_speaker
-from .models import DiarizationOutput, DiarizationStatus, SessionDiarization, TranscriptSpan, Utterance
+from .models import (
+    DiarizationOutput,
+    DiarizationStatus,
+    SessionDiarization,
+    TranscriptSpan,
+    Utterance,
+)
 
 DiarizeAudio = Callable[[str, str], Awaitable[DiarizationOutput]]
 SaveSessionDiarization = Callable[[SessionDiarization], Awaitable[None]]
@@ -52,7 +58,7 @@ async def run_diarization(
     failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
     make_utterance_id = make_utterance_id or (lambda: uuid.uuid4().hex)
 
     try:
@@ -64,7 +70,7 @@ async def run_diarization(
             engine=engine,
             utterances=[],
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -88,7 +94,7 @@ async def run_diarization(
         engine=output.engine,
         utterances=utterances,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

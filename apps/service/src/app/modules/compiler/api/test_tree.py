@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.compiler.api.models import BankCandidate
 from app.modules.compiler.api.tree import build_question_bank_tree
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_candidate(candidate_id: str, template_section: str, priority: int) -> BankCandidate:

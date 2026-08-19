@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -38,7 +38,7 @@ def make_requirements_state(engagement_id: str = "engagement-1") -> Requirements
         confirmed_requirements=[],
         contradictions=[],
         decisions=[],
-        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 

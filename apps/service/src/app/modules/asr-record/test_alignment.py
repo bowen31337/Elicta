@@ -8,7 +8,7 @@ relative import cannot be resolved by pytest's default collection mode.
 from __future__ import annotations
 
 import importlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -23,7 +23,7 @@ align_completed_transcripts = _alignment.align_completed_transcripts
 divergent_spans = _alignment.divergent_spans
 DIVERGENCE_THRESHOLD = _alignment.DIVERGENCE_THRESHOLD
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_transcript(

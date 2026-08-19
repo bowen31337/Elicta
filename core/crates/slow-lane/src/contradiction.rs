@@ -156,7 +156,7 @@ mod tests {
             earlier_utterance("utterance-2"),
         );
 
-        let triggers = detector.on_tick(&[candidate.clone()]);
+        let triggers = detector.on_tick(std::slice::from_ref(&candidate));
 
         assert_eq!(
             triggers,
@@ -178,7 +178,7 @@ mod tests {
             reference_document("doc-sow", DocumentStatus::GroundTruth),
         );
 
-        let triggers = detector.on_tick(&[candidate.clone()]);
+        let triggers = detector.on_tick(std::slice::from_ref(&candidate));
 
         assert_eq!(
             triggers,
@@ -233,7 +233,7 @@ mod tests {
         let candidate =
             ContradictionCandidate::new("utterance-9", "budget conflict", earlier_utterance("utterance-2"));
 
-        let first_tick = detector.on_tick(&[candidate.clone()]);
+        let first_tick = detector.on_tick(std::slice::from_ref(&candidate));
         let second_tick = detector.on_tick(&[candidate]);
 
         assert_eq!(first_tick.len(), 1, "the first tick's judgment must fire");

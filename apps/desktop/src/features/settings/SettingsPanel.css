@@ -1,0 +1,24 @@
+.settings-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.settings-panel h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
+.settings-panel h2 { font-size: 0.8rem; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; margin: 10px 0 0; opacity: .7; }
+.settings-field { display: flex; flex-direction: column; gap: 4px; }
+.settings-field label { font-size: .85rem; font-weight: 500; }
+.settings-help { font-size: .75rem; opacity: .7; margin: 0; }
+.settings-state { font-size: .75rem; opacity: .8; margin: 0; }
+.settings-secret-row { display: flex; gap: 6px; align-items: center; }
+.settings-secret-row input { flex: 1; min-width: 0; }
+.settings-warning { font-size: .78rem; border-radius: 4px; padding: 8px 10px;
+  background: rgba(180, 120, 10, .12); margin: 0; }
+.settings-error { font-size: .78rem; border-radius: 4px; padding: 8px 10px;
+  background: rgba(180, 40, 30, .12); margin: 0; }
+.settings-danger { color: rgb(150, 40, 30); }
+.settings-actions { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.settings-saved { font-size: .78rem; opacity: .75; }
+.settings-loading { padding: 16px; font-size: .85rem; opacity: .7; }
+.settings-radio { display: inline-flex; gap: 5px; align-items: center;
+  font-size: .85rem; margin-right: 14px; }
+.settings-panel fieldset { border: 0; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px; }
+.settings-panel legend { font-size: .85rem; font-weight: 500; padding: 0; }
+.settings-inuse { font-weight: 400; opacity: .7; font-size: .78rem; }

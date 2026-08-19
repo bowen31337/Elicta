@@ -18,7 +18,7 @@ result into a `CoverageCitation`.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.models import (
     CoverageSlotState,
@@ -27,7 +27,12 @@ from app.modules.debrief.pipeline.models import (
     SessionSectionClassification,
 )
 
-from .models import CoverageCitation, CoverageMatrixEntry, CoverageMatrixStatus, RequirementsCoverageMatrix
+from .models import (
+    CoverageCitation,
+    CoverageMatrixEntry,
+    CoverageMatrixStatus,
+    RequirementsCoverageMatrix,
+)
 
 CiteFilledSlot = Callable[[str, float, float], Awaitable[CoverageCitation]]
 SaveCoverageMatrix = Callable[[RequirementsCoverageMatrix], Awaitable[None]]
@@ -60,7 +65,7 @@ async def build_coverage_matrix(
     would be indistinguishable from one that was built correctly.
     """
 
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
 
     if classification.status != SectionClassificationStatus.COMPLETE:
         failed = RequirementsCoverageMatrix(

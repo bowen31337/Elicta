@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.modules.debrief.pipeline.classification import (
     compute_slot_fill_states,
@@ -20,7 +20,7 @@ from app.modules.debrief.pipeline.models import (
     TranslatedUtterance,
 )
 
-FIXED = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXED = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def make_cleaned_utterances() -> list[TranslatedUtterance]:

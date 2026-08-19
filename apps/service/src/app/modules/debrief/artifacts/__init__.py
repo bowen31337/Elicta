@@ -46,7 +46,11 @@ shape.
 
 from __future__ import annotations
 
-from app.modules.debrief.artifacts.matrix import CiteFilledSlot, SaveCoverageMatrix, build_coverage_matrix
+from app.modules.debrief.artifacts.matrix import (
+    CiteFilledSlot,
+    SaveCoverageMatrix,
+    build_coverage_matrix,
+)
 from app.modules.debrief.artifacts.models import (
     ConfirmedRequirement,
     CoverageCitation,
@@ -54,8 +58,8 @@ from app.modules.debrief.artifacts.models import (
     CoverageMatrixEntry,
     CoverageMatrixStatus,
     EngagementCoverageSummary,
-    RequirementsCoverageMatrix,
     RequirementsContradiction,
+    RequirementsCoverageMatrix,
     RequirementsState,
     TranscriptArtifact,
     TranscriptArtifactEntry,
@@ -78,8 +82,14 @@ from app.modules.debrief.artifacts.router import (
     build_open_questions_router,
     build_project_brief_router,
 )
-from app.modules.debrief.artifacts.state import SaveRequirementsState, merge_requirements_state_forward
-from app.modules.debrief.artifacts.transcript import SaveTranscriptArtifact, build_transcript_artifact
+from app.modules.debrief.artifacts.state import (
+    SaveRequirementsState,
+    merge_requirements_state_forward,
+)
+from app.modules.debrief.artifacts.transcript import (
+    SaveTranscriptArtifact,
+    build_transcript_artifact,
+)
 
 __all__ = [
     "DEFAULT_PRD_COVERAGE_THRESHOLD",

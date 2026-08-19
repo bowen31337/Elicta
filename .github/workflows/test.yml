@@ -1,0 +1,112 @@
+name: Tests
+
+# The gate that was missing. Six workflows built, signed, notarised and
+# replay-gated artifacts, but none ran a test suite or a linter — which is
+# how a tree whose `cargo test --workspace` did not compile, and which
+# carried 143 lint violations, stayed green all the way to a signed release.
+#
+# One job per language, because a polyglot repo has per-language blind
+# spots: a Rust signature change is invisible to a Python gate, and that is
+# exactly the break this repo shipped.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust — workspace tests and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # No --exclude: the whole workspace must compile, tests/e2e included.
+      # Excluding the integration crate is what let its callers rot.
+      - name: Test the workspace
+        run: cargo test --workspace --locked
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # `cargo fmt --all --check` is deliberately not gated yet: the tree has
+      # 326 pre-existing rustfmt hunks across 64 files. Reformatting belongs
+      # in its own mechanical commit — landing it here would bury real
+      # changes. Add this step once that commit lands:
+      #   - run: cargo fmt --all --check
+
+  service:
+    name: Service — pytest, migrations and ruff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install service dependencies
+        working-directory: apps/service
+        run: uv sync --locked
+
+      - name: Lint
+        working-directory: apps/service
+        run: uv run ruff check .
+
+      # Includes test_migrations.py, which runs every Alembic revision in
+      # offline mode — the chain is validated without needing a database.
+      - name: Unit tests
+        working-directory: apps/service
+        run: uv run pytest -q
+
+      # Drives the production composition root, so a router that stops being
+      # mounted fails here rather than shipping unreachable.
+      - name: API integration suite
+        run: uv run --project apps/service python -m pytest tests/e2e/api_integration -q
+
+  desktop:
+    name: Desktop — vitest, typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter elicta-desktop typecheck
+
+      - name: Unit tests
+        run: pnpm --filter elicta-desktop test
+
+      - name: Typecheck the generated API client
+        run: pnpm --filter api-client typecheck
+
+      - name: Build
+        run: pnpm --filter elicta-desktop build

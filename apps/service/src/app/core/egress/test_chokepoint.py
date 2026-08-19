@@ -1,7 +1,11 @@
 import pytest
 
 from app.core.egress.chokepoint import EgressChokepoint
-from app.core.egress.errors import EgressLogError, EgressRegionError, EgressTransportError
+from app.core.egress.errors import (
+    EgressLogError,
+    EgressRegionError,
+    EgressTransportError,
+)
 from app.core.egress.models import EgressLogRow, ProcessorRequest, ProcessorSuccess
 from app.core.egress.region import EngagementRegionRegistry
 

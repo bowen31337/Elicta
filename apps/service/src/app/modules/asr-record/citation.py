@@ -19,7 +19,12 @@ to render an unfilled section, not fail to build.
 
 from __future__ import annotations
 
-from .models import RecordPathSourceReference, RecordPathTranscript, TranscriptSegment, TranscriptionStatus
+from .models import (
+    RecordPathSourceReference,
+    RecordPathTranscript,
+    TranscriptionStatus,
+    TranscriptSegment,
+)
 
 
 def _overlapping_segments(

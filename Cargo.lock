@@ -141,6 +141,17 @@ dependencies = [
 [[package]]
 name = "elicta-app"
 version = "0.1.0"
+dependencies = [
+ "asr-live",
+ "bank",
+ "capture",
+ "coverage",
+ "language",
+ "ranking",
+ "slow-lane",
+ "trigger-gate",
+ "wer",
+]
 
 [[package]]
 name = "fallible-iterator"

@@ -9,6 +9,8 @@ engagement/meeting tables and mounts the returned router.
 
 from collections.abc import Awaitable, Callable
 
+from fastapi import APIRouter
+
 from app.core.consent.confirmation import SaveConsentRecord, record_consent_confirmation
 from app.core.consent.gate import evaluate_consent_gate
 from app.core.consent.models import (
@@ -17,7 +19,6 @@ from app.core.consent.models import (
     ConsentModel,
     ConsentRecord,
 )
-from fastapi import APIRouter
 
 ConsentModelLookup = Callable[[str], Awaitable[ConsentModel]]
 ConfirmationLookup = Callable[[str], Awaitable[bool]]

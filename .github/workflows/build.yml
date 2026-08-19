@@ -63,7 +63,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build desktop frontend assets
-        run: pnpm --filter desktop build
+        run: pnpm --filter elicta-desktop build
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
@@ -154,7 +154,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build desktop frontend assets
-        run: pnpm --filter desktop build
+        run: pnpm --filter elicta-desktop build
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked

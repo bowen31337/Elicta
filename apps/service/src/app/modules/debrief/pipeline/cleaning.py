@@ -20,9 +20,14 @@ said.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .models import CleanedUtterance, SessionTranscriptCleaning, TranscriptCleaningStatus, Utterance
+from .models import (
+    CleanedUtterance,
+    SessionTranscriptCleaning,
+    TranscriptCleaningStatus,
+    Utterance,
+)
 
 CleanTranscript = Callable[[str, list[Utterance]], Awaitable[list[str]]]
 SaveSessionTranscriptCleaning = Callable[[SessionTranscriptCleaning], Awaitable[None]]
@@ -51,7 +56,7 @@ async def run_transcript_cleaning(
     whose cleaning run failed.
     """
 
-    requested_at = requested_at or datetime.now(timezone.utc)
+    requested_at = requested_at or datetime.now(UTC)
 
     try:
         cleaned_texts = await clean(session_id, utterances)
@@ -78,7 +83,7 @@ async def run_transcript_cleaning(
             engine=engine,
             utterances=[],
             requested_at=requested_at,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
             error=str(exc),
         )
         await save(failed)
@@ -90,7 +95,7 @@ async def run_transcript_cleaning(
         engine=engine,
         utterances=cleaned_utterances,
         requested_at=requested_at,
-        completed_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(UTC),
     )
     await save(result)
     return result

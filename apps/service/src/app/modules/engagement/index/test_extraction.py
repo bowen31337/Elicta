@@ -6,7 +6,7 @@ from .extraction import extract_text
 
 
 def test_extracts_utf8_text_verbatim():
-    assert extract_text("Scope: rebuild the intake pipeline.".encode("utf-8")) == (
+    assert extract_text(b"Scope: rebuild the intake pipeline.") == (
         "Scope: rebuild the intake pipeline."
     )
 
