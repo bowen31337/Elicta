@@ -104,6 +104,38 @@ jobs:
           echo "$archs" | grep -qw arm64
           echo "$archs" | grep -qw x86_64
           echo "BUNDLE_PATH=$bundle" >> "$GITHUB_ENV"
+          echo "exe=$exe" >> "$GITHUB_ENV"
+
+      - name: Verify every dynamic dependency can actually be resolved
+        # The arch and signature checks both passed on a bundle that could not
+        # launch: it carried a STRONG @rpath/libswift_Concurrency.dylib with no
+        # LC_RPATH to resolve it against, so dyld aborted before main(). That
+        # is what a too-low deployment target buys -- Swift back-deploys its
+        # runtime and expects the build system to copy the shim into the
+        # bundle, which cargo does not do. Assert loadability, not just shape.
+        #
+        # Checked per-architecture: otool walks a fat binary one slice at a
+        # time, and the two slices had different defects (x86_64 back-deployed
+        # the entire Swift runtime, arm64 only the concurrency library).
+        run: |
+          set -euo pipefail
+          failed=0
+          for arch in arm64 x86_64; do
+            rpaths="$(otool -arch "$arch" -l "$exe" | grep -c LC_RPATH || true)"
+            bad="$(otool -arch "$arch" -L "$exe" | tail -n +2 | awk '{print $1}' \
+                   | grep '^@rpath/' || true)"
+            if [ -n "$bad" ] && [ "$rpaths" -eq 0 ]; then
+              echo "::error::$arch declares no LC_RPATH yet depends on:" >&2
+              echo "$bad" | sed 's/^/    /' >&2
+              failed=1
+            else
+              echo "$arch: ok (LC_RPATH entries: $rpaths)"
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "dyld cannot load this bundle -- refusing to publish it." >&2
+            exit 1
+          fi
 
       - name: Verify the artifact is signed
         run: codesign --verify --verbose=2 "$BUNDLE_PATH"
