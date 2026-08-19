@@ -31,7 +31,13 @@ jobs:
     name: macOS universal (arm64 + x86_64)
     # Apple Silicon runner: builds aarch64-apple-darwin natively and
     # x86_64-apple-darwin via cross-compilation, then lipo's them together.
-    runs-on: macos-14
+    # macos-15 (SDK 15.5), not macos-14: screencapturekit -> apple-metal
+    # ships a Swift bridge referencing MTLResidencySet, MTLLogState,
+    # MTLCommandQueueDescriptor and MTLSamplerDescriptor.reductionMode, none
+    # of which exist in the 14.5 SDK, so the bundle build failed there. 15.5
+    # is the oldest hosted SDK that compiles all of them -- preferred over
+    # macos-26 so the shipped binary links against the older SDK.
+    runs-on: macos-15
     outputs:
       artifact-name: ${{ steps.artifact.outputs.name }}
     steps:
