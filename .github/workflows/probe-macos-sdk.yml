@@ -1,9 +1,8 @@
 name: Probe macOS SDK
 
-# TEMPORARY. Reports the OS and SDK each hosted macOS runner label provides,
-# so the build can be pinned to one new enough for the Metal symbols that
-# screencapturekit -> apple-metal's Swift bridge references. Delete once the
-# label is chosen.
+# TEMPORARY. Compiles the exact Metal symbols that screencapturekit ->
+# apple-metal 0.8.8's Swift bridge references, on each hosted macOS label,
+# so the build pin is chosen from evidence. Delete once recorded.
 
 on:
   workflow_dispatch:
@@ -13,17 +12,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        label: [macos-14, macos-15, macos-26, macos-latest]
+        label: [macos-15, macos-26]
     runs-on: ${{ matrix.label }}
     steps:
       - name: Report toolchain
         run: |
-          echo "label:  ${{ matrix.label }}"
-          sw_vers
-          xcodebuild -version
+          sw_vers; xcodebuild -version
           echo "macOS SDK: $(xcrun --sdk macosx --show-sdk-version)"
-          echo "--- Metal symbols present in the SDK headers ---"
-          hdr="$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks/Metal.framework/Headers"
-          for sym in MTLResidencySet MTLLogState MTLCommandQueueDescriptor MTLSamplerReductionMode; do
-            if grep -rq "$sym" "$hdr" 2>/dev/null; then echo "  $sym: PRESENT"; else echo "  $sym: MISSING"; fi
-          done
+
+      - name: Compile the referenced Metal symbols
+        run: |
+          cat > probe.swift <<'SWIFT'
+          import Metal
+          func probe(device: MTLDevice, queue: MTLCommandQueue) {
+              _ = MTLCommandQueueDescriptor()
+              _ = MTLLogStateDescriptor()
+              _ = MTLResidencySetDescriptor()
+              let s = MTLSamplerDescriptor()
+              s.reductionMode = .min
+              s.lodBias = 0.0
+          }
+          SWIFT
+          # Report per-symbol rather than aborting on the first failure.
+          if swiftc -parse probe.swift 2>probe.err; then
+            echo "RESULT ${{ matrix.label }}: ALL SYMBOLS PRESENT"
+          else
+            echo "RESULT ${{ matrix.label }}: MISSING SYMBOLS"
+            cat probe.err
+          fi
