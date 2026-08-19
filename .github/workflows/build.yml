@@ -65,9 +65,6 @@ jobs:
       - name: Build desktop frontend assets
         run: pnpm --filter elicta-desktop build
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
       - name: Build universal macOS bundle
         working-directory: apps/desktop
         env:
@@ -75,7 +72,7 @@ jobs:
           # this artifact is downloaded; CI falls back to ad-hoc signing so
           # every build here is at least a validly signed Mach-O binary.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-        run: cargo tauri build --target universal-apple-darwin --ci
+        run: pnpm exec tauri build --target universal-apple-darwin --ci
 
       - name: Verify universal binary covers arm64 and x86_64
         run: |
@@ -156,12 +153,9 @@ jobs:
       - name: Build desktop frontend assets
         run: pnpm --filter elicta-desktop build
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
       - name: Build Windows bundle
         working-directory: apps/desktop
-        run: cargo tauri build --target ${{ matrix.rust-target }} --ci
+        run: pnpm exec tauri build --target ${{ matrix.rust-target }} --ci
 
       - name: Prepare code signing certificate
         id: cert

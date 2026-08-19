@@ -52,3 +52,8 @@ handbook/preview/
 *.bak
 *.tmp
 *.orig
+
+# Downloaded release bundles (.dmg / .msi pulled from a CI run for hand
+# testing). Build output, not source — the canonical copies live on the
+# GitHub Release and the workflow artifact.
+/release/
