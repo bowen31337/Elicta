@@ -1,0 +1,29 @@
+name: Probe macOS SDK
+
+# TEMPORARY. Reports the OS and SDK each hosted macOS runner label provides,
+# so the build can be pinned to one new enough for the Metal symbols that
+# screencapturekit -> apple-metal's Swift bridge references. Delete once the
+# label is chosen.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        label: [macos-14, macos-15, macos-26, macos-latest]
+    runs-on: ${{ matrix.label }}
+    steps:
+      - name: Report toolchain
+        run: |
+          echo "label:  ${{ matrix.label }}"
+          sw_vers
+          xcodebuild -version
+          echo "macOS SDK: $(xcrun --sdk macosx --show-sdk-version)"
+          echo "--- Metal symbols present in the SDK headers ---"
+          hdr="$(xcrun --sdk macosx --show-sdk-path)/System/Library/Frameworks/Metal.framework/Headers"
+          for sym in MTLResidencySet MTLLogState MTLCommandQueueDescriptor MTLSamplerReductionMode; do
+            if grep -rq "$sym" "$hdr" 2>/dev/null; then echo "  $sym: PRESENT"; else echo "  $sym: MISSING"; fi
+          done
