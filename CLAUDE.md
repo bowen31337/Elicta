@@ -67,6 +67,24 @@ cd apps/service && uv run ruff check .
 uv run --project apps/service python -m pytest tests/e2e/api_integration   # 45 tests, from repo root
 ```
 
+macOS desktop bundle (`.app` + `.dmg`) — **build locally, not in CI**:
+```bash
+./scripts/build-macos.sh              # host arch only; what you want for testing
+./scripts/build-macos.sh --universal  # arm64 + x86_64, as shipped
+```
+Needs **Xcode 26+**: `screencapturekit` vendors a Swift bridge over Metal 4, and
+SDK 15 compiles most of it before failing. The script preflights that, the Node
+floor and the Rust targets, then checks the result is loadable by dyld — the
+published 0.1.0 passed the arch and signature checks and still could not start,
+because Swift had back-deployed `libswift_Concurrency.dylib` to an `@rpath` with
+no `LC_RPATH`. `bundle.macOS.minimumSystemVersion` (13.0) is what prevents that;
+it also sets `MACOSX_DEPLOYMENT_TARGET`, so lowering it reintroduces the crash.
+
+`build.yml`'s automatic triggers are commented out — it runs on `macos-26` at
+10x billing for ~35 min. `gh workflow run build.yml --ref main` still works, and
+it uploads an artifact rather than publishing a release; attaching a `.dmg` to a
+release is a separate `gh release upload` step.
+
 Desktop (`pnpm`, Node >= 22.13):
 ```bash
 pnpm install --frozen-lockfile

@@ -10,11 +10,22 @@ name: Build Desktop Artifacts
 # (PRD NFR-3.3); Windows artifacts are Authenticode-signed inline below.
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
-    branches: [main]
+  # Automatic triggers are off for now -- see scripts/build-macos.sh for the
+  # local build, which is the faster loop while the desktop shell is being
+  # hand-tested. This job runs on macos-26 runners, billed at ten times the
+  # Linux rate for roughly thirty-five minutes, and `cancel-in-progress`
+  # below meant a second push killed the first run mid-flight.
+  #
+  # Restore by uncommenting; nothing else about the workflow changed, and
+  # `workflow_dispatch` / `workflow_call` still work meanwhile, so
+  # sign-macos.yml can still reuse this and a build can still be asked for
+  # on demand.
+  #
+  # push:
+  #   branches: [main]
+  #   tags: ["v*"]
+  # pull_request:
+  #   branches: [main]
   workflow_dispatch:
   workflow_call:
     outputs:

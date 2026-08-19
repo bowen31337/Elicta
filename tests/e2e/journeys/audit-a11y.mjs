@@ -32,6 +32,10 @@ const AXE = readFileSync(
 );
 
 const SCENES = [
+  // The window itself: source list, toolbar and pane, with fixed screens in
+  // it. Audited at 820px the sidebar is docked; at 420px it is a closed
+  // drawer, which is the state it ships in at that width.
+  'shell',
   'before-meeting',
   'nudge-surfaced',
   'code-switched',

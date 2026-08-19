@@ -13,6 +13,8 @@ import { PrepScreen } from '../features/prep/route';
 import { RecordingScreen } from '../features/recording/route';
 import { ReplayScreen } from '../features/replay/route';
 import { SettingsPanel } from '../features/settings/SettingsPanel';
+import { AppShell } from '../shell/AppShell';
+import { buildDestinations } from '../shell/destinations';
 import { SCENES } from './scenes';
 import { STUB_SETTINGS_CONTROLLER } from './settingsScenes';
 import {
@@ -60,9 +62,7 @@ const SCREENS: Record<string, () => JSX.Element> = {
   'replay-failing': () => <ReplayScreen {...REPLAY_FAILING} />,
 };
 
-function Scene() {
-  const scene = new URLSearchParams(window.location.search).get('scene') ?? 'before-meeting';
-
+function renderScene(scene: string) {
   if (scene.startsWith('settings')) {
     return <SettingsPanel controller={STUB_SETTINGS_CONTROLLER[scene]} />;
   }
@@ -75,6 +75,42 @@ function Scene() {
     return <p style={{ padding: 16 }}>Unknown scene: {scene}</p>;
   }
   return <OperatorPanel initial={state} />;
+}
+
+/**
+ * Which fixed screen stands in for each destination when the whole window is
+ * the subject. The window is a screen too — its sidebar and toolbar carry
+ * contrast, focus and landmark obligations like any other — and auditing it
+ * against live routes would mean auditing whatever the service happened to
+ * return that minute.
+ */
+const SHELL_SCENES: Record<string, string> = {
+  prep: 'prep',
+  consent: 'consent-confirmed',
+  panel: 'nudge-surfaced',
+  capture: 'capturing',
+  recording: 'recording',
+  debrief: 'debrief',
+  'debrief-chat': 'debrief-chat',
+  arc: 'arc',
+  replay: 'replay',
+  settings: 'settings-configured',
+  about: 'about-managed',
+};
+
+function Scene() {
+  const scene = new URLSearchParams(window.location.search).get('scene') ?? 'before-meeting';
+
+  if (scene === 'shell') {
+    return (
+      <AppShell
+        destinations={buildDestinations(Object.keys(SHELL_SCENES))}
+        renderScreen={(destination) => renderScene(SHELL_SCENES[destination.feature])}
+      />
+    );
+  }
+
+  return renderScene(scene);
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

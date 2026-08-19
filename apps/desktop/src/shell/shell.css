@@ -1,0 +1,315 @@
+/* ==========================================================================
+   The window: source list, toolbar, one pane.
+
+   The desktop idiom for an app that is a set of related screens is a split
+   view — the list of places on the left, the place you are in on the right.
+   That is what this file builds. The screens themselves are unchanged; they
+   already use the grouped-list idiom, and a pane is where such a document
+   belongs.
+   ========================================================================== */
+
+:root {
+  --sidebar-width: 244px;
+  --toolbar-height: 54px;
+  /* The sidebar sits a touch deeper than the content ground in light and a
+     touch lighter in dark — the same relationship macOS gives a source list,
+     which reads as "behind" the content rather than on top of it. It is a
+     material, not a colour: docked it has nothing to blur, but over content
+     at narrow widths the blur is what stops text showing through as noise. */
+  --sidebar-tint: rgba(232, 232, 237, 0.88);
+  --sidebar-highlight: rgba(255, 255, 255, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sidebar-tint: rgba(28, 28, 30, 0.92);
+    --sidebar-highlight: rgba(255, 255, 255, 0.08);
+  }
+}
+[data-theme="dark"] {
+  --sidebar-tint: rgba(28, 28, 30, 0.92);
+  --sidebar-highlight: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- Frame ------------------------------------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  /* The window scrolls in exactly one place — the pane. A page-level scrollbar
+     next to a pane-level one is the giveaway that a layout is a document
+     pretending to be an app. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg-grouped);
+}
+
+.shell--empty { display: grid; place-items: center; padding: var(--space-8); }
+
+/* ---- Source list ------------------------------------------------------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-3) var(--space-6);
+  background: var(--sidebar-tint);
+  -webkit-backdrop-filter: blur(30px) saturate(var(--material-saturate));
+  backdrop-filter: blur(30px) saturate(var(--material-saturate));
+  /* A hairline, not a border: it must not add a pixel to the column width. */
+  box-shadow: inset -0.5px 0 0 var(--separator);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3) 0;
+  min-height: 32px;
+}
+.sidebar-head .mark { color: var(--accent); flex: none; }
+.sidebar-wordmark {
+  font-size: var(--text-headline);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug);
+  color: var(--label);
+}
+
+.sidebar-nav { display: flex; flex-direction: column; gap: var(--space-5); }
+.sidebar-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.sidebar-group-title { margin: 0 0 var(--space-1) var(--space-3); }
+.sidebar-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  text-decoration: none;
+  font-size: var(--text-subhead);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-normal);
+  /* Press feedback lands on pointer-down; the row is an object being pushed,
+     not a link waiting for a page load. */
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
+}
+.sidebar-item .glyph { color: var(--accent); flex: none; }
+.sidebar-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (hover: hover) {
+  .sidebar-item:hover { background: var(--fill-4); }
+}
+.sidebar-item:active { transform: scale(0.985); background: var(--fill-3); }
+
+.sidebar-item.is-selected {
+  background: var(--accent-fill);
+  color: #fff;
+  font-weight: var(--weight-semibold);
+}
+.sidebar-item.is-selected .glyph { color: #fff; }
+.sidebar-item.is-selected:active { background: var(--accent-fill); }
+
+/* ---- Pane -------------------------------------------------------------- */
+
+.pane { position: relative; min-width: 0; min-height: 0; }
+
+.pane-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Content passes *under* the toolbar rather than starting below it, which
+     is what gives the material something to refract. */
+  padding-top: var(--toolbar-height);
+}
+
+.pane-body { min-height: 100%; }
+.pane-body--stage {
+  /* The panel is a floating material that sits over the operator's screen
+     during a meeting. Filling a desk-width window with it would misrepresent
+     what it is, so the pane stages it at the width it really has. */
+  display: flex;
+  justify-content: center;
+  /* flex-start, not the default stretch: the panel is a card that sizes to
+     its content, and a card stretched to the window height stops reading as
+     something that floats. */
+  align-items: flex-start;
+  padding: var(--space-6) var(--space-5) var(--space-10);
+  box-sizing: border-box;
+}
+.pane-body--stage > .panel {
+  width: min(420px, 100%);
+  min-height: 0;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  padding: var(--panel-inset);
+}
+
+/* ---- Toolbar ----------------------------------------------------------- */
+
+.toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--toolbar-height);
+  padding: var(--space-2) var(--space-5);
+  box-sizing: border-box;
+  background: var(--material-regular-tint);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+  backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+  /* Light catching the top edge of the material. Without it a translucent bar
+     reads as a flat wash rather than a surface. */
+  box-shadow: inset 0 1px 0 var(--sidebar-highlight);
+  transition: box-shadow var(--duration-base) var(--ease-out);
+}
+
+/* Once something is underneath, the bar earns depth. Apple separates chrome
+   from content with a shadow and a hairline that appear on scroll, never with
+   a line that is always there. */
+.toolbar.is-scrolled {
+  box-shadow:
+    inset 0 1px 0 var(--sidebar-highlight),
+    0 0.5px 0 var(--separator),
+    0 10px 18px -16px rgba(0, 0, 0, 0.5);
+}
+
+.toolbar-titles { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.toolbar-title { color: var(--label); }
+.toolbar-caption {
+  color: var(--label-supporting);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--label-supporting);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
+}
+@media (hover: hover) {
+  .toolbar-button:hover { background: var(--fill-4); color: var(--label); }
+}
+.toolbar-button:active { transform: scale(0.94); background: var(--fill-3); }
+
+/* The toggle only means something when the sidebar can be over the content. */
+.toolbar-button { display: none; }
+.sidebar-scrim { display: none; }
+
+/* ---- Narrow windows ---------------------------------------------------- */
+
+/* Below this the two columns stop fitting side by side, so the source list
+   becomes a layer over the content — the same move a Mac window makes when
+   it is dragged narrow. Above it the sidebar is docked, which is the state
+   the accessibility audit measures at its 820px width. */
+@media (max-width: 767px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    box-shadow: var(--shadow-3);
+    transform: translateX(-100%);
+    /* `visibility` is what takes the closed drawer out of the tab order —
+       a keyboard user must not tab into a sidebar that is off screen. */
+    visibility: hidden;
+    transition:
+      transform var(--duration-base) var(--ease-ios),
+      visibility 0s linear var(--duration-base);
+  }
+
+  .is-drawer-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--duration-base) var(--ease-ios),
+      visibility 0s;
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.32);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-base) var(--ease-out);
+  }
+  .is-drawer-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
+
+  .toolbar-button { display: inline-flex; }
+}
+
+/* ---- Coarse pointers --------------------------------------------------- */
+
+@media (pointer: coarse) {
+  .sidebar-item { min-height: 44px; }
+  .toolbar-button { width: 44px; height: 44px; }
+}
+
+/* ---- Settings people rely on ------------------------------------------- */
+
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar,
+  .toolbar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .sidebar { background: var(--bg-secondary); }
+  .toolbar { background: var(--bg-grouped); }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .toolbar { background: var(--bg-grouped); }
+}
+
+@media (prefers-contrast: more) {
+  .sidebar { box-shadow: inset -1px 0 0 var(--separator-opaque); }
+  .toolbar.is-scrolled { box-shadow: 0 1px 0 var(--separator-opaque); }
+  .sidebar-item.is-selected { outline: 1px solid var(--label); outline-offset: -1px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-item,
+  .toolbar,
+  .toolbar-button,
+  .sidebar-scrim {
+    transition-duration: 0.01ms;
+  }
+  .sidebar-item:active,
+  .toolbar-button:active { transform: none; }
+}
