@@ -89,7 +89,16 @@ jobs:
             echo "no .app bundle produced" >&2
             exit 1
           fi
-          exe="$bundle/Contents/MacOS/$(basename "$bundle" .app)"
+          # The .app directory is named from productName ("Elicta") but the
+          # executable inside it from the Cargo package name
+          # ("elicta-desktop"), so the two do not match and cannot be derived
+          # from each other. CFBundleExecutable is what actually links them.
+          exe="$bundle/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Contents/Info.plist")"
+          if [ ! -f "$exe" ]; then
+            echo "CFBundleExecutable does not name a file in the bundle: $exe" >&2
+            ls -l "$bundle/Contents/MacOS" >&2
+            exit 1
+          fi
           archs="$(lipo -archs "$exe")"
           echo "architectures: $archs"
           echo "$archs" | grep -qw arm64
