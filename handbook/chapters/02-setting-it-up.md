@@ -6,10 +6,17 @@ it permission to use them. It is done in the app, once, by whoever administers
 Elicta for the team — not by an engineer editing a server somewhere, because the
 person who needs a key changed is rarely the person who could deploy one.
 
+The screen is in three parts, one for each outside service, and each part says
+whether it is ready before you read a single field. The credential for a service
+sits inside that service's own part, named after the company that issued it, so
+there is no list of keys to work out which of them goes where.
+
 ## Before anything is set up
 
 On first run the screen says plainly that nothing is configured, rather than
-looking ready and failing later.
+looking ready and failing later. Each part carries its own verdict — one needs a
+credential, another needs a key — so what is left to do can be read at a
+glance.
 
 ![Before anything is configured](../../docs/journeys/screenshots/settings-first-run.png)
 
@@ -24,15 +31,18 @@ than a failure halfway through writing up a meeting.
 Two of those choices ask for no key at all. If you already run on Amazon or
 Google, Elicta uses the permissions your cloud account grants it. Asking you to
 paste a key there would mean creating a long-lived credential in a place where
-your own platform has a better mechanism.
+your own platform has a better mechanism — so when you choose one of them, the
+credential fields do not appear at all rather than sitting there greyed out.
 
 ![Pointing Elicta at an internal gateway](../../docs/journeys/screenshots/settings-compatible-endpoint.png)
 
 ## Keys and tokens
 
-Both are supported, because organisations issue different things. You choose
-which is in use and Elicta labels it, so there is never any doubt about which
-credential a failure came from.
+Both are supported, because organisations issue different things. You say which
+kind you have, and only that one is asked for — the screen no longer shows you
+two boxes and leaves you to work out which of them matters. If the other kind is
+still stored from before, Elicta says so in a line of its own and offers to
+remove it, so nothing is left on the service that you cannot see.
 
 ![Credentials configured, with the one in use marked](../../docs/journeys/screenshots/settings-configured.png)
 
@@ -57,6 +67,9 @@ after-the-meeting ones are chosen for being accurate — and for disagreeing
 usefully with each other.
 
 ![Transcription services](../../docs/journeys/screenshots/settings-speech-vendors.png)
+
+The key for transcription sits with that choice, under the name of the company
+that issued it, because that is the name on the tab you copied it from.
 
 The two used for the recording must be different companies. The same service
 twice would agree with itself and flag nothing, so the form will not accept it.

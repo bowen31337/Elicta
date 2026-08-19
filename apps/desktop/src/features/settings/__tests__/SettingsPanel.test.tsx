@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -201,10 +201,48 @@ describe('SettingsPanel', () => {
     expect(save.mock.calls[0][0].inference.auth_mode).toBe('oauth_token');
   });
 
-  it('offers a field for the token as well as the key', () => {
+  it('shows the credential for the chosen mode, and only that one', async () => {
+    // Both fields at once was the confusion: a screen that says "use one or
+    // the other" and then offers both, side by side, with a Test button each.
     render(<SettingsPanel controller={controller()} />);
 
-    expect(screen.getByLabelText(/Anthropic OAuth token/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Anthropic API key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Anthropic OAuth token')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'OAuth token' }));
+
+    expect(screen.getByLabelText('Anthropic OAuth token')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
+  });
+
+  it('still admits to a stored credential it is no longer using', async () => {
+    // Hiding the unselected field must not hide a secret the service holds:
+    // a key nobody can see is a key nobody can revoke.
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.click(screen.getByRole('radio', { name: 'OAuth token' }));
+
+    expect(
+      screen.getByText(/Anthropic API key is also stored \(ends abcd\), and is not in use/),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].secrets).toEqual([
+      { key: 'anthropic_api_key', value: '' },
+    ]);
+  });
+
+  it('asks for no Anthropic credential at all when the host supplies it', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    await userEvent.selectOptions(screen.getByLabelText('Route Claude calls through'), 'bedrock');
+
+    expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'API key' })).not.toBeInTheDocument();
+    // The stored key is still accounted for rather than silently orphaned.
+    expect(screen.getByText(/Anthropic API key is also stored/)).toBeInTheDocument();
   });
 
   it('lets the operator choose the live transcription vendor', async () => {
@@ -348,5 +386,78 @@ describe('SettingsPanel', () => {
     expect(
       screen.getByLabelText('Custom speech service endpoint'),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Grouping by service.
+ *
+ * The screen used to list four credentials together under one "Authenticate
+ * with" switch that governed two of them. These assert the fix: a credential
+ * appears with the service it authenticates, named after that service, and
+ * each section says whether it is ready without the operator opening a single
+ * password field.
+ */
+describe('reading the screen at a glance', () => {
+  it('says whether each service is set up', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    const claude = screen.getByRole('region', { name: 'Claude' });
+    const speech = screen.getByRole('region', { name: 'Speech to text' });
+
+    expect(within(claude).getByText('Ready')).toBeInTheDocument();
+    expect(within(speech).getByText('Needs a key')).toBeInTheDocument();
+  });
+
+  it('puts each credential in the section for the thing it authenticates', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    const claude = screen.getByRole('region', { name: 'Claude' });
+    const speech = screen.getByRole('region', { name: 'Speech to text' });
+
+    expect(within(claude).getByLabelText('Anthropic API key')).toBeInTheDocument();
+    expect(within(claude).queryByLabelText(/AssemblyAI/)).not.toBeInTheDocument();
+    expect(within(speech).getByLabelText('AssemblyAI key')).toBeInTheDocument();
+  });
+
+  it('names the speech key after the vendor that issues it', async () => {
+    // "Speech-to-text vendor key" named a category. An operator has a tab open
+    // on a vendor's console, and that is the name they are looking for.
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.getByLabelText('AssemblyAI key')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
+
+    expect(screen.getByLabelText('Deepgram key')).toBeInTheDocument();
+  });
+
+  it('calls meeting capture optional, because it is', () => {
+    render(
+      <SettingsPanel
+        controller={controller({
+          settings: {
+            ...CONFIGURED,
+            secrets: [
+              ...CONFIGURED.secrets,
+              { key: 'capture_vendor_api_key', configured: false, hint: null },
+            ],
+          },
+        })}
+      />,
+    );
+
+    const capture = screen.getByRole('region', { name: 'Meeting capture' });
+    expect(within(capture).getByText('Optional')).toBeInTheDocument();
+  });
+
+  it('says there are unsaved changes rather than leaving the operator to remember', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText('Model'), 'x');
+
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   });
 });

@@ -7,7 +7,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
-  padding: var(--space-7) var(--space-6) var(--space-10);
+  /* The foot clears the floating save bar, so the last field can be scrolled
+     out from under it rather than living permanently behind it. */
+  padding: var(--space-7) var(--space-6) calc(var(--space-10) + 56px);
   max-width: 640px;
   margin: 0 auto;
   box-sizing: border-box;
@@ -20,13 +22,42 @@
   letter-spacing: var(--tracking-tight);
 }
 
+/* --- Service sections -------------------------------------------------------
+   The screen is grouped by the service being configured, so a section title is
+   a name — "Claude", "Speech to text" — not a category of setting. That makes
+   it a real title rather than the small uppercase eyebrow it used to be, and
+   it sits one clear step below the screen title and one clear step above the
+   field labels inside it: 34 / 22 / 17. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.settings-section + .settings-section { margin-top: var(--space-4); }
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-inline: var(--space-2);
+}
+
 .settings-panel h2 {
-  margin: var(--space-4) 0 calc(var(--space-1) * -1) var(--space-2);
-  font-size: var(--text-footnote);
+  margin: 0;
+  font-size: var(--text-title-2);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: var(--tracking-snug);
+  color: var(--label);
+}
+
+/* The one line that says what this service does for the operator, so the
+   section can be skipped by someone who does not need it. */
+.settings-section-summary {
+  margin: calc(var(--space-2) * -1) var(--space-2) var(--space-1);
+  font-size: var(--text-footnote);
+  line-height: var(--leading-relaxed);
   color: var(--label-supporting);
+  max-width: 56ch;
 }
 
 /* Each field is a card in the group, not a bare input on the page. */
@@ -108,11 +139,14 @@
   align-items: center;
   margin-top: var(--space-3);
 }
-.settings-actions button:first-child {
+.settings-actions button {
   background: var(--accent-fill);
   color: #fff;
   padding-inline: var(--space-7);
 }
+/* Whatever the bar is saying sits at its leading edge, away from the button. */
+.settings-dirty,
+.settings-saved { margin-right: auto; }
 .settings-saved { font-size: var(--text-footnote); color: var(--green-ink); }
 
 .settings-warning,
@@ -306,4 +340,53 @@
 @media (prefers-contrast: more) {
   .settings-segmented { outline: 1px solid var(--separator-opaque); }
   .settings-radio:has(input:checked) { outline: 1px solid var(--label); }
+}
+
+
+/* --- A stored credential that is not the one in use -------------------------
+   Only the selected credential gets a field, which is what makes the section
+   readable. A secret the service still holds cannot simply vanish with it, so
+   it is stated in one line and can be removed from here. */
+.settings-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  background: var(--fill-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-footnote);
+  line-height: var(--leading-relaxed);
+  color: var(--label-supporting);
+}
+
+/* --- The save bar -----------------------------------------------------------
+   This form is long enough that a button at its foot is a scroll away from the
+   field that changed. The bar rides the bottom of the viewport as a floating
+   material — `.glass` carries the tint, blur, specular edge and depth — so the
+   action is always where the operator's eyes already are.
+
+   It is deliberately not an instant-apply screen. Every other Apple settings
+   surface applies as you type; a screen that writes credentials should not,
+   because a half-typed key is not a state anyone wants saved. */
+.settings-actions {
+  position: sticky;
+  bottom: var(--space-5);
+  z-index: 2;
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  /* The primary action sits at the trailing edge, where this platform has put
+     the button that commits a change for forty years. */
+  justify-content: flex-end;
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+}
+
+.settings-dirty { font-size: var(--text-footnote); color: var(--orange-ink); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .settings-actions { background: var(--bg-tertiary); }
 }

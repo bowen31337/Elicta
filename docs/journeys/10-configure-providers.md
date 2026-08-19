@@ -6,9 +6,15 @@ Elicta relies on outside services to transcribe audio and to do the writing-up.
 Those are configured in the app, not by an engineer editing a server, because
 the person who needs a key changed is not usually the person who could deploy.
 
+The screen is organised by service — one section for the AI work, one for
+transcription, one for managed capture — and each section carries its own
+readiness. A credential lives in the section for the thing it authenticates,
+rather than in a single list of keys that gave no clue which was which.
+
 ## First run
 
-Nothing is set up, and the screen says so plainly rather than looking ready.
+Nothing is set up, and the screen says so plainly rather than looking ready:
+every section reads "needs a credential" or "needs a key" beside its title.
 
 ![Before anything is configured](screenshots/settings-first-run.png)
 
@@ -29,7 +35,9 @@ platform has a better mechanism.
 ## Your key, or your token
 
 Both are supported, because organisations issue different things. You choose
-which one is in use, and Elicta labels it so there is no doubt.
+which one is in use, and only that one is asked for — a credential of the other
+kind that is still stored is named in a line of its own, with a way to clear it,
+so nothing is held that the operator cannot see.
 
 ![Credentials configured, with the one in use marked](screenshots/settings-configured.png)
 
@@ -49,7 +57,9 @@ Four things on this screen exist to stop a credential leaking:
 
 The live path and the recording are set up separately because they are bought
 on different things: one on how quickly it can tell a sentence has finished,
-the other on two services disagreeing usefully.
+the other on two services disagreeing usefully. The key sits with them, named
+after the vendor selected above it — "AssemblyAI key", not "speech-to-text
+vendor key".
 
 ![Transcription services](screenshots/settings-speech-vendors.png)
 
