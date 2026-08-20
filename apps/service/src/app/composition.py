@@ -1017,6 +1017,12 @@ def _include_operational_routers(
             started_at=datetime.now(UTC),
         )
         backend.live_sessions[started.session_id] = started
+        # The debrief pipeline files its requirements state under the
+        # engagement, and this is the only moment that knows which engagement
+        # a session belongs to.
+        engagement_id = backend.meeting_engagement_ids.get(meeting_id)
+        if engagement_id is not None:
+            backend.session_engagement_ids[started.session_id] = engagement_id
         return started
 
     async def admit_capture(meeting_id: str) -> Any:
@@ -1463,7 +1469,17 @@ async def _run_debrief_when_record_path_completes(
         for segment in transcript.segments
     ]
 
-    engagement_id = backend.session_engagement_ids.get(session_id, session_id)
+    # The record path keys everything by the meeting id, and calls it a
+    # session id; the live path allocates a session id of its own. Both have
+    # to resolve to the engagement, because that is what carries forward
+    # between meetings (FR-3.11). Falling back to the session id filed one
+    # engagement's requirements state under a meeting id, where the next
+    # meeting in the same engagement could never find it.
+    engagement_id = (
+        backend.session_engagement_ids.get(session_id)
+        or backend.meeting_engagement_ids.get(session_id)
+        or session_id
+    )
 
     async def save_cleaning(record: Any) -> None:
         backend.transcript_cleanings[session_id] = record
