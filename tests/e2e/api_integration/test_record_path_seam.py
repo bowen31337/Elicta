@@ -101,3 +101,18 @@ def test_a_meeting_that_was_never_transcribed_has_no_alignment(
     response = client.get(f"/api/meetings/{meeting_id}/record/divergences")
 
     assert response.status_code == 404
+
+
+def test_a_session_whose_audio_was_never_destroyed_says_so(client: TestClient) -> None:
+    """NFR-2.4 asks the discard to be observable, not merely to happen.
+
+    A 404 means no attempt has been made, which is deliberately distinct from
+    a `FAILED` event — that one means the audio may still be sitting there and
+    somebody needs to know. The positive case needs a debrief pipeline to have
+    diarized the session, so it lives in `test_debrief_artifacts_seam.py`,
+    where an engine is substituted; there is no honest way to reach it here.
+    """
+
+    meeting_id = _meeting(client)
+
+    assert client.get(f"/api/sessions/{meeting_id}/audio-destruction").status_code == 404

@@ -23,11 +23,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from .models import CitationRow
+from .models import AudioDestructionEvent, CitationRow
 
 SaveCitationRow = Callable[[CitationRow], Awaitable[None]]
+GetAudioDestruction = Callable[[str], Awaitable[AudioDestructionEvent | None]]
 
 
 def build_citation_row_router(save: SaveCitationRow) -> APIRouter:
@@ -37,5 +38,36 @@ def build_citation_row_router(save: SaveCitationRow) -> APIRouter:
     async def write_citation_row(session_id: str, row: CitationRow) -> CitationRow:
         await save(row)
         return row
+
+    return router
+
+
+def build_audio_destruction_router(get_event: GetAudioDestruction) -> APIRouter:
+    """Build the audio-destruction read route (PRD NFR-2.4).
+
+    NFR-2.4 does not just require the raw audio to be discarded; it requires
+    the discard to be *observable*, which is why `AudioDestructionEvent` is
+    persisted whether the deletion succeeded or failed. It was persisted and
+    then served back nowhere, so the one screen whose job is to tell a
+    reviewer what happened to the audio had nothing to read.
+
+    A 404 means no attempt has been made yet — the session is still being
+    transcribed, or was never captured. That is deliberately distinct from a
+    `FAILED` event, which means the audio may still be sitting there and
+    somebody needs to know.
+    """
+
+    router = APIRouter(prefix="/api/sessions", tags=["audio-lifecycle"])
+
+    @router.get(
+        "/{session_id}/audio-destruction",
+        response_model=AudioDestructionEvent,
+        status_code=200,
+    )
+    async def get_audio_destruction(session_id: str) -> AudioDestructionEvent:
+        event = await get_event(session_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="no audio destruction event")
+        return event
 
     return router

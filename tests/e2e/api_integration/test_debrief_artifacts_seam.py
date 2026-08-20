@@ -194,3 +194,27 @@ def test_a_meeting_with_no_debrief_lists_nothing_and_404s_its_artifacts(
     assert client.get("/api/meetings/meeting-1/artifacts").json() == []
     assert client.get("/api/sessions/meeting-1/project-brief").status_code == 404
     assert client.get("/api/artifacts/artifact-1").status_code == 404
+
+
+def test_the_audio_destruction_is_readable_once_the_debrief_has_run(
+    debriefing_client: TestClient,
+) -> None:
+    """NFR-2.4 requires the discard to be observable, not merely to happen.
+
+    The event was persisted whether the deletion succeeded or failed, and
+    served back nowhere — so the recording screen, whose job is to tell a
+    reviewer what became of the audio, had nothing to read. Destruction is
+    gated on both record-path transcription and diarization finishing, which
+    is why this belongs to the debrief fixture rather than the record-path one.
+    """
+
+    meeting_id = _debriefed_meeting(debriefing_client)
+
+    response = debriefing_client.get(f"/api/sessions/{meeting_id}/audio-destruction")
+
+    assert response.status_code == 200, response.text
+    event = response.json()
+    assert event["session_id"] == meeting_id
+    assert event["status"] == "complete"
+    assert event["audio_ref"] == "s3://recordings/ridgeway-01.wav"
+    assert event["completed_at"]

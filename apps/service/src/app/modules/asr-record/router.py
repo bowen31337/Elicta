@@ -34,6 +34,10 @@ from .service import (
 )
 
 GetSessionAlignment = Callable[[str], Awaitable[SessionAlignment | None]]
+# Told that this session's raw audio is now held, and where. NFR-2.4 requires
+# it to be destroyed the moment transcription and diarization both finish, and
+# nothing can destroy audio whose retention was never recorded.
+OnAudioRetained = Callable[[str, str], Awaitable[None]]
 
 
 def build_record_path_router(
@@ -43,6 +47,7 @@ def build_record_path_router(
     get_transcripts: GetRecordPathTranscript,
     save_alignment: SaveSessionAlignment | None = None,
     get_alignment: GetSessionAlignment | None = None,
+    on_audio_retained: OnAudioRetained | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/sessions", tags=["record-path-transcription"])
 
@@ -54,6 +59,8 @@ def build_record_path_router(
     async def create_record_path_transcript(
         session_id: str, payload: RecordPathTranscriptionRequest
     ) -> list[RecordPathTranscript]:
+        if on_audio_retained is not None:
+            await on_audio_retained(session_id, payload.audio_ref)
         return await run_record_path_transcription(
             session_id,
             payload.audio_ref,
@@ -100,6 +107,7 @@ def build_meeting_transcription_router(
     schedule: ScheduleTranscriptionWork,
     save_alignment: SaveSessionAlignment | None = None,
     get_alignment: GetSessionAlignment | None = None,
+    on_audio_retained: OnAudioRetained | None = None,
 ) -> APIRouter:
     """Async, job-based entry point for starting one meeting's record-path run.
 
@@ -121,6 +129,11 @@ def build_meeting_transcription_router(
     async def start_meeting_record_path_transcription(
         meeting_id: str, payload: RecordPathTranscriptionRequest
     ) -> RecordPathTranscriptionJob:
+        # Before anything is dispatched: this is the moment the service takes
+        # custody of the raw audio, and the moment its eventual destruction
+        # (NFR-2.4) becomes something that can be owed.
+        if on_audio_retained is not None:
+            await on_audio_retained(meeting_id, payload.audio_ref)
         return await start_record_path_transcription_job(
             meeting_id,
             payload.audio_ref,

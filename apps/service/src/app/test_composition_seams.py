@@ -84,17 +84,21 @@ ACCEPTED_READ_ONLY: dict[str, str] = {
     ),
 }
 
-# Mutating calls on a field, as opposed to reads of it. `pin` belongs here
-# because a registry mutates through its own method rather than by
-# assignment — a write is a write however it is spelled.
+# Calls that PUT something into a field, as opposed to reads of it. `pin`
+# belongs here because a registry mutates through its own method rather than
+# by assignment — a write is a write however it is spelled.
+#
+# `pop` and `clear` are deliberately absent. They remove, and a field that is
+# only ever emptied was never filled: `retained_audio` was read in three
+# places, written in none, and `.pop(...)` alone was enough to look like a
+# writer — so NFR-2.4's audio destruction could never fire and this test said
+# nothing. Removal is not provenance.
 WRITE_METHODS = (
     "append",
     "add",
     "update",
     "setdefault",
     "extend",
-    "pop",
-    "clear",
     "pin",
 )
 

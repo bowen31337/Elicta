@@ -92,7 +92,10 @@ from app.modules.debrief.pipeline.retention import (
     destroy_retained_audio,
     is_ready_for_audio_destruction,
 )
-from app.modules.debrief.pipeline.router import build_citation_row_router
+from app.modules.debrief.pipeline.router import (
+    build_audio_destruction_router,
+    build_citation_row_router,
+)
 from app.modules.debrief.session.models import (
     DebriefConversationSession,
     NudgeDispositionRecord,
@@ -867,6 +870,19 @@ def build_app(
     async def get_alignment(session_id: str) -> Any | None:
         return backend.session_alignments.get(session_id)
 
+    async def on_audio_retained(session_id: str, audio_ref: str) -> None:
+        """Record that the service now holds this session's raw audio.
+
+        `retained_audio` was read in three places and written in none: the
+        destruction gate asked what audio to destroy and always got `None`,
+        so NFR-2.4's discard could never fire and the debrief pipeline ran
+        against an empty `audio_ref`. Accepting a recording for
+        transcription is the moment custody begins, so it is the moment the
+        obligation to destroy it is recorded.
+        """
+
+        backend.retained_audio[session_id] = audio_ref
+
     app.include_router(
         _asr_router.build_record_path_router(
             engines,
@@ -875,6 +891,7 @@ def build_app(
             get_transcripts,
             save_alignment=save_alignment,
             get_alignment=get_alignment,
+            on_audio_retained=on_audio_retained,
         )
     )
 
@@ -914,6 +931,7 @@ def build_app(
             schedule,
             save_alignment=save_alignment,
             get_alignment=get_alignment,
+            on_audio_retained=on_audio_retained,
         )
     )
 
@@ -921,6 +939,21 @@ def build_app(
         backend.citation_rows.append(row)
 
     app.include_router(build_citation_row_router(save_citation_row))
+
+    async def get_audio_destruction(session_id: str) -> AudioDestructionEvent | None:
+        """The latest destruction attempt for this session, if one was made.
+
+        Latest rather than first: a retry after a failure is what describes
+        where the audio actually stands now. The whole list stays in
+        `audio_destruction_events` as the NFR-2.4 audit trail.
+        """
+
+        for event in reversed(backend.audio_destruction_events):
+            if event.session_id == session_id:
+                return event
+        return None
+
+    app.include_router(build_audio_destruction_router(get_audio_destruction))
 
     async def open_conversation(meeting_id: str, session_id: str) -> str:
         return f"conversation-{session_id}"
