@@ -129,6 +129,44 @@ async function main() {
         await cdp.eval(OVERLAY(`${journey.id} — ${journey.title}`, message));
         await sleep(900);
       },
+      /** A full navigation, so components that fetch on mount see state the
+       *  journey created after the page first loaded. `go` is a hash change,
+       *  which remounts the screen but not the toolbar's picker. */
+      async reloadTo(feature) {
+        // Navigating to a URL that differs only in its fragment is a
+        // same-document change — Chrome updates the hash and does not reload,
+        // so a component that fetched on mount keeps its stale list. Set the
+        // fragment, then reload the document explicitly.
+        await cdp.eval(`window.location.hash = '#/${feature}'; return true`);
+        await cdp.send('Page.reload', { ignoreCache: true });
+        await sleep(3200);
+        await cdp.eval(OVERLAY(`${journey.id} — ${journey.title}`, `Screen: ${feature}`));
+      },
+      /** Picks the engagement, and optionally the meeting, the way an operator
+       *  does — through the toolbar control, not by writing to localStorage. */
+      async selectInPicker(engagementId, meetingId) {
+        const chose = await cdp.eval(
+          `const el = document.querySelector('#current-engagement');
+           if (!el) return 'no-picker';
+           const setter = Object.getOwnPropertyDescriptor(
+             window.HTMLSelectElement.prototype, 'value').set;
+           setter.call(el, ${JSON.stringify(engagementId)});
+           el.dispatchEvent(new Event('change', { bubbles: true }));
+           return el.value`);
+        await sleep(1600);
+        if (meetingId) {
+          await cdp.eval(
+            `const el = document.querySelector('#current-meeting');
+             if (!el) return 'no-meeting-picker';
+             const setter = Object.getOwnPropertyDescriptor(
+               window.HTMLSelectElement.prototype, 'value').set;
+             setter.call(el, ${JSON.stringify(meetingId)});
+             el.dispatchEvent(new Event('change', { bubbles: true }));
+             return el.value`);
+          await sleep(1600);
+        }
+        return chose;
+      },
       async go(feature) {
         await cdp.eval(`window.location.hash = '#/${feature}'; return true`);
         await sleep(1800);

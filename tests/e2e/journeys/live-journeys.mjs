@@ -75,6 +75,12 @@ export const JOURNEYS = [
         (bank.json?.sections ?? []).length > 0,
         `bank after compile: ${JSON.stringify(bank.json).slice(0, 300)}`);
 
+      await ctx.narrate('Choosing this engagement in the toolbar, as an operator would');
+      await ctx.reloadTo('prep');
+      const picked = await ctx.selectInPicker(engagementId);
+      ctx.check('the engagement can be chosen from the toolbar', picked === engagementId,
+        `the picker reads ${JSON.stringify(picked)} after choosing ${engagementId}`);
+
       await ctx.narrate('The Preparation screen in the running app');
       await ctx.go('prep');
       await ctx.shot('prep-screen');
@@ -130,6 +136,16 @@ export const JOURNEYS = [
         /consent/i.test(consentReason),
         `refused with ${consentReason} — 4xx here does not demonstrate a consent gate`);
 
+      await ctx.narrate('The Consent screen before anyone has confirmed');
+      await ctx.reloadTo('consent');
+      await ctx.selectInPicker(engagementId, meetingId);
+      await ctx.shot('consent-before');
+      const beforeDisabled = await ctx.eval(
+        `const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Start');
+         return b ? b.disabled : null`);
+      ctx.check('capture cannot be started until consent is confirmed', beforeDisabled === true,
+        `the Start button's disabled state is ${JSON.stringify(beforeDisabled)} while consent is unconfirmed`);
+
       await ctx.narrate('Confirming consent on the record');
       const confirm = await ctx.api('POST', `/api/meetings/${meetingId}/consent-confirmation`,
         { confirmed_by: 'Dana Whitfield, COO' });
@@ -150,12 +166,13 @@ export const JOURNEYS = [
       ctx.state.sessionId = started.json?.session_id ?? null;
 
       await ctx.narrate('The Consent screen in the running app');
-      await ctx.go('consent');
+      await ctx.reloadTo('consent');
+      await ctx.selectInPicker(engagementId, meetingId);
       await ctx.shot('consent-screen');
       const startDisabled = await ctx.eval(
         `const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Start'); return b? b.disabled : null`);
-      ctx.check('capture cannot be started until consent is confirmed', startDisabled === true,
-        `the Start button's disabled state is ${JSON.stringify(startDisabled)}`);
+      ctx.check('capture becomes available once consent is on the record', startDisabled === false,
+        `the Start button's disabled state is ${JSON.stringify(startDisabled)} after consent was confirmed`);
       const meetingTitle = await ctx.text('#consent-title');
       ctx.check('the consent screen names the meeting it gates',
         meetingTitle !== null && meetingTitle.trim() !== '—',
@@ -290,7 +307,8 @@ export const JOURNEYS = [
         `status ${divergences.status}, ${JSON.stringify(divergences.json).slice(0, 300)}`);
 
       await ctx.narrate('The Recording screen in the running app');
-      await ctx.go('recording');
+      await ctx.reloadTo('recording');
+      await ctx.selectInPicker(ctx.state.engagementId, meetingId);
       await ctx.shot('recording-screen');
       const engines = await ctx.count('#engines-title ~ .group .row');
       ctx.check('the screen names the engines that transcribed the meeting', engines > 0,
@@ -348,7 +366,8 @@ export const JOURNEYS = [
         JSON.stringify(artifacts.json).slice(0, 300));
 
       await ctx.narrate('Asking about the meeting in the running app');
-      await ctx.go('debrief-chat');
+      await ctx.reloadTo('debrief-chat');
+      await ctx.selectInPicker(ctx.state.engagementId, meetingId);
       await ctx.shot('debrief-chat-before-start');
       await ctx.clickText('button', 'Start');
       await ctx.sleep(4000);
@@ -415,7 +434,8 @@ export const JOURNEYS = [
         `inherited bank: ${JSON.stringify(inherited.json).slice(0, 240)}`);
 
       await ctx.narrate('The Engagement arc screen in the running app');
-      await ctx.go('arc');
+      await ctx.reloadTo('arc');
+      await ctx.selectInPicker(engagementId);
       await ctx.shot('arc-screen');
       const meetings = await ctx.count('.timeline-item');
       ctx.check('the arc shows the meetings held so far', meetings > 0, `${meetings} meetings on the timeline`);
