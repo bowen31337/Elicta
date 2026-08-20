@@ -113,6 +113,7 @@ from app.modules.engagement.documents.router import (
     build_engagement_documents_router,
     build_reference_document_link_router,
 )
+from app.modules.engagement.index.extraction import extract_text
 from app.modules.engagement.index.service import index_document
 from app.modules.engagement.meetings.models import (
     Attendee,
@@ -334,6 +335,14 @@ class Backend:
     attendees: dict[str, list[Attendee]] = field(default_factory=dict)
     next_attendee_id: int = 0
 
+    # Each document's extracted text, by document id — what the offline
+    # compiler extracts claims from (§3.10). Deliberately not the same thing
+    # as `document_chunks` (the retrieval index, whitespace-normalised and
+    # split, which would shift every citation offset) or
+    # `context_pack_digests` (which carries counts and never text, because
+    # FR-3.3 keeps the *runtime* cached prefix compact).
+    document_texts: dict[str, str] = field(default_factory=dict)
+
     reference_document_bodies: dict[str, str] = field(default_factory=dict)
     reference_documents: list[tuple[ReferenceDocument, str]] = field(default_factory=list)
     next_reference_document_id: int = 0
@@ -523,6 +532,7 @@ def build_app(
             status=payload.status,
         )
         backend.engagement_documents.setdefault(engagement_id, []).append(document)
+        backend.document_texts[document.document_id] = extract_text(payload.content)
 
         # FR-3.3: index the content as soon as it exists. The two sinks stay
         # separate on purpose — raw chunks serve slow-lane retrieval, while
@@ -1140,6 +1150,7 @@ def _include_operational_routers(
             source_uri=request.url,
         )
         backend.reference_documents.append((document, body))
+        backend.document_texts[document.id] = body
         backend.engagement_documents.setdefault(engagement_id, []).append(
             EngagementDocument(
                 document_id=document.id,
@@ -1359,11 +1370,19 @@ async def _run_engagement_compile(
 ) -> Any:
     """Run the §3.10 compiler chain for one engagement."""
 
+    # Both intake paths (FR-3.2 upload and link) land in
+    # `engagement_documents`, so one read covers both. The text comes from
+    # `document_texts`; a document whose text never arrived contributes an
+    # empty string rather than its filename -- the compiler extracting claims
+    # from "current-process.md" is what left the bank empty while every stage
+    # reported success.
+    attached = backend.engagement_documents.get(engagement_id, [])
     documents = [
         _extraction_models.ExtractionSourceDocument(
-            document_id=document.document_id, text=document.name
+            document_id=document.document_id,
+            text=backend.document_texts.get(document.document_id, ""),
         )
-        for document in backend.engagement_documents.get(engagement_id, [])
+        for document in attached
     ]
 
     engagement = backend.engagements.get(engagement_id)
@@ -1371,7 +1390,18 @@ async def _run_engagement_compile(
         engagement_id=engagement_id,
         sector=getattr(engagement, "sector", "unknown"),
         project_type=getattr(engagement, "commercial_context", "unknown"),
-        documents=[],
+        # The Analyst pass reads the documents' content and their status tags
+        # together: FR-3.4's taxonomy is what tells it to treat a claim as
+        # ground truth, as a hypothesis to verify, or as superseded
+        # background. An empty list left it inventing from the sector alone.
+        documents=[
+            _agent_models.ContextPackDocument(
+                document_id=document.document_id,
+                status=document.status,
+                text=backend.document_texts.get(document.document_id, ""),
+            )
+            for document in attached
+        ],
     )
 
     async def save_extraction(record: Any) -> None:
