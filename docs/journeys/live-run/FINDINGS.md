@@ -203,3 +203,86 @@ says so correctly.
 | Speech key is write-only (hint only, never the value) | not run | **passes** |
 | Journey 10 overall | 7 of 7 | **12 of 12** |
 | Anything actually transcribed by Elicta | no | **still no** |
+
+---
+
+# What was closed — 20 August 2026
+
+Thirteen stories, run through the autonomous agent loop
+(`scripts/ralph/`), each one reconnecting a seam and proving it with a
+test that goes through the API in both directions. Re-running the same
+harness against the same system afterwards:
+
+**52 passed / 34 failed → 67 passed / 21 failed.** Journeys 2, 5 and 10
+now pass completely.
+
+| # | Journey | Before | After |
+|---|---|---|---|
+| 01 | Prepare for the engagement | 7P/5F | 12P/1F |
+| 02 | Start the meeting, with consent | 8P/4F | **13P/0F** |
+| 03 | Catch a vague answer | 2P/3F | 3P/2F |
+| 04 | Two languages | 4P/1F | 4P/1F |
+| 05 | When the connection drops | 3P/1F | **4P/0F** |
+| 06 | Check the recording | 1P/3F | 3P/1F |
+| 07 | Get the write-up | 6P/8F | 4P/10F |
+| 08 | Carry state forward | 2P/4F | 3P/3F |
+| 09 | Judge the suggestions | 3P/3F | 5P/1F |
+| 10 | Set up the services | 12P/0F | **12P/0F** |
+| 11 | Control the recording | 2P/1F | 2P/1F |
+| 12 | Install and roll out | 2P/1F | 2P/1F |
+
+Every write/read pair in the table at the top of this document now works.
+Verified against a service running the new code, not only in tests:
+
+- `POST /api/meetings` → `GET /api/meetings/{id}` returns the meeting
+- consent-confirmation → consent-gate reads `confirmed`, and a session
+  started before consent is refused **naming consent**, not "meeting not
+  found"
+- a linked document appears in the engagement's document list
+- a replay run reads back, and a rating moves its metrics
+- transcribe → divergences returns a result
+
+The `ack:` stub is gone. With no model configured the debrief returns
+**503** naming what is missing; under a provider rate limit it returns
+**429** with `retry_after` and the sentence "this is a limit, not a
+fault." The egress audit records rows, including failures with reasons.
+
+The six unwired screens read from the service, and a toolbar control
+chooses which engagement and meeting they are about — `select()` existed
+but no component called it, so until that control was added every screen
+showed whatever the oldest engagement held.
+
+## The guard that makes this stay closed
+
+`apps/service/src/app/test_composition_seams.py` asserts the structural
+invariant: **a field the composition root reads, it must also write**, or
+it appears in `ACCEPTED_READ_ONLY` with a stated reason. Both halves are
+mutation-tested — introducing a new read-only field fails the invariant
+test, and adding a `backend.*` assignment to a seam test fails
+`test_no_seam_test_sets_up_its_own_read_side`.
+
+Suites: 706 → 792 service tests, 45 → 107 API integration, 199 → 363
+desktop.
+
+## What is still open, and why
+
+None of the 21 remaining failures is unfinished work from this pass.
+
+- **Ten (journey 7) are an Anthropic rate limit.** The debrief now
+  returns 429 with the message above; the journey still cannot complete
+  without a model, and the artifacts downstream of it cannot be produced.
+- **Six need something that does not exist.** The live panel, language
+  chrome, audio sources and OS permissions require either the
+  speech-vendor backend — `TranscriptionBackend` still has three
+  implementations and all three are fakes — or the desktop shell, which a
+  browser is not.
+- **Four are accepted exceptions**, each named with its reason in
+  `ACCEPTED_READ_ONLY`: inherited open questions and the per-meeting bank
+  need a recompile step no caller runs; a linked document's body needs a
+  connector that does not exist.
+- **One is the compiler**, which now reads document *text* rather than
+  filenames but has no text to read until that connector exists.
+
+The handbook is in drift on seven chapters, because the screens they show
+changed. That is the mechanism working; it needs a human to re-read them
+and run `gen.py accept`.

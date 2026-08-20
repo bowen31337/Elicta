@@ -1,19 +1,19 @@
 # Live journey run
 
-Driven against a running system — panel at http://192.168.99.233:1420, service at http://192.168.99.233:8000.
-**52 of 86 checks passed; 34 failed.**
+Driven against a running system — panel at http://127.0.0.1:1420, service at http://127.0.0.1:8000.
+**67 of 88 checks passed; 21 failed.**
 
 | # | Journey | Passed | Failed | Recording |
 |---|---|---|---|---|
-| 01 | Prepare for the engagement | 7 | 5 | `01-prepare-an-engagement/journey.mp4` |
-| 02 | Start the meeting, with consent on the record | 8 | 4 | `02-start-a-meeting-with-consent/journey.mp4` |
-| 03 | Catch a vague answer while it still matters ⚠︎ | 2 | 3 | `03-catch-a-vague-answer-live/journey.mp4` |
+| 01 | Prepare for the engagement | 12 | 1 | `01-prepare-an-engagement/journey.mp4` |
+| 02 | Start the meeting, with consent on the record | 13 | 0 | `02-start-a-meeting-with-consent/journey.mp4` |
+| 03 | Catch a vague answer while it still matters ⚠︎ | 3 | 2 | `03-catch-a-vague-answer-live/journey.mp4` |
 | 04 | Run a meeting in two languages ⚠︎ | 4 | 1 | `04-run-a-code-switched-meeting/journey.mp4` |
-| 05 | When the connection drops | 3 | 1 | `05-degraded-mode/journey.mp4` |
-| 06 | Check the recording ⚠︎ | 1 | 3 | `06-reconcile-the-recording/journey.mp4` |
-| 07 | Get the write-up | 6 | 8 | `07-produce-the-debrief/journey.mp4` |
-| 08 | Carry what you learned forward | 2 | 4 | `08-carry-state-forward/journey.mp4` |
-| 09 | Judge whether the suggestions are any good | 3 | 3 | `09-replay-and-tune-ranking/journey.mp4` |
+| 05 | When the connection drops | 4 | 0 | `05-degraded-mode/journey.mp4` |
+| 06 | Check the recording ⚠︎ | 3 | 1 | `06-reconcile-the-recording/journey.mp4` |
+| 07 | Get the write-up | 4 | 10 | `07-produce-the-debrief/journey.mp4` |
+| 08 | Carry what you learned forward | 3 | 3 | `08-carry-state-forward/journey.mp4` |
+| 09 | Judge whether the suggestions are any good | 5 | 1 | `09-replay-and-tune-ranking/journey.mp4` |
 | 10 | Set up the services Elicta uses | 12 | 0 | `10-configure-providers/journey.mp4` |
 | 11 | Control the recording | 2 | 1 | `11-control-capture/journey.mp4` |
 | 12 | Get Elicta onto people’s machines | 2 | 1 | `12-install-and-roll-out/journey.mp4` |
@@ -22,7 +22,7 @@ Driven against a running system — panel at http://192.168.99.233:1420, service
 
 ## 01 — Prepare for the engagement
 
-Video: `01-prepare-an-engagement/journey.mp4` (141 frames). Screenshots: 1.
+Video: `01-prepare-an-engagement/journey.mp4` (197 frames). Screenshots: 1.
 
 **Passed**
 
@@ -32,24 +32,21 @@ Video: `01-prepare-an-engagement/journey.mp4` (141 frames). Screenshots: 1.
 - an unknown term type is rejected rather than stored
 - a non-SharePoint link is refused
 - a SharePoint link is attached
+- the attached document appears in the document list
 - compilation is accepted
+- the engagement can be chosen from the toolbar
+- the preparation screen names the client organisation
+- the screen lists the reference document just attached
+- the screen shows the engagement vocabulary just added
 
 **Failed**
 
-- **the attached document appears in the document list**
-  - list returned {"engagement_id":"eng-6","documents":[]} after attaching reference-document-6
 - **the compiled bank contains candidate questions**
-  - bank after compile: {"engagement_id":"eng-6","sections":[],"generated_at":"2026-08-20T03:22:10.262912Z"}
-- **the preparation screen names the client organisation**
-  - heading reads "—"
-- **the screen lists the reference document just attached**
-  - 0 rows in the reference-documents section
-- **the screen shows the engagement vocabulary just added**
-  - 0 vocabulary chips rendered
+  - bank after compile: {"engagement_id":"eng-13","sections":[],"generated_at":"2026-08-20T05:56:10.511292Z"}
 
 ## 02 — Start the meeting, with consent on the record
 
-Video: `02-start-a-meeting-with-consent/journey.mp4` (85 frames). Screenshots: 1.
+Video: `02-start-a-meeting-with-consent/journey.mp4` (208 frames). Screenshots: 2.
 
 **Passed**
 
@@ -58,36 +55,33 @@ Video: `02-start-a-meeting-with-consent/journey.mp4` (85 frames). Screenshots: 1
 - the gate reports consent is still awaited
 - the gate states its legal basis
 - starting a session before consent is refused
+- the refusal is about consent, not a meeting the service cannot find
+- capture cannot be started until consent is confirmed
 - consent is recorded against a named person
 - consent is timestamped
-- capture cannot be started until consent is confirmed
+- the gate opens once consent is confirmed
+- the session starts once consent is confirmed
+- capture becomes available once consent is on the record
+- the consent screen names the meeting it gates
 
-**Failed**
+Failed browser requests during this journey: 1
 
-- **the refusal is about consent, not a meeting the service cannot find**
-  - refused with {"detail":"meeting not found"} — 4xx here does not demonstrate a consent gate
-- **the gate opens once consent is confirmed**
-  - gate still reads "awaiting_confirmation" after a confirmation was accepted
-- **the session starts once consent is confirmed**
-  - status 404, {"detail":"meeting not found"}
-- **the consent screen names the meeting it gates**
-  - title reads "—"
+- `404 http://127.0.0.1:1420/api/meetings/meeting-9/consent-record`
 
 ## 03 — Catch a vague answer while it still matters
 
 > Blocked: No Deepgram backend exists. `TranscriptionBackend` has three implementations in `core/crates/asr-live` and all three are fakes; the crate has no dependencies, so it cannot open a socket.
 
-Video: `03-catch-a-vague-answer-live/journey.mp4` (58 frames). Screenshots: 1.
+Video: `03-catch-a-vague-answer-live/journey.mp4` (59 frames). Screenshots: 1.
 
 **Passed**
 
 - the session stream is reachable
+- the slow lane accepts a tick
 - the panel renders
 
 **Failed**
 
-- **the slow lane accepts a tick**
-  - status 404, {"detail":"meeting not found"}
 - **the panel shows live coverage from the session**
   - coverage chrome reads "— / —"
 - **a follow-up question is surfaced to the operator**
@@ -97,7 +91,7 @@ Video: `03-catch-a-vague-answer-live/journey.mp4` (58 frames). Screenshots: 1.
 
 > Blocked: Same missing vendor backend as journey 3 — the credential is configured and verified, but nothing can connect to Deepgram to transcribe.
 
-Video: `04-run-a-code-switched-meeting/journey.mp4` (65 frames). Screenshots: 1.
+Video: `04-run-a-code-switched-meeting/journey.mp4` (67 frames). Screenshots: 1.
 
 **Passed**
 
@@ -113,55 +107,47 @@ Video: `04-run-a-code-switched-meeting/journey.mp4` (65 frames). Screenshots: 1.
 
 ## 05 — When the connection drops
 
-Video: `05-degraded-mode/journey.mp4` (61 frames). Screenshots: 1.
+Video: `05-degraded-mode/journey.mp4` (63 frames). Screenshots: 1.
 
 **Passed**
 
 - the panel is not falsely claiming degraded mode while the model is reachable
 - the configured model credential is reachable
 - an egress audit trail is available
-
-**Failed**
-
-- **the audit records what left the machine**
-  - audit returned [] after a live model call was made
+- the audit records what left the machine
 
 ## 06 — Check the recording
 
 > Blocked: `app/modules/asr-record` makes no outbound HTTP call, so the record path has no vendor client to reconcile two engines with.
 
-Video: `06-reconcile-the-recording/journey.mp4` (48 frames). Screenshots: 1.
+Video: `06-reconcile-the-recording/journey.mp4` (94 frames). Screenshots: 1.
 
 **Passed**
 
 - the record path accepts a transcription request
+- divergences between the two engines are reported
+- the screen names the engines that transcribed the meeting
 
 **Failed**
 
-- **divergences between the two engines are reported**
-  - status 404, {"detail":"record-path alignment not found"}
-- **the screen names the engines that transcribed the meeting**
-  - 0 engine rows rendered
 - **the screen reports how far the engines agreed**
   - agreement reads "0%"
 
 ## 07 — Get the write-up
 
-Video: `07-produce-the-debrief/journey.mp4` (393 frames). Screenshots: 5.
+Video: `07-produce-the-debrief/journey.mp4` (460 frames). Screenshots: 5.
 
 **Passed**
 
 - a debrief conversation opens
 - the conversation is anchored to a session
-- the debrief accepts a free-text question
+- the answer comes from the model rather than a stub echo
 - the conversation opens from the screen
-- the screen shows the question and an answer
-- the debrief screen reports no error
 
 **Failed**
 
-- **the answer comes from the model rather than a stub echo**
-  - the service replied {"session_id":"dc2590b143ea43c29dbbf9184482ca65","meeting_id":"meeting-8","conversation_ref":"conversation-dc2590b143ea43c29dbbf9184482ca65","status":"open","streaming_enabled":true,"length_cap":null,"latency_budget_seconds":null,"opened_at":"2026-08-20T03:22:47.735275Z","nudge_dispositions":[],"his
+- **the debrief accepts a free-text question**
+  - status 429, {"detail":"the debrief conversation (FR-7.3): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a fault."}
 - **the project brief is produced**
   - status 404, {"detail":"draft project brief not found"}
 - **the decision log is produced**
@@ -172,53 +158,61 @@ Video: `07-produce-the-debrief/journey.mp4` (393 frames). Screenshots: 5.
   - status 404, {"detail":"draft follow-up email not found"}
 - **the meeting lists its artifacts**
   - []
+- **the screen shows the question and an answer**
+  - 1 turns rendered
 - **the answer on screen is a real answer, not the question echoed back**
-  - Elicta replied "ack: Which requirements are still only inferred?"
+  - Elicta replied null
+- **the debrief screen reports no error**
+  - error region reads "the debrief conversation (FR-7.3): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a fault. Nothing was lost — ask again when it is back."
 - **every claim on the debrief screen carries its citation**
   - 0 cited claims rendered
 
+Failed browser requests during this journey: 4
+
+- `429 http://127.0.0.1:1420/api/meetings/meeting-9/debrief/message`
+- `404 http://127.0.0.1:1420/api/sessions/meeting-9/open-questions`
+- `404 http://127.0.0.1:1420/api/sessions/meeting-9/decision-log`
+- `404 http://127.0.0.1:1420/api/sessions/meeting-9/project-brief`
+
 ## 08 — Carry what you learned forward
 
-Video: `08-carry-state-forward/journey.mp4` (58 frames). Screenshots: 1.
+Video: `08-carry-state-forward/journey.mp4` (89 frames). Screenshots: 1.
 
 **Passed**
 
 - engagement state is readable
 - a second meeting is created in the same engagement
+- the arc shows the meetings held so far
 
 **Failed**
 
 - **open questions are carried forward to the next meeting**
-  - state reads {"engagement_id":"eng-6","inherited_open_questions":[],"requirements_state":null}
+  - state reads {"engagement_id":"eng-13","inherited_open_questions":[],"requirements_state":null}
 - **the requirements state is readable**
   - status 404, {"detail":"requirements state not found"}
 - **the second meeting inherits candidate questions**
-  - inherited bank: {"meeting_id":"meeting-9","candidates":[],"generated_at":"2026-08-20T03:23:28.167799Z"}
-- **the arc shows the meetings held so far**
-  - 0 meetings on the timeline
+  - inherited bank: {"meeting_id":"meeting-10","candidates":[],"generated_at":"2026-08-20T05:57:58.367029Z"}
 
 ## 09 — Judge whether the suggestions are any good
 
-Video: `09-replay-and-tune-ranking/journey.mp4` (58 frames). Screenshots: 1.
+Video: `09-replay-and-tune-ranking/journey.mp4` (57 frames). Screenshots: 1.
 
 **Passed**
 
 - a replay run starts
+- the run reports its suggestions
 - a rating is accepted
 - the run reports the precision and embarrassment gates
+- the replay screen names the run it is showing
 
 **Failed**
 
-- **the run reports its suggestions**
-  - status 404, {"detail":"no replay run: run-3"}
-- **the replay screen names the run it is showing**
-  - run label reads "—"
 - **the screen lists suggestions to rate**
   - 0 suggestions rendered
 
 ## 10 — Set up the services Elicta uses
 
-Video: `10-configure-providers/journey.mp4` (470 frames). Screenshots: 8.
+Video: `10-configure-providers/journey.mp4` (474 frames). Screenshots: 8.
 
 **Passed**
 
@@ -237,7 +231,7 @@ Video: `10-configure-providers/journey.mp4` (470 frames). Screenshots: 8.
 
 ## 11 — Control the recording
 
-Video: `11-control-capture/journey.mp4` (39 frames). Screenshots: 1.
+Video: `11-control-capture/journey.mp4` (40 frames). Screenshots: 1.
 
 **Passed**
 
@@ -253,7 +247,7 @@ Video: `11-control-capture/journey.mp4` (39 frames). Screenshots: 1.
 
 ## 12 — Get Elicta onto people’s machines
 
-Video: `12-install-and-roll-out/journey.mp4` (39 frames). Screenshots: 1.
+Video: `12-install-and-roll-out/journey.mp4` (40 frames). Screenshots: 1.
 
 **Passed**
 

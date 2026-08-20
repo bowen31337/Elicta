@@ -1,7 +1,7 @@
 {
   "startedAgainst": {
-    "app": "http://192.168.99.233:1420",
-    "api": "http://192.168.99.233:8000"
+    "app": "http://127.0.0.1:1420",
+    "api": "http://127.0.0.1:8000"
   },
   "ffmpeg": "/usr/bin/ffmpeg",
   "consoleErrors": [],
@@ -15,12 +15,12 @@
         {
           "name": "engagement is created",
           "ok": true,
-          "detail": "status 201, body {\"engagement_id\":\"eng-6\"}"
+          "detail": "status 201, body {\"engagement_id\":\"eng-13\"}"
         },
         {
           "name": "the service returns an engagement id",
           "ok": true,
-          "detail": "eng-6"
+          "detail": "eng-13"
         },
         {
           "name": "all three vocabulary terms are accepted",
@@ -40,12 +40,12 @@
         {
           "name": "a SharePoint link is attached",
           "ok": true,
-          "detail": "status 201, id reference-document-6"
+          "detail": "status 201, id reference-document-4"
         },
         {
           "name": "the attached document appears in the document list",
-          "ok": false,
-          "detail": "list returned {\"engagement_id\":\"eng-6\",\"documents\":[]} after attaching reference-document-6"
+          "ok": true,
+          "detail": "list returned {\"engagement_id\":\"eng-13\",\"documents\":[{\"document_id\":\"reference-document-4\",\"name\":\"RFP.pdf\",\"status\":\"ground truth\"}]} after attaching reference-document-4"
         },
         {
           "name": "compilation is accepted",
@@ -55,22 +55,27 @@
         {
           "name": "the compiled bank contains candidate questions",
           "ok": false,
-          "detail": "bank after compile: {\"engagement_id\":\"eng-6\",\"sections\":[],\"generated_at\":\"2026-08-20T03:22:10.262912Z\"}"
+          "detail": "bank after compile: {\"engagement_id\":\"eng-13\",\"sections\":[],\"generated_at\":\"2026-08-20T05:56:10.511292Z\"}"
+        },
+        {
+          "name": "the engagement can be chosen from the toolbar",
+          "ok": true,
+          "detail": "the picker reads \"eng-13\" after choosing eng-13"
         },
         {
           "name": "the preparation screen names the client organisation",
-          "ok": false,
-          "detail": "heading reads \"—\""
+          "ok": true,
+          "detail": "heading reads \"Northwind Logistics\""
         },
         {
           "name": "the screen lists the reference document just attached",
-          "ok": false,
-          "detail": "0 rows in the reference-documents section"
+          "ok": true,
+          "detail": "1 rows in the reference-documents section"
         },
         {
           "name": "the screen shows the engagement vocabulary just added",
-          "ok": false,
-          "detail": "0 vocabulary chips rendered"
+          "ok": true,
+          "detail": "3 vocabulary chips rendered"
         }
       ],
       "notes": [],
@@ -79,11 +84,11 @@
       ],
       "error": null,
       "video": "01-prepare-an-engagement/journey.mp4",
-      "frames": 141,
+      "frames": 197,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 7,
-      "failed": 5
+      "passed": 12,
+      "failed": 1
     },
     {
       "id": "02",
@@ -94,7 +99,7 @@
         {
           "name": "the meeting is created",
           "ok": true,
-          "detail": "status 201, id meeting-8"
+          "detail": "status 201, id meeting-9"
         },
         {
           "name": "the meeting carries its engagement context",
@@ -114,55 +119,63 @@
         {
           "name": "starting a session before consent is refused",
           "ok": true,
-          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+          "detail": "status 403, {\"detail\":\"consent has not been confirmed for this meeting, so capture cannot begin\"}"
         },
         {
           "name": "the refusal is about consent, not a meeting the service cannot find",
-          "ok": false,
-          "detail": "refused with {\"detail\":\"meeting not found\"} — 4xx here does not demonstrate a consent gate"
-        },
-        {
-          "name": "consent is recorded against a named person",
           "ok": true,
-          "detail": "{\"meeting_id\":\"meeting-8\",\"confirmed_by\":\"Dana Whitfield, COO\",\"confirmed_at\":\"2026-08-20T03:22:17.987572Z\"}"
-        },
-        {
-          "name": "consent is timestamped",
-          "ok": true,
-          "detail": "2026-08-20T03:22:17.987572Z"
-        },
-        {
-          "name": "the gate opens once consent is confirmed",
-          "ok": false,
-          "detail": "gate still reads \"awaiting_confirmation\" after a confirmation was accepted"
-        },
-        {
-          "name": "the session starts once consent is confirmed",
-          "ok": false,
-          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+          "detail": "refused with {\"detail\":\"consent has not been confirmed for this meeting, so capture cannot begin\"} — 4xx here does not demonstrate a consent gate"
         },
         {
           "name": "capture cannot be started until consent is confirmed",
           "ok": true,
-          "detail": "the Start button's disabled state is true"
+          "detail": "the Start button's disabled state is true while consent is unconfirmed"
+        },
+        {
+          "name": "consent is recorded against a named person",
+          "ok": true,
+          "detail": "{\"meeting_id\":\"meeting-9\",\"confirmed_by\":\"Dana Whitfield, COO\",\"confirmed_at\":\"2026-08-20T05:56:31.811556Z\"}"
+        },
+        {
+          "name": "consent is timestamped",
+          "ok": true,
+          "detail": "2026-08-20T05:56:31.811556Z"
+        },
+        {
+          "name": "the gate opens once consent is confirmed",
+          "ok": true,
+          "detail": "gate still reads \"confirmed\" after a confirmation was accepted"
+        },
+        {
+          "name": "the session starts once consent is confirmed",
+          "ok": true,
+          "detail": "status 200, {\"session_id\":\"session-4\",\"meeting_id\":\"meeting-9\",\"started_at\":\"2026-08-20T05:56:32.721819Z\"}"
+        },
+        {
+          "name": "capture becomes available once consent is on the record",
+          "ok": true,
+          "detail": "the Start button's disabled state is false after consent was confirmed"
         },
         {
           "name": "the consent screen names the meeting it gates",
-          "ok": false,
-          "detail": "title reads \"—\""
+          "ok": true,
+          "detail": "title reads \"Northwind Logistics\""
         }
       ],
       "notes": [],
       "shots": [
-        "01-consent-screen.png"
+        "01-consent-before.png",
+        "02-consent-screen.png"
       ],
       "error": null,
       "video": "02-start-a-meeting-with-consent/journey.mp4",
-      "frames": 85,
+      "frames": 208,
       "videoOk": true,
-      "networkFailures": [],
-      "passed": 8,
-      "failed": 4
+      "networkFailures": [
+        "404 http://127.0.0.1:1420/api/meetings/meeting-9/consent-record"
+      ],
+      "passed": 13,
+      "failed": 0
     },
     {
       "id": "03",
@@ -177,8 +190,8 @@
         },
         {
           "name": "the slow lane accepts a tick",
-          "ok": false,
-          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+          "ok": true,
+          "detail": "status 200, {\"meeting_id\":\"meeting-9\",\"coverage_updates\":[],\"new_candidates\":[],\"ticked_at\":\"2026-08-20T05:56:43.176814Z\"}"
         },
         {
           "name": "the panel renders",
@@ -202,11 +215,11 @@
       ],
       "error": null,
       "video": "03-catch-a-vague-answer-live/journey.mp4",
-      "frames": 58,
+      "frames": 59,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 2,
-      "failed": 3
+      "passed": 3,
+      "failed": 2
     },
     {
       "id": "04",
@@ -246,7 +259,7 @@
       ],
       "error": null,
       "video": "04-run-a-code-switched-meeting/journey.mp4",
-      "frames": 65,
+      "frames": 67,
       "videoOk": true,
       "networkFailures": [],
       "passed": 4,
@@ -271,12 +284,12 @@
         {
           "name": "an egress audit trail is available",
           "ok": true,
-          "detail": "status 200, []"
+          "detail": "status 200, [{\"timestamp_ms\":1787205366505,\"engagement_id\":\"eng-13\",\"processor_name\":\"claude-opus-5\",\"region\":null,\"byte_count\":0,\"success\":false,\"error\":\"document claim extraction (§3.10): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a faul"
         },
         {
           "name": "the audit records what left the machine",
-          "ok": false,
-          "detail": "audit returned [] after a live model call was made"
+          "ok": true,
+          "detail": "audit returned [{\"timestamp_ms\":1787205366505,\"engagement_id\":\"eng-13\",\"processor_name\":\"claude-opus-5\",\"region\":null,\"byte_count\":0,\"success\":false,\"error\":\"document claim extraction (§3.10): the model provider is rate limiting this deployment. The same  after a live model call was made"
         }
       ],
       "notes": [],
@@ -285,11 +298,11 @@
       ],
       "error": null,
       "video": "05-degraded-mode/journey.mp4",
-      "frames": 61,
+      "frames": 63,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 3,
-      "failed": 1
+      "passed": 4,
+      "failed": 0
     },
     {
       "id": "06",
@@ -300,17 +313,17 @@
         {
           "name": "the record path accepts a transcription request",
           "ok": true,
-          "detail": "status 202, {\"job_id\":\"8cc176e8c2284281ab037f58aaf0a4b5\",\"meeting_id\":\"meeting-8\",\"status\":\"queued\",\"created_at\":\"2026-08-20T03:22:42.649831Z\",\"engine_lineages\":[\"engine-a\",\"engine-b\"]}"
+          "detail": "status 202, {\"job_id\":\"674922181bf94d489e5897aca3f84747\",\"meeting_id\":\"meeting-9\",\"status\":\"queued\",\"created_at\":\"2026-08-20T05:57:01.518400Z\",\"engine_lineages\":[\"engine-a\",\"engine-b\"]}"
         },
         {
           "name": "divergences between the two engines are reported",
-          "ok": false,
-          "detail": "status 404, {\"detail\":\"record-path alignment not found\"}"
+          "ok": true,
+          "detail": "status 200, {\"session_id\":\"meeting-9\",\"reference_engine\":\"engine-a\",\"other_engine\":\"engine-b\",\"spans\":[],\"computed_at\":\"2026-08-20T05:57:01.519424Z\"}"
         },
         {
           "name": "the screen names the engines that transcribed the meeting",
-          "ok": false,
-          "detail": "0 engine rows rendered"
+          "ok": true,
+          "detail": "2 engine rows rendered"
         },
         {
           "name": "the screen reports how far the engines agreed",
@@ -324,11 +337,11 @@
       ],
       "error": null,
       "video": "06-reconcile-the-recording/journey.mp4",
-      "frames": 48,
+      "frames": 94,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 1,
-      "failed": 3
+      "passed": 3,
+      "failed": 1
     },
     {
       "id": "07",
@@ -344,17 +357,17 @@
         {
           "name": "the conversation is anchored to a session",
           "ok": true,
-          "detail": "dc2590b143ea43c29dbbf9184482ca65"
+          "detail": "bd9ac153632e4c7a9ed925a8ceabc440"
         },
         {
           "name": "the debrief accepts a free-text question",
-          "ok": true,
-          "detail": "status 200, {\"session_id\":\"dc2590b143ea43c29dbbf9184482ca65\",\"meeting_id\":\"meeting-8\",\"conversation_ref\":\"conversation-dc2590b143ea43c29dbbf9184482ca65\",\"status\":\"open\",\"streaming_enabled\":true,\"length_cap\":null,\"latency_budget_seconds\":null,\"opened_at\":\"2026-08-20T03:22:47.735275Z\",\"nudge_dispositions\":[],\"history\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"What did the client say about the March dead"
+          "ok": false,
+          "detail": "status 429, {\"detail\":\"the debrief conversation (FR-7.3): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a fault.\"}"
         },
         {
           "name": "the answer comes from the model rather than a stub echo",
-          "ok": false,
-          "detail": "the service replied {\"session_id\":\"dc2590b143ea43c29dbbf9184482ca65\",\"meeting_id\":\"meeting-8\",\"conversation_ref\":\"conversation-dc2590b143ea43c29dbbf9184482ca65\",\"status\":\"open\",\"streaming_enabled\":true,\"length_cap\":null,\"latency_budget_seconds\":null,\"opened_at\":\"2026-08-20T03:22:47.735275Z\",\"nudge_dispositions\":[],\"his"
+          "ok": true,
+          "detail": "the service replied {\"detail\":\"the debrief conversation (FR-7.3): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a fault.\"}"
         },
         {
           "name": "the project brief is produced",
@@ -388,18 +401,18 @@
         },
         {
           "name": "the screen shows the question and an answer",
-          "ok": true,
-          "detail": "2 turns rendered"
+          "ok": false,
+          "detail": "1 turns rendered"
         },
         {
           "name": "the answer on screen is a real answer, not the question echoed back",
           "ok": false,
-          "detail": "Elicta replied \"ack: Which requirements are still only inferred?\""
+          "detail": "Elicta replied null"
         },
         {
           "name": "the debrief screen reports no error",
-          "ok": true,
-          "detail": "error region reads null"
+          "ok": false,
+          "detail": "error region reads \"the debrief conversation (FR-7.3): the model provider is rate limiting this deployment. The same request should succeed shortly — this is a limit, not a fault. Nothing was lost — ask again when it is back.\""
         },
         {
           "name": "every claim on the debrief screen carries its citation",
@@ -417,11 +430,16 @@
       ],
       "error": null,
       "video": "07-produce-the-debrief/journey.mp4",
-      "frames": 393,
+      "frames": 460,
       "videoOk": true,
-      "networkFailures": [],
-      "passed": 6,
-      "failed": 8
+      "networkFailures": [
+        "429 http://127.0.0.1:1420/api/meetings/meeting-9/debrief/message",
+        "404 http://127.0.0.1:1420/api/sessions/meeting-9/open-questions",
+        "404 http://127.0.0.1:1420/api/sessions/meeting-9/decision-log",
+        "404 http://127.0.0.1:1420/api/sessions/meeting-9/project-brief"
+      ],
+      "passed": 4,
+      "failed": 10
     },
     {
       "id": "08",
@@ -437,7 +455,7 @@
         {
           "name": "open questions are carried forward to the next meeting",
           "ok": false,
-          "detail": "state reads {\"engagement_id\":\"eng-6\",\"inherited_open_questions\":[],\"requirements_state\":null}"
+          "detail": "state reads {\"engagement_id\":\"eng-13\",\"inherited_open_questions\":[],\"requirements_state\":null}"
         },
         {
           "name": "the requirements state is readable",
@@ -447,17 +465,17 @@
         {
           "name": "a second meeting is created in the same engagement",
           "ok": true,
-          "detail": "meeting-9"
+          "detail": "meeting-10"
         },
         {
           "name": "the second meeting inherits candidate questions",
           "ok": false,
-          "detail": "inherited bank: {\"meeting_id\":\"meeting-9\",\"candidates\":[],\"generated_at\":\"2026-08-20T03:23:28.167799Z\"}"
+          "detail": "inherited bank: {\"meeting_id\":\"meeting-10\",\"candidates\":[],\"generated_at\":\"2026-08-20T05:57:58.367029Z\"}"
         },
         {
           "name": "the arc shows the meetings held so far",
-          "ok": false,
-          "detail": "0 meetings on the timeline"
+          "ok": true,
+          "detail": "2 meetings on the timeline"
         }
       ],
       "notes": [],
@@ -466,11 +484,11 @@
       ],
       "error": null,
       "video": "08-carry-state-forward/journey.mp4",
-      "frames": 58,
+      "frames": 89,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 2,
-      "failed": 4
+      "passed": 3,
+      "failed": 3
     },
     {
       "id": "09",
@@ -485,8 +503,8 @@
         },
         {
           "name": "the run reports its suggestions",
-          "ok": false,
-          "detail": "status 404, {\"detail\":\"no replay run: run-3\"}"
+          "ok": true,
+          "detail": "status 200, {\"run_id\":\"run-3\",\"status\":\"pending\",\"progress\":0,\"suggestion_count\":0}"
         },
         {
           "name": "a rating is accepted",
@@ -496,12 +514,12 @@
         {
           "name": "the run reports the precision and embarrassment gates",
           "ok": true,
-          "detail": "status 200, {\"run_id\":\"run-3\",\"languages\":[]}"
+          "detail": "status 200, {\"run_id\":\"run-3\",\"languages\":[{\"language\":\"en\",\"surfaced_count\":1,\"useful_count\":1,\"precision_at_surfaced\":1,\"embarrassing_count\":0,\"clears_m2_gate\":true}]}"
         },
         {
           "name": "the replay screen names the run it is showing",
-          "ok": false,
-          "detail": "run label reads \"—\""
+          "ok": true,
+          "detail": "run label reads \"northwind-discovery-2 · en · pending\""
         },
         {
           "name": "the screen lists suggestions to rate",
@@ -515,11 +533,11 @@
       ],
       "error": null,
       "video": "09-replay-and-tune-ranking/journey.mp4",
-      "frames": 58,
+      "frames": 57,
       "videoOk": true,
       "networkFailures": [],
-      "passed": 3,
-      "failed": 3
+      "passed": 5,
+      "failed": 1
     },
     {
       "id": "10",
@@ -545,7 +563,7 @@
         {
           "name": "the service stores the token",
           "ok": true,
-          "detail": "{\"key\":\"anthropic_oauth_token\",\"configured\":true,\"hint\":\"wgAA\",\"updated_at\":\"2026-08-20T03:23:47.420982Z\"}"
+          "detail": "{\"key\":\"anthropic_oauth_token\",\"configured\":true,\"hint\":\"wgAA\",\"updated_at\":\"2026-08-20T05:58:20.579252Z\"}"
         },
         {
           "name": "a stored secret is never returned, only hinted at",
@@ -570,7 +588,7 @@
         {
           "name": "the service stores the speech-vendor key",
           "ok": true,
-          "detail": "{\"key\":\"asr_vendor_api_key\",\"configured\":true,\"hint\":\"8285\",\"updated_at\":\"2026-08-20T03:24:08.985203Z\"}"
+          "detail": "{\"key\":\"asr_vendor_api_key\",\"configured\":true,\"hint\":\"8285\",\"updated_at\":\"2026-08-20T05:58:42.393977Z\"}"
         },
         {
           "name": "the live vendor is now Deepgram",
@@ -601,7 +619,7 @@
       ],
       "error": null,
       "video": "10-configure-providers/journey.mp4",
-      "frames": 470,
+      "frames": 474,
       "videoOk": true,
       "networkFailures": [],
       "passed": 12,
@@ -640,7 +658,7 @@
       ],
       "error": null,
       "video": "11-control-capture/journey.mp4",
-      "frames": 39,
+      "frames": 40,
       "videoOk": true,
       "networkFailures": [],
       "passed": 2,
@@ -674,7 +692,7 @@
       ],
       "error": null,
       "video": "12-install-and-roll-out/journey.mp4",
-      "frames": 39,
+      "frames": 40,
       "videoOk": true,
       "networkFailures": [],
       "passed": 2,
@@ -682,7 +700,7 @@
     }
   ],
   "totals": {
-    "passed": 52,
-    "failed": 34
+    "passed": 67,
+    "failed": 21
   }
 }
