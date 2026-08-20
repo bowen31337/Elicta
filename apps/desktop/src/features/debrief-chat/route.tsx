@@ -4,6 +4,7 @@ import '../prep/screens.css';
 import './debriefChat.css';
 
 import {
+  meetingIdleHint,
   meetingTitle,
   selectionStatus,
   useCurrentEngagement,
@@ -194,7 +195,10 @@ export default function DebriefChatRoute() {
         eyebrow="Debrief"
         status={status === 'ready' || status === 'missing' ? 'idle' : status}
         error={engagement.error ?? meeting.error}
-        idleHint="No meeting exists yet. There is nothing to ask about until one has been captured."
+        idleHint={meetingIdleHint(
+          engagement,
+          'There is nothing to ask about until one has been captured.',
+        )}
       />
     );
   }

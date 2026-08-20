@@ -142,7 +142,7 @@ export default function ConsentRoute() {
         eyebrow="Before recording"
         status={consent.status}
         error={consent.error}
-        idleHint="No meeting exists yet. Create one before recording anything."
+        idleHint={consent.idleHint}
       />
     );
   }

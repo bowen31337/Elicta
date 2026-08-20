@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 
 import {
+  meetingIdleHint,
   meetingTitle,
   selectionStatus,
   useCurrentEngagement,
@@ -76,6 +77,8 @@ function speakerAt(segments: readonly WireSegment[], span: WireAlignedSpan): str
 export interface RecordingData extends RecordingScreenProps {
   readonly status: ResourceStatus;
   readonly error: string | null;
+  /** What to say when there is no meeting — see `meetingIdleHint`. */
+  readonly idleHint: string;
 }
 
 export function useRecording(): RecordingData {
@@ -151,5 +154,9 @@ export function useRecording(): RecordingData {
             transcripts.status === 'missing' ? 'ready' : transcripts.status,
           ),
     error: engagement.error ?? meeting.error ?? alignment.error ?? transcripts.error,
+    idleHint: meetingIdleHint(
+      engagement,
+      'A recording is reconciled after one has been captured.',
+    ),
   };
 }

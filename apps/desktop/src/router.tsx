@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType } from "react";
 
 import { AppShell } from "./shell/AppShell";
+import { SelectionPicker } from "./shell/SelectionPicker";
 import { buildDestinations } from "./shell/destinations";
 
 type RouteModule = { default: ComponentType };
@@ -32,6 +33,7 @@ export function AppRouter() {
   return (
     <AppShell
       destinations={destinations}
+      selector={<SelectionPicker />}
       renderScreen={(destination) => {
         const Screen = screens.get(destination.feature);
         if (Screen === undefined) return null;

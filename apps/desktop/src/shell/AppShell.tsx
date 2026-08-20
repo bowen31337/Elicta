@@ -24,6 +24,16 @@ export interface AppShellProps {
   readonly destinations: readonly Destination[];
   /** Renders the screen for a feature. The router owns lazy loading. */
   readonly renderScreen: (destination: Destination) => React.ReactNode;
+  /**
+   * The control naming which engagement the pane is about, shown at the
+   * trailing edge of the toolbar.
+   *
+   * Injected rather than imported, for the reason `renderScreen` is: this
+   * component is the window and knows nothing about the service. Handed a
+   * `<SelectionPicker />` by the router, it renders it; handed nothing, it is
+   * still a window.
+   */
+  readonly selector?: React.ReactNode;
 }
 
 /** `#/settings` → `settings`. */
@@ -32,7 +42,7 @@ function readFragment(): string {
   return decodeURIComponent(window.location.hash.replace(/^#\/?/, '')).trim();
 }
 
-export function AppShell({ destinations, renderScreen }: AppShellProps) {
+export function AppShell({ destinations, renderScreen, selector }: AppShellProps) {
   const [fragment, setFragment] = useState(readFragment);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -154,6 +164,7 @@ export function AppShell({ destinations, renderScreen }: AppShellProps) {
             <span className="toolbar-title t-headline">{selected.title}</span>
             <span className="toolbar-caption t-caption">{selected.caption}</span>
           </div>
+          {selector}
         </header>
 
         <div className="pane-scroll" ref={paneRef} onScroll={onPaneScroll}>

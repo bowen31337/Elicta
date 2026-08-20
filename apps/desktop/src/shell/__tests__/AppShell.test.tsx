@@ -31,6 +31,28 @@ afterEach(() => {
   window.location.hash = '';
 });
 
+describe('the engagement control', () => {
+  it('sits in the toolbar, where it applies to whatever is in the pane', () => {
+    render(
+      <AppShell
+        destinations={DESTINATIONS}
+        selector={<button type="button">Northwind Freight</button>}
+        renderScreen={() => null}
+      />,
+    );
+
+    const toolbar = screen.getByRole('banner');
+    expect(
+      within(toolbar).getByRole('button', { name: 'Northwind Freight' }),
+    ).toBeInTheDocument();
+  });
+
+  it('is still a window when nothing supplies one', () => {
+    renderShell();
+    expect(screen.getByText('screen: prep')).toBeInTheDocument();
+  });
+});
+
 describe('choosing a screen', () => {
   it('shows one screen, not all of them', () => {
     renderShell();

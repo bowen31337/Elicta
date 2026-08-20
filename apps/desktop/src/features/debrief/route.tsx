@@ -117,7 +117,7 @@ export default function DebriefRoute() {
         eyebrow="Debrief"
         status={debrief.status}
         error={debrief.error}
-        idleHint="No meeting exists yet. Artifacts appear after one has been debriefed."
+        idleHint={debrief.idleHint}
       />
     );
   }

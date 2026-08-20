@@ -112,6 +112,38 @@ describe('the consent screen', () => {
     expect(await screen.findAllByText(/Line-in/)).not.toHaveLength(0);
   });
 
+  /**
+   * The line this replaces said "No meeting exists yet" whenever the screen
+   * had no meeting id — including when meetings existed in quantity under an
+   * engagement the app had simply never been pointed at.
+   */
+  it('names the engagement that is empty rather than claiming no meeting exists', async () => {
+    stubService({
+      '/api/engagements': {
+        items: [
+          ENGAGEMENTS.items[0],
+          { ...ENGAGEMENTS.items[0], engagement_id: 'eng-2', client_organisation: 'Cadence Rail' },
+        ],
+        total: 2,
+      },
+      '/api/engagements/eng-1/meetings': { engagement_id: 'eng-1', meetings: [] },
+    });
+    render(<ConsentRoute />);
+
+    const hint = await screen.findByText(/Harbourline Ferries has no meetings yet/);
+    expect(hint).toHaveTextContent('choose it from the engagement menu');
+    expect(screen.queryByText(/No meeting exists yet/)).not.toBeInTheDocument();
+  });
+
+  it('says the service holds nothing when it really holds nothing', async () => {
+    stubService({ '/api/engagements': { items: [], total: 0 } });
+    render(<ConsentRoute />);
+
+    expect(
+      await screen.findByText(/No engagement is selected, because the service holds none yet/),
+    ).toBeInTheDocument();
+  });
+
   it('refuses to render the gate at all when it cannot be read', async () => {
     vi.stubGlobal(
       'fetch',

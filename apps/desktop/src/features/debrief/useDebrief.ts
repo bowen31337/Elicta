@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 
 import {
+  meetingIdleHint,
   meetingTitle,
   selectionStatus,
   useCurrentEngagement,
@@ -75,6 +76,8 @@ export interface DebriefData extends DebriefScreenProps {
   readonly status: ResourceStatus;
   readonly error: string | null;
   readonly meetingId: string | null;
+  /** What to say when there is no meeting — see `meetingIdleHint`. */
+  readonly idleHint: string;
 }
 
 export function useDebrief(): DebriefData {
@@ -128,5 +131,6 @@ export function useDebrief(): DebriefData {
         : combineStatus(engagement.status, meeting.status),
     error: engagement.error ?? meeting.error ?? questions.error ?? decisions.error ?? brief.error,
     meetingId: id,
+    idleHint: meetingIdleHint(engagement, 'Artifacts appear after one has been debriefed.'),
   };
 }

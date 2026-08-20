@@ -15,6 +15,7 @@ import { ReplayScreen } from '../features/replay/route';
 import { SettingsPanel } from '../features/settings/SettingsPanel';
 import { AppShell } from '../shell/AppShell';
 import { buildDestinations } from '../shell/destinations';
+import { SelectionPickerView } from '../shell/SelectionPicker';
 import { SCENES } from './scenes';
 import { STUB_SETTINGS_CONTROLLER } from './settingsScenes';
 import {
@@ -98,6 +99,47 @@ const SHELL_SCENES: Record<string, string> = {
   about: 'about-managed',
 };
 
+/**
+ * A populated engagement control for the fixed `shell` scene.
+ *
+ * The connected picker only renders once a service has answered, so without
+ * this the accessibility audit would never see it — and the toolbar is glass,
+ * which is the one ground where a colour that passes everywhere else can fail.
+ */
+const SHELL_ENGAGEMENTS = [
+  {
+    engagement_id: 'eng-1',
+    client_organisation: 'Harbourline Ferries',
+    sector: 'transport',
+    commercial_context: 'Crew rostering',
+    purpose: null,
+    scope_boundary: null,
+    target_requirements_template: null,
+  },
+  {
+    engagement_id: 'eng-2',
+    client_organisation: 'Cadence Rail',
+    sector: 'transport',
+    commercial_context: 'Depot rebuild',
+    purpose: null,
+    scope_boundary: null,
+    target_requirements_template: null,
+  },
+];
+
+const SHELL_MEETINGS = [
+  {
+    meeting_id: 'meeting-1',
+    engagement_id: 'eng-1',
+    state: 'planned',
+    capture_mode: 'Line-in',
+    scheduled_at: null,
+    session_purpose: 'Discovery 1',
+    sections_filled: 4,
+    sections_total: 6,
+  },
+];
+
 function Scene() {
   const scene = new URLSearchParams(window.location.search).get('scene') ?? 'before-meeting';
 
@@ -105,6 +147,16 @@ function Scene() {
     return (
       <AppShell
         destinations={buildDestinations(Object.keys(SHELL_SCENES))}
+        selector={
+          <SelectionPickerView
+            engagements={SHELL_ENGAGEMENTS}
+            engagementId="eng-1"
+            onSelectEngagement={() => {}}
+            meetings={SHELL_MEETINGS}
+            meetingId="meeting-1"
+            onSelectMeeting={() => {}}
+          />
+        }
         renderScreen={(destination) => renderScene(SHELL_SCENES[destination.feature])}
       />
     );

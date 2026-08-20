@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 import { useResource, type Resource, type ResourceStatus } from './useResource';
 
@@ -33,12 +33,34 @@ function read(key: string): string | null {
   }
 }
 
+/**
+ * Everything currently reading the selection.
+ *
+ * The choice cannot live in a `useState` inside the hook, because the control
+ * that changes it and the screen that obeys it are different components — the
+ * picker is in the toolbar and the screen is in the pane. A copy per hook call
+ * means a choice made in one is invisible to the other until a reload, which
+ * is the "manual refresh" this exists to remove. So the store is the module,
+ * the hooks subscribe to it, and localStorage is the value.
+ */
+const listeners = new Set<() => void>();
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 function write(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
   } catch {
     /* see `read` */
   }
+  // Copied first: a listener that re-reads and re-selects must not mutate the
+  // set being iterated.
+  for (const listener of [...listeners]) listener();
 }
 
 export function loadSelectedEngagementId(): string | null {
@@ -109,7 +131,14 @@ export interface CurrentEngagement {
  */
 export function useCurrentEngagement(): CurrentEngagement {
   const list = useResource<EngagementListBody>('/api/engagements');
-  const [chosen, setChosen] = useState<string | null>(() => loadSelectedEngagementId());
+  // Read straight through to storage on every render rather than caching the
+  // value here: a cached copy outlives a `localStorage.clear()` and starts
+  // answering for a store that no longer holds it.
+  const chosen = useSyncExternalStore(
+    subscribe,
+    loadSelectedEngagementId,
+    loadSelectedEngagementId,
+  );
 
   const engagements = useMemo(() => list.data?.items ?? [], [list.data]);
 
@@ -126,10 +155,7 @@ export function useCurrentEngagement(): CurrentEngagement {
     // list is a real answer about a service that has no engagements yet.
     status: list.status,
     error: list.error,
-    select: (engagementId: string) => {
-      saveSelectedEngagementId(engagementId);
-      setChosen(engagementId);
-    },
+    select: saveSelectedEngagementId,
   };
 }
 
@@ -153,9 +179,18 @@ export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
   const list = useResource<MeetingListBody>(
     engagementId === null ? null : `/api/engagements/${encodeURIComponent(engagementId)}/meetings`,
   );
-  const [chosen, setChosen] = useState<string | null>(() => loadSelectedMeetingId());
+  const chosen = useSyncExternalStore(subscribe, loadSelectedMeetingId, loadSelectedMeetingId);
 
-  const meetings = useMemo(() => list.data?.meetings ?? [], [list.data]);
+  // The body names the engagement it answers for, and that is checked rather
+  // than assumed: `useResource` holds the previous answer until the next one
+  // arrives, so for a moment after the operator switches engagement the last
+  // engagement's meetings are still in hand. Showing them in the toolbar menu
+  // would put one client's meeting under another client's name.
+  const meetings = useMemo(
+    () =>
+      list.data === null || list.data.engagement_id !== engagementId ? [] : list.data.meetings,
+    [list.data, engagementId],
+  );
 
   const meeting =
     meetings.find((candidate) => candidate.meeting_id === chosen) ??
@@ -172,10 +207,7 @@ export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
     meetings,
     status: list.status,
     error: list.error,
-    select: (meetingId: string) => {
-      saveSelectedMeetingId(meetingId);
-      setChosen(meetingId);
-    },
+    select: saveSelectedMeetingId,
   };
 }
 
@@ -191,6 +223,35 @@ export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
  */
 export function selectionStatus(status: ResourceStatus, id: string | null): ResourceStatus {
   return status === 'ready' && id === null ? 'idle' : status;
+}
+
+/**
+ * What a per-meeting screen says when it has no meeting to be about.
+ *
+ * The four screens that need this all shipped with the same line — "No
+ * meeting exists yet" — and on the machine that found this bug it was simply
+ * untrue. Meetings existed; they belonged to an engagement the app had never
+ * been told to look at, because there was no way to tell it. An operator
+ * reading that line would reasonably conclude the service had lost their work.
+ *
+ * So the two causes are said apart. Nothing at all is one sentence; an empty
+ * engagement is another, and it names which engagement is empty — and, when
+ * there are others, says where the meetings might be instead.
+ */
+export function meetingIdleHint(
+  current: Pick<CurrentEngagement, 'engagement' | 'engagements'>,
+  consequence: string,
+): string {
+  if (current.engagement === null) {
+    return (
+      'No engagement is selected, because the service holds none yet. ' +
+      'Create an engagement, then a meeting under it.'
+    );
+  }
+  const empty = `${current.engagement.client_organisation} has no meetings yet. ${consequence}`;
+  return current.engagements.length > 1
+    ? `${empty} Another engagement may have one — choose it from the engagement menu.`
+    : empty;
 }
 
 /** A meeting's human label, for a screen heading. */

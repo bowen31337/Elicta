@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   loadSelectedEngagementId,
+  meetingIdleHint,
   useCurrentEngagement,
   useCurrentMeeting,
   meetingTitle,
@@ -194,6 +195,21 @@ describe('the current meeting', () => {
     await waitFor(() => expect(screen.getByTestId('id')).toHaveTextContent('meeting-1'));
   });
 
+  it('shows nothing from the previous engagement while the new one loads', async () => {
+    // `useResource` keeps the last body until the next one arrives, which is
+    // fine for a path that never changes and wrong the moment an operator can
+    // switch engagement from the toolbar: the answer names the engagement it
+    // is about, so an answer about a different one is not this one's data.
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MEETINGS)));
+    const { rerender } = render(<MeetingProbe engagementId="eng-1" />);
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('2'));
+
+    rerender(<MeetingProbe engagementId="eng-2" />);
+
+    expect(screen.getByTestId('count')).toHaveTextContent('0');
+    expect(screen.getByTestId('id')).toHaveTextContent('none');
+  });
+
   it('ignores a remembered meeting from another engagement', async () => {
     window.localStorage.setItem('elicta.selection.meetingId', 'meeting-99');
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MEETINGS)));
@@ -233,5 +249,48 @@ describe('reading one thing from the service', () => {
     render(<ResourceProbe path="/api/anything" />);
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('error'));
+  });
+});
+
+/**
+ * The copy the four per-meeting screens show when they have no meeting.
+ *
+ * The line they all shipped with — "No meeting exists yet" — was false on the
+ * machine that found this: meetings existed, under an engagement the app had
+ * never been told to look at. An operator reading it would conclude the
+ * service had lost their work.
+ */
+describe('the hint on a screen with no meeting', () => {
+  const northwind = ENGAGEMENTS.items[0];
+  const southbank = ENGAGEMENTS.items[1];
+
+  it('says nothing exists when the service really does hold nothing', () => {
+    expect(meetingIdleHint({ engagement: null, engagements: [] }, 'Artifacts appear later.')).toBe(
+      'No engagement is selected, because the service holds none yet. ' +
+        'Create an engagement, then a meeting under it.',
+    );
+  });
+
+  it('names the engagement that is empty, rather than claiming no meeting exists', () => {
+    expect(
+      meetingIdleHint(
+        { engagement: northwind, engagements: [northwind] },
+        'Artifacts appear after one has been debriefed.',
+      ),
+    ).toBe(
+      'Northwind Freight has no meetings yet. Artifacts appear after one has been debriefed.',
+    );
+  });
+
+  it('points at the other engagements, which is where the meetings actually were', () => {
+    expect(
+      meetingIdleHint(
+        { engagement: northwind, engagements: [northwind, southbank] },
+        'Artifacts appear after one has been debriefed.',
+      ),
+    ).toBe(
+      'Northwind Freight has no meetings yet. Artifacts appear after one has been debriefed. ' +
+        'Another engagement may have one — choose it from the engagement menu.',
+    );
   });
 });

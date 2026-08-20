@@ -155,7 +155,7 @@ export default function RecordingRoute() {
         eyebrow="Recording"
         status={recording.status}
         error={recording.error}
-        idleHint="No meeting exists yet. A recording is reconciled after one has been captured."
+        idleHint={recording.idleHint}
       />
     );
   }

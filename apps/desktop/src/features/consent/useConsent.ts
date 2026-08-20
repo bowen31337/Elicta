@@ -1,4 +1,5 @@
 import {
+  meetingIdleHint,
   meetingTitle,
   selectionStatus,
   useCurrentEngagement,
@@ -44,6 +45,8 @@ export function readableTimestamp(iso: string): string {
 export interface ConsentData extends ConsentScreenProps {
   readonly status: ResourceStatus;
   readonly error: string | null;
+  /** What to say when there is no meeting — see `meetingIdleHint`. */
+  readonly idleHint: string;
 }
 
 export function useConsent(): ConsentData {
@@ -84,5 +87,6 @@ export function useConsent(): ConsentData {
         ? selectionStatus(combineStatus(engagement.status, meeting.status), meeting.meetingId)
         : combineStatus(engagement.status, meeting.status, gate.status),
     error: engagement.error ?? meeting.error ?? gate.error,
+    idleHint: meetingIdleHint(engagement, 'Create one before recording anything.'),
   };
 }
