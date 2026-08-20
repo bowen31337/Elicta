@@ -175,7 +175,7 @@
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md 'Why the existing suites do not catch any of this'. This is the anti-regression story \u2014 it must be able to fail."
     }
   ]
