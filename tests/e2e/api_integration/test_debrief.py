@@ -57,16 +57,22 @@ def test_start_debrief_session_returns_201(client: TestClient) -> None:
     assert response.json()["status"] == "open"
 
 
-def test_send_debrief_message_returns_200(client: TestClient) -> None:
+def test_send_debrief_message_without_an_engine_returns_503(client: TestClient) -> None:
+    """This app is built with no inference engine, so the conversation cannot answer.
+
+    It used to assert a 200 with an assistant turn, which passed because the
+    composition root replied "ack: {message}" itself. Both halves were true
+    and the feature was not: an operator saw a stub rendered as an answer.
+    An app with no model configured must say so — the conversation that does
+    answer from an engine is covered in `test_debrief_conversation_seam.py`.
+    """
+
     client.post("/api/meetings/m1/debrief/start")
 
     response = client.post("/api/meetings/m1/debrief/message", json={"message": "what changed?"})
 
-    assert response.status_code == 200
-    history = response.json()["history"]
-    assert len(history) == 2
-    assert history[0]["role"] == "user"
-    assert history[1]["role"] == "assistant"
+    assert response.status_code == 503
+    assert "configured" in response.json()["detail"].lower()
 
 
 def test_send_debrief_message_missing_body_returns_422(client: TestClient) -> None:

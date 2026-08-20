@@ -105,6 +105,10 @@ def _working_engines() -> DebriefEngines:
         translate=translate,
         classify=classify,
         run_chain=run_chain,
+        # The §7 pipeline is batch; the conversational seam is FR-7.3 and has
+        # no business here. Left as the raiser so that if a stage ever reaches
+        # for it, these tests fail rather than quietly succeed.
+        converse=DebriefEngines.unconfigured().converse,
     )
 
 
@@ -234,6 +238,7 @@ async def test_a_failing_stage_halts_the_chain_rather_than_feeding_the_next_one(
             translate=broken_translate,
             classify=engines.classify,
             run_chain=engines.run_chain,
+            converse=engines.converse,
         ),
         recorded,
     )

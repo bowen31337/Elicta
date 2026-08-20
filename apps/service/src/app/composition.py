@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.core.consent.models import ConsentModel, ConsentRecord
 from app.core.consent.router import build_consent_router
@@ -164,7 +165,11 @@ from app.orchestration.compiler import (
     submit_engagement_compile,
 )
 from app.orchestration.debrief import DebriefSinks, run_debrief_pipeline
-from app.orchestration.engines import CompilerEngines, DebriefEngines
+from app.orchestration.engines import (
+    CompilerEngines,
+    DebriefEngines,
+    EngineNotConfiguredError,
+)
 from app.persistence import StateStore
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
@@ -392,6 +397,18 @@ def build_app(
 
     debrief_engines = debrief_engines or DebriefEngines.unconfigured()
     compiler_engines = compiler_engines or CompilerEngines.unconfigured()
+
+    @app.exception_handler(EngineNotConfiguredError)
+    async def _engine_not_configured(_request: Request, exc: EngineNotConfiguredError) -> JSONResponse:
+        """Turn a fail-closed stage into an answer the operator can act on.
+
+        Without this the caller gets an opaque 500 and the one useful thing —
+        which stage needed a model, and which setting would supply it — stays
+        in the server log. 503 rather than 500: nothing is broken, something
+        is unconfigured, and the same request succeeds once it is.
+        """
+
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     async def get_engagement_consent_model(engagement_id: str) -> ConsentModel:
         return backend.consent_models.get(engagement_id, ConsentModel.PER_MEETING)
@@ -641,8 +658,34 @@ def build_app(
         return backend.debrief_sessions[meeting_id]
 
     async def send_debrief_message(conversation_ref: str, message: str) -> list[dict[str, Any]]:
+        """Put one operator message to the model, and return what it said.
+
+        The engine is handed the whole conversation so far, not just the
+        latest line: `debrief/session` persists each assistant turn's content
+        blocks verbatim precisely so they can be replayed back, and replaying
+        only the newest turn would throw away the meeting the operator is
+        asking about.
+
+        There is no fallback. With no engine configured this raises and the
+        operator is told; it must never answer with text of its own, because
+        the panel renders a stub in exactly the same bubble as an answer.
+        """
+
         backend.sent_messages.append((conversation_ref, message))
-        return [{"type": "text", "text": f"ack: {message}"}]
+        session = next(
+            (
+                candidate
+                for candidate in backend.debrief_sessions.values()
+                if candidate.conversation_ref == conversation_ref
+            ),
+            None,
+        )
+        history = session.history if session is not None else []
+        turns = [
+            {"role": turn.role.value, "content": turn.content} for turn in history
+        ]
+        turns.append({"role": "user", "content": [{"type": "text", "text": message}]})
+        return await debrief_engines.converse(turns)
 
     app.include_router(
         build_debrief_session_router(

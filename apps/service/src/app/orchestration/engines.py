@@ -89,6 +89,11 @@ class DebriefEngines:
     translate: Callable[..., Awaitable[Any]]
     classify: Callable[..., Awaitable[Any]]
     run_chain: Callable[..., Awaitable[Any]]
+    # FR-7.3's free-form half. The other five stages run once over a finished
+    # transcript; this one answers an operator mid-conversation, so it takes
+    # the turns so far and returns the assistant's content blocks verbatim —
+    # the shape `debrief/session/service.py` persists without interpreting.
+    converse: Callable[..., Awaitable[Any]]
 
     @classmethod
     def unconfigured(cls) -> DebriefEngines:
@@ -99,6 +104,7 @@ class DebriefEngines:
             translate=_unconfigured("transcript translation (§7 step 4)"),
             classify=_unconfigured("section classification (§7 step 5)"),
             run_chain=_unconfigured("BMAD analyst chain (§7 step 6)"),
+            converse=_unconfigured("the debrief conversation (FR-7.3)"),
         )
 
     @property

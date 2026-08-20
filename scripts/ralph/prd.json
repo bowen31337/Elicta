@@ -11,34 +11,34 @@
     {
       "id": "US-001",
       "title": "A meeting created through the API is visible to every route that takes a meeting id",
-      "description": "As an operator, when I create a meeting I need the rest of the product to know it exists, so the live panel can run at all. Today create_meeting writes only backend.meeting_engagement_ids, while GET /api/meetings/{id} reads backend.meeting_details and session/start, session/stream and slow-lane/tick all gate on backend.known_meetings — which nothing ever writes.",
+      "description": "As an operator, when I create a meeting I need the rest of the product to know it exists, so the live panel can run at all. Today create_meeting writes only backend.meeting_engagement_ids, while GET /api/meetings/{id} reads backend.meeting_details and session/start, session/stream and slow-lane/tick all gate on backend.known_meetings \u2014 which nothing ever writes.",
       "acceptanceCriteria": [
         "POST /api/meetings then GET /api/meetings/{returned id} returns 200 with the meeting, not 404",
         "POST /api/meetings/{id}/session/start does not fail with 'meeting not found'",
         "POST /api/meetings/{id}/slow-lane/tick does not fail with 'meeting not found'",
         "GET /api/meetings/{id}/session/stream is reachable for a created meeting",
-        "New test in tests/e2e/api_integration that creates the meeting through the API and reads it back through the API only — it must not assign to any backend.* field to set up the read side",
+        "New test in tests/e2e/api_integration that creates the meeting through the API and reads it back through the API only \u2014 it must not assign to any backend.* field to set up the read side",
         "cd apps/service && uv run pytest passes",
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md section 1. composition.py lines ~511 (write), ~763/778/832 (known_meetings guards), ~861 (meeting_details read)."
     },
     {
       "id": "US-002",
       "title": "Confirming consent opens the consent gate",
-      "description": "As a client, when someone confirms on the record that I consented, the product must treat consent as given. Today save_consent_record appends to backend.consent_records while is_confirmed_for_meeting reads backend.confirmed_meetings, which nothing writes — so consent is recorded correctly and read back as never given.",
+      "description": "As a client, when someone confirms on the record that I consented, the product must treat consent as given. Today save_consent_record appends to backend.consent_records while is_confirmed_for_meeting reads backend.confirmed_meetings, which nothing writes \u2014 so consent is recorded correctly and read back as never given.",
       "acceptanceCriteria": [
         "POST /api/meetings/{id}/consent-confirmation then GET /api/meetings/{id}/consent-gate?engagement_id=... no longer reports awaiting_confirmation",
-        "Starting a session BEFORE consent is refused, and the refusal names consent — not 'meeting not found'",
+        "Starting a session BEFORE consent is refused, and the refusal names consent \u2014 not 'meeting not found'",
         "Starting a session AFTER consent succeeds",
         "New API-only test covering refused-before and allowed-after, with no backend.* assignment for setup",
         "cd apps/service && uv run pytest passes",
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md section 2. composition.py ~395 (read) and ~397 (write). Safety-relevant: keep failing closed if anything is ambiguous."
     },
     {
@@ -47,7 +47,7 @@
       "description": "As an operator, an answer on the debrief screen must come from the model or not appear at all. Today send_debrief_message in the composition root returns a hardcoded 'ack: {message}' echo, rendered on screen identically to a real answer, while the debrief engines main.py builds are ignored.",
       "acceptanceCriteria": [
         "send_debrief_message routes through the injected debrief engines rather than returning a literal",
-        "With no model configured the call fails closed and names what is missing — it must not return plausible-looking text",
+        "With no model configured the call fails closed and names what is missing \u2014 it must not return plausible-looking text",
         "The literal 'ack: ' no longer appears in apps/service/src/app/composition.py",
         "A test asserts the debrief reply is never the request message echoed back",
         "cd apps/service && uv run pytest passes",
@@ -60,7 +60,7 @@
     {
       "id": "US-004",
       "title": "The context compiler reads document text, not filenames",
-      "description": "As an operator, compiling the question bank must read what the documents say. Today _run_engagement_compile builds its extraction input as text=document.name — the filename — while the body sits unread in backend.reference_document_bodies, and context_pack is built with documents=[] hardcoded.",
+      "description": "As an operator, compiling the question bank must read what the documents say. Today _run_engagement_compile builds its extraction input as text=document.name \u2014 the filename \u2014 while the body sits unread in backend.reference_document_bodies, and context_pack is built with documents=[] hardcoded.",
       "acceptanceCriteria": [
         "Extraction input carries each document's text, not its name",
         "The analyst context pack carries the engagement's documents instead of an empty list",
@@ -79,7 +79,7 @@
       "description": "As an operator, a SharePoint document I attach must show up in the engagement. Today the link endpoint writes backend.reference_documents while the list endpoint reads backend.engagement_documents.",
       "acceptanceCriteria": [
         "POST /api/engagements/{id}/documents/link then GET /api/engagements/{id}/documents returns the attached document",
-        "An uploaded document still appears in the same list — no regression",
+        "An uploaded document still appears in the same list \u2014 no regression",
         "The SharePoint/Teams URL validation still rejects other hosts",
         "New API-only test covering attach-then-list",
         "cd apps/service && uv run pytest passes"
@@ -114,7 +114,7 @@
       ],
       "priority": 7,
       "passes": false,
-      "notes": "FINDINGS.md write/read table row 6. Note apps/service/src/app/modules/asr-record has no HTTP client — this story is about the seam, not about calling a real vendor."
+      "notes": "FINDINGS.md write/read table row 6. Note apps/service/src/app/modules/asr-record has no HTTP client \u2014 this story is about the seam, not about calling a real vendor."
     },
     {
       "id": "US-008",
@@ -137,7 +137,7 @@
       "description": "As a reviewer, the egress audit must show the calls that were actually made. Today GET /api/audit/egress returns an empty list after live model calls, because backend.egress_rows is read and never written.",
       "acceptanceCriteria": [
         "After a call that leaves the machine, GET /api/audit/egress?engagement_id=...&start_ms=...&end_ms=... returns at least one row",
-        "Rows carry enough to be audited — at minimum the vendor or destination and a timestamp",
+        "Rows carry enough to be audited \u2014 at minimum the vendor or destination and a timestamp",
         "The time window is honoured: a window excluding the call returns nothing",
         "New API-only test",
         "cd apps/service && uv run pytest passes"
@@ -154,14 +154,14 @@
         "prep, consent, recording, replay, arc and debrief each load their data from the service instead of hardcoded empty props",
         "Each screen still renders an honest empty state when the service has nothing, and an error state when it is unreachable",
         "debrief-chat no longer hardcodes the meeting id 'meeting-1'",
-        "The fixed-scene harness (journeys.html) still renders every scene — apps/desktop/src/journeys must keep working",
+        "The fixed-scene harness (journeys.html) still renders every scene \u2014 apps/desktop/src/journeys must keep working",
         "pnpm --filter elicta-desktop test passes",
         "pnpm --filter elicta-desktop typecheck passes",
         "pnpm --filter elicta-desktop build passes"
       ],
       "priority": 10,
       "passes": false,
-      "notes": "FINDINGS.md 'Six screens are not connected to anything'. Large story — hand off rather than rush. Keep the presentational components' props exactly as they are; only the route.tsx defaults change."
+      "notes": "FINDINGS.md 'Six screens are not connected to anything'. Large story \u2014 hand off rather than rush. Keep the presentational components' props exactly as they are; only the route.tsx defaults change."
     },
     {
       "id": "US-011",
@@ -176,7 +176,7 @@
       ],
       "priority": 11,
       "passes": false,
-      "notes": "FINDINGS.md 'Why the existing suites do not catch any of this'. This is the anti-regression story — it must be able to fail."
+      "notes": "FINDINGS.md 'Why the existing suites do not catch any of this'. This is the anti-regression story \u2014 it must be able to fail."
     }
   ]
 }

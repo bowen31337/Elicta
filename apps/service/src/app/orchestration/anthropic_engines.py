@@ -5,7 +5,9 @@ workloads, the plain Messages API for single-shot structured extraction. The
 debrief pipeline in `orchestration/debrief.py` decomposes into exactly the
 latter — each stage takes a transcript and returns one schema-shaped result,
 with no tool use and no multi-turn state — so each stage is one
-`messages.parse` call rather than an agent loop.
+`messages.parse` call rather than an agent loop. `converse`, the FR-7.3
+conversational half, is the one exception: it is multi-turn and its output is
+prose, so it is a plain `messages.create` and carries its own history.
 
 Two design rules come straight from §14.4 ("schema, not prose") and §14.3
 ("the cache prefix is the whole game"):
@@ -260,6 +262,16 @@ transcript you were given and never invent one. Mark provenance "stated" only
 when the client actually said it; anything you concluded is "inferred". A
 reviewer's core need is telling those two apart, so do not blur them."""
 
+_DEBRIEF_CONVERSATION_SYSTEM = """You are Elicta, answering an analyst's questions about a \
+requirements meeting that has just finished.
+
+Answer only from the transcript and artifacts in this conversation. Say when
+something was never covered rather than filling the gap — the analyst is using
+you to find out what is missing, so an invented answer costs them the very
+thing they came for. Distinguish what the client stated from what you
+inferred, every time. Be brief; this is a working conversation, not a report."""
+
+
 _EXTRACTION_SYSTEM = """You extract factual claims from client reference documents.
 
 For each claim, quote the exact supporting span and give its character
@@ -363,6 +375,25 @@ def anthropic_debrief_engines(
             follow_up_email=BmadFollowUpEmailDraft(**parsed.follow_up_email.model_dump()),
         )
 
+    async def converse(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """One turn of the FR-7.3 debrief conversation.
+
+        The odd one out in this module: every other stage is a single-shot
+        `messages.parse` against a schema, because §14.4 wants schema and not
+        prose. A conversation *is* prose, so this is a plain `create` — and
+        the assistant's content blocks are returned exactly as the API sent
+        them, never flattened to a string, because the caller persists them
+        verbatim and replays them back as the next turn's history.
+        """
+
+        response = await client.messages.create(
+            model=model,
+            max_tokens=MAX_TOKENS,
+            system=_cached_system(_DEBRIEF_CONVERSATION_SYSTEM),
+            messages=turns,
+        )
+        return [block.model_dump() for block in response.content]
+
     return DebriefEngines(
         name=model,
         diarize=diarize if diarize is not None else _no_diarizer,
@@ -370,6 +401,7 @@ def anthropic_debrief_engines(
         translate=translate,
         classify=classify,
         run_chain=run_chain,
+        converse=converse,
     )
 
 
