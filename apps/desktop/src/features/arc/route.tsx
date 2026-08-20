@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
+import { useArc } from './useArc';
 
 /**
  * Journey 8 — what carries into the next meeting.
@@ -115,8 +117,34 @@ export function ArcScreen({
   );
 }
 
+/**
+ * The mounted screen, over the service.
+ *
+ * The through-line this screen exists to show — what survived the meetings —
+ * is the engagement's own carried-forward state, so it is read rather than
+ * recomputed from the meetings here. An engagement with one meeting and no
+ * debrief yet legitimately has nothing to carry, and renders that way.
+ */
 export default function ArcRoute() {
+  const arc = useArc();
+
+  if (arc.status !== 'ready' && arc.status !== 'missing') {
+    return (
+      <ScreenState
+        eyebrow="Engagement"
+        status={arc.status}
+        error={arc.error}
+        idleHint="No engagement exists yet. The arc appears once one has meetings behind it."
+      />
+    );
+  }
+
   return (
-    <ArcScreen engagement="—" meetings={[]} standingQuestions={[]} confirmedRequirements={0} />
+    <ArcScreen
+      engagement={arc.engagement}
+      meetings={arc.meetings}
+      standingQuestions={arc.standingQuestions}
+      confirmedRequirements={arc.confirmedRequirements}
+    />
   );
 }
