@@ -17,7 +17,9 @@ slots into later without touching a single router.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -243,6 +245,9 @@ class Backend:
     record_path_transcripts: dict[str, list[Any]] = field(default_factory=dict)
     session_alignments: dict[str, Any] = field(default_factory=dict)
     transcription_jobs: dict[str, Any] = field(default_factory=dict)
+    # In-flight background jobs, held so the event loop's weak reference is
+    # not the only one keeping them alive. See `schedule` in `build_app`.
+    scheduled_work: set[Any] = field(default_factory=set)
     engagement_vocabulary: dict[str, list[str]] = field(default_factory=dict)
     vocabulary_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
@@ -650,12 +655,29 @@ def build_app(
     async def save_job(job: Any) -> None:
         backend.transcription_jobs[job.job_id] = job
 
-    def schedule(work: Any) -> None:
-        """Never actually run the scheduled work: no task queue exists yet to back it.
+    def schedule(work: Callable[[], Awaitable[None]]) -> None:
+        """Run the accepted job, in this process, on the loop serving the request.
 
-        The 202 response only needs the job to be accepted, not completed —
-        tests for what a completed job leaves behind seed `backend` directly.
+        This used to drop the coroutine on the floor: the endpoint answered
+        202 with a job id and two engine lineages, and nothing ever
+        transcribed, so `record/divergences` answered "alignment not found"
+        forever. A job accepted and never run is worse than one refused —
+        the caller has a handle to something that will never happen.
+
+        In-process and not durable, which is the honest limit of a service
+        with no task queue: a restart loses whatever was in flight. The
+        injected seam is exactly where a real queue substitutes.
+
+        The task is held in `backend.scheduled_work` until it finishes.
+        Without a strong reference the loop keeps only a weak one, and a
+        long-running job can be garbage-collected mid-flight — an accepted
+        job that vanishes for no reason anyone can reproduce. `run_and_track`
+        records its own failure, so nothing needs to await this to notice one.
         """
+
+        task = asyncio.ensure_future(work())
+        backend.scheduled_work.add(task)
+        task.add_done_callback(backend.scheduled_work.discard)
 
     app.include_router(
         _asr_router.build_meeting_transcription_router(
