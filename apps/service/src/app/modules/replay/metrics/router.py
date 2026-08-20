@@ -46,6 +46,8 @@ def build_replay_metrics_router(get_ratings: GetRunRatings) -> APIRouter:
                     surfaced_count=figure.surfaced_count,
                     useful_count=figure.useful_count,
                     precision_at_surfaced=figure.precision_at_surfaced,
+                    embarrassing_count=figure.embarrassing_count,
+                    clears_m2_gate=figure.clears_m2_gate,
                 )
             )
 

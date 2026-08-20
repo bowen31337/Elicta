@@ -54,6 +54,8 @@ def test_getting_run_metrics_returns_200_with_precision_at_surfaced():
                 "surfaced_count": 4,
                 "useful_count": 2,
                 "precision_at_surfaced": 0.5,
+                "embarrassing_count": 0,
+                "clears_m2_gate": True,
             }
         ],
     }
@@ -99,3 +101,26 @@ def test_unknown_run_id_returns_404():
     response = client.get("/api/replay/runs/run-missing/metrics")
 
     assert response.status_code == 404
+
+
+def test_run_metrics_publish_m2_as_a_gate_not_a_rate():
+    """M2 is a gate: one embarrassing suggestion fails it however many surfaced.
+
+    It was computed and not published, so anything rendering it had to either
+    invent a zero — reporting a passing gate for a build that fails it — or
+    show nothing at all.
+    """
+
+    client, _ = make_client(
+        [
+            rating("en", useful=True),
+            rating("en", useful=False, embarrassing=True),
+        ]
+    )
+
+    response = client.get("/api/replay/runs/run-1/metrics")
+
+    assert response.status_code == 200
+    figure = response.json()["languages"][0]
+    assert figure["embarrassing_count"] == 1
+    assert figure["clears_m2_gate"] is False

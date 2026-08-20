@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
+import { useReplay } from './useReplay';
 
 /**
  * Journey 9 — rate a replayed meeting, and see the release gates.
@@ -100,14 +102,35 @@ export function ReplayScreen({
   );
 }
 
+/**
+ * The mounted screen, over the service.
+ *
+ * The placeholder rendered `precisionPercent={0}` and `embarrassmentCount={0}`
+ * — a failing M1 and a passing M2, both invented. M2 is the dangerous one:
+ * zero *is* the passing value, so a screen with nothing to show reported a
+ * clean release gate for a build nobody had measured.
+ */
 export default function ReplayRoute() {
+  const replay = useReplay();
+
+  if (replay.status !== 'ready') {
+    return (
+      <ScreenState
+        eyebrow="Replay"
+        status={replay.status}
+        error={replay.error}
+        idleHint="No replay run has been started yet. Metrics appear once one has."
+      />
+    );
+  }
+
   return (
     <ReplayScreen
-      runLabel="—"
-      precisionPercent={0}
-      precisionThreshold={70}
-      embarrassmentCount={0}
-      suggestions={[]}
+      runLabel={replay.runLabel}
+      precisionPercent={replay.precisionPercent}
+      precisionThreshold={replay.precisionThreshold}
+      embarrassmentCount={replay.embarrassmentCount}
+      suggestions={replay.suggestions}
     />
   );
 }
