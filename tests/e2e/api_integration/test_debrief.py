@@ -123,7 +123,11 @@ def test_write_citation_row_missing_field_returns_422(client: TestClient) -> Non
 
 def test_list_meeting_artifacts_returns_200(client: TestClient, backend: Backend) -> None:
     backend.meeting_artifacts["m1"] = [
-        ArtifactSummary(artifact_type=ArtifactType.TRANSCRIPT, generated_at=_NOW)
+        ArtifactSummary(
+            artifact_id="artifact-1",
+            artifact_type=ArtifactType.TRANSCRIPT,
+            generated_at=_NOW,
+        )
     ]
 
     response = client.get("/api/meetings/m1/artifacts")

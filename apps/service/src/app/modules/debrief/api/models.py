@@ -51,8 +51,15 @@ class ArtifactType(str, Enum):
 
 
 class ArtifactSummary(BaseModel):
-    """One artifact a meeting has produced, listed by kind and generation time."""
+    """One artifact a meeting has produced, listed by id, kind and generation time.
 
+    `artifact_id` is what makes the list actionable: `ArtifactDetail` is
+    addressed by its own id, and this list is the only place a caller can
+    learn one. Without it the detail route was reachable only by guessing,
+    which is to say not at all.
+    """
+
+    artifact_id: str
     artifact_type: ArtifactType
     generated_at: datetime
 

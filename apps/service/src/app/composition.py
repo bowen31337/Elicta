@@ -58,6 +58,7 @@ from app.modules.compiler.techniques.models import CandidateAuthorityRequirement
 from app.modules.debrief.api.models import (
     ArtifactDetail,
     ArtifactSummary,
+    ArtifactType,
     MeetingAttendee,
     MeetingDetail,
 )
@@ -259,6 +260,7 @@ class Backend:
 
     meeting_artifacts: dict[str, list[ArtifactSummary]] = field(default_factory=dict)
     artifacts_by_id: dict[str, ArtifactDetail] = field(default_factory=dict)
+    next_artifact_id: int = 0
 
     coverage_matrices: dict[str, list[RequirementsCoverageMatrix]] = field(default_factory=dict)
     requirements_states: dict[str, RequirementsState] = field(default_factory=dict)
@@ -292,7 +294,6 @@ class Backend:
     transcript_cleanings: dict[str, Any] = field(default_factory=dict)
     transcript_translations: dict[str, Any] = field(default_factory=dict)
     section_classifications: dict[str, Any] = field(default_factory=dict)
-    analyst_chains: dict[str, Any] = field(default_factory=dict)
     citation_tables: dict[str, Any] = field(default_factory=dict)
 
     # Context compiler chain (architecture §3.10) records.
@@ -1397,7 +1398,11 @@ async def _run_debrief_when_record_path_completes(
         backend.section_classifications[session_id] = record
 
     async def save_chain(record: Any) -> None:
-        backend.analyst_chains[session_id] = record
+        # `bmad_chains` is what the project brief, decision log, open
+        # questions and follow-up email routes all read. This used to write
+        # `analyst_chains`, which nothing read — the same record under two
+        # names, so all four routes 404'd on a session that had one.
+        backend.bmad_chains[session_id] = record
 
     async def save_citation_table(record: Any) -> None:
         backend.citation_tables[session_id] = record
@@ -1436,7 +1441,106 @@ async def _run_debrief_when_record_path_completes(
         ),
     )
     backend.debrief_runs[session_id] = run
+    _record_debrief_artifacts(backend, session_id, run)
     return run
+
+
+def _record_debrief_artifacts(backend: Backend, session_id: str, run: Any) -> None:
+    """Turn what the §7 run produced into listable, addressable artifacts (FR-8.1-8.7).
+
+    The pipeline persisted each stage's own record, but nothing ever turned
+    those into the `artifacts` rows the meeting's artifact list and the
+    per-artifact detail route read — so a debrief completed and the meeting
+    reported having produced nothing.
+
+    Only what the run actually produced is recorded. A stage that failed or
+    never ran contributes no row, which is what keeps "this meeting has no
+    decision log" distinguishable from "this meeting's decision log is
+    empty". Called once per session, behind the same re-entry guard that
+    stops the pipeline running twice, so ids are not reissued.
+    """
+
+    generated: list[tuple[ArtifactType, Any, dict[str, Any]]] = []
+
+    translation = getattr(run, "translation", None)
+    if translation is not None and getattr(translation, "utterances", None):
+        generated.append(
+            (
+                ArtifactType.TRANSCRIPT,
+                translation,
+                {
+                    "utterances": [
+                        utterance.model_dump(mode="json")
+                        for utterance in translation.utterances
+                    ]
+                },
+            )
+        )
+
+    matrix = getattr(run, "coverage_matrix", None)
+    if matrix is not None:
+        generated.append((ArtifactType.COVERAGE_MATRIX, matrix, matrix.model_dump(mode="json")))
+
+    chain = getattr(run, "analyst_chain", None)
+    artifacts = getattr(chain, "artifacts", None) if chain is not None else None
+    if artifacts is not None:
+        generated.extend(
+            [
+                (
+                    ArtifactType.OPEN_QUESTIONS,
+                    chain,
+                    {
+                        "open_questions": [
+                            question.model_dump(mode="json")
+                            for question in artifacts.open_questions
+                        ]
+                    },
+                ),
+                (
+                    ArtifactType.DECISION_LOG,
+                    chain,
+                    {
+                        "decisions": [
+                            decision.model_dump(mode="json")
+                            for decision in artifacts.decisions
+                        ]
+                    },
+                ),
+                (
+                    ArtifactType.PROJECT_BRIEF,
+                    chain,
+                    artifacts.project_brief.model_dump(mode="json"),
+                ),
+                (
+                    ArtifactType.FOLLOW_UP_EMAIL,
+                    chain,
+                    artifacts.follow_up_email.model_dump(mode="json"),
+                ),
+            ]
+        )
+
+    for artifact_type, source, body in generated:
+        backend.next_artifact_id += 1
+        artifact_id = f"artifact-{backend.next_artifact_id}"
+        # The stage's own completion time, not now: an artifact is dated when
+        # the run that produced it finished, which is what a reviewer
+        # correlates against the meeting.
+        generated_at = getattr(source, "completed_at", None) or datetime.now(UTC)
+        backend.artifacts_by_id[artifact_id] = ArtifactDetail(
+            id=artifact_id,
+            session_id=session_id,
+            artifact_type=artifact_type,
+            artifact_language=backend.document_language,
+            body=body,
+            generated_at=generated_at,
+        )
+        backend.meeting_artifacts.setdefault(session_id, []).append(
+            ArtifactSummary(
+                artifact_id=artifact_id,
+                artifact_type=artifact_type,
+                generated_at=generated_at,
+            )
+        )
 
 
 async def _run_engagement_compile(

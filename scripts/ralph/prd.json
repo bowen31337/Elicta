@@ -99,7 +99,7 @@
         "cd apps/service && uv run pytest passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md write/read table rows 4 and 5. composition.py ~660, ~675, ~848, ~855."
     },
     {
@@ -113,7 +113,7 @@
         "cd apps/service && uv run pytest passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md write/read table row 6. Note apps/service/src/app/modules/asr-record has no HTTP client \u2014 this story is about the seam, not about calling a real vendor."
     },
     {

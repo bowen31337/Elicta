@@ -64,8 +64,16 @@ def test_listing_artifacts_returns_200_with_type_and_generated_at():
     generated_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     client, _ = make_client(
         artifacts=[
-            ArtifactSummary(artifact_type=ArtifactType.TRANSCRIPT, generated_at=generated_at),
-            ArtifactSummary(artifact_type=ArtifactType.OPEN_QUESTIONS, generated_at=generated_at),
+            ArtifactSummary(
+                artifact_id="artifact-1",
+                artifact_type=ArtifactType.TRANSCRIPT,
+                generated_at=generated_at,
+            ),
+            ArtifactSummary(
+                artifact_id="artifact-2",
+                artifact_type=ArtifactType.OPEN_QUESTIONS,
+                generated_at=generated_at,
+            ),
         ]
     )
 
@@ -73,8 +81,16 @@ def test_listing_artifacts_returns_200_with_type_and_generated_at():
 
     assert response.status_code == 200
     assert response.json() == [
-        {"artifact_type": "transcript", "generated_at": "2026-08-18T12:00:00Z"},
-        {"artifact_type": "open_questions", "generated_at": "2026-08-18T12:00:00Z"},
+        {
+            "artifact_id": "artifact-1",
+            "artifact_type": "transcript",
+            "generated_at": "2026-08-18T12:00:00Z",
+        },
+        {
+            "artifact_id": "artifact-2",
+            "artifact_type": "open_questions",
+            "generated_at": "2026-08-18T12:00:00Z",
+        },
     ]
 
 
