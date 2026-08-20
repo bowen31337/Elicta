@@ -14,6 +14,20 @@ Who they are, the sector, and the commercial shape of the engagement.
 That is not filing. It is what lets Elicta work out which languages to expect in
 the room, so that nobody has to be asked to choose one before a meeting starts.
 
+## Say which engagement you are looking at
+
+Elicta keeps every engagement you have run, and each screen shows one of them at
+a time. The control for choosing sits at the top of the window, beside the name
+of the screen you are on, and it follows you as you move between screens.
+
+Set it once when you sit down. Everything else on this page — the documents, the
+vocabulary, the question bank — belongs to whichever engagement is named there.
+A screen that looks empty is far more often pointed at the wrong engagement than
+genuinely empty.
+
+Your choice is remembered, so reopening Elicta puts you back where you left off
+rather than on whichever engagement happens to be oldest.
+
 ## Add what you already have
 
 Scoping decks, throughput studies, the last proposal. Each document is tagged as

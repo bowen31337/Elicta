@@ -42,12 +42,25 @@ at the start that everyone dismisses without reading.
 
 ## Record your own voice once
 
-You can record up to a minute of yourself so that Elicta can tell your speech
-from the client's.
+The idea is that you record up to a minute of yourself so that Elicta can tell
+your speech from the client's.
 
-It is worth the minute. Without it, a question *you* asked can be recorded as
-something the client wanted — and that error carries all the way into the
+It would be worth the minute. Without it, a question *you* asked can be recorded
+as something the client wanted — and that error carries all the way into the
 write-up, where nobody would know to doubt it.
+
+## Where this is honest about itself
+
+Pausing, the state display and the argument for a better microphone all work,
+and they work in the installed app rather than only in principle.
+
+Recording your own voice does not. The screen offers it and the button does
+nothing yet, so today every voice in the room is treated the same way — which
+is the error described above, still waiting to be prevented.
+
+Capture itself needs the installed application. Opened in a browser the screen
+says so plainly and disables the controls, rather than sitting there looking
+ready to record.
 
 <!-- HANDBOOK-NAV -->
 

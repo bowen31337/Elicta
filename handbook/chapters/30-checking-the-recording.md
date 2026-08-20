@@ -32,16 +32,22 @@ something went wrong later.
 
 ## Where this is honest about itself
 
-Running both services, comparing them, flagging every disagreement and destroying
-the audio all work today.
+The comparing, the flagging and the destroying are built. The transcribing is
+not: on this path Elicta is not yet connected to either service.
 
-There is now a way to measure how much this pairing actually catches: given a
-recording and a known-correct transcript, it reports what share of the mistakes
+Ask it to check a recording today and it will accept the job, name two engines
+and report no disagreements — because nothing was transcribed. Those two engine
+names are placeholders rather than companies. Everything on this page describes
+machinery that is finished and waiting, not a recording that has been through
+it. The comparison is real; it has had nothing real to compare.
+
+There is also a way to measure how much the pairing catches, once it runs: given
+a recording and a known-correct transcript, it reports what share of the mistakes
 the two services would have shown you. A sample containing no mistakes reports
 "cannot tell" rather than a clean pass, because it is no evidence either way.
 
-That measurement has not yet been run against real client recordings. The answer
-can be produced; it has not been produced.
+That measurement has not been run against real client recordings. The answer can
+be produced; it has not been produced.
 
 <!-- HANDBOOK-NAV -->
 
