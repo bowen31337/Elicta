@@ -54,6 +54,7 @@ from app.modules.compiler.techniques.models import CandidateAuthorityRequirement
 from app.modules.debrief.api.models import (
     ArtifactDetail,
     ArtifactSummary,
+    MeetingAttendee,
     MeetingDetail,
 )
 from app.modules.debrief.api.router import (
@@ -358,6 +359,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     )
     backend.next_engagement_id = store.highest_engagement_ordinal()
     backend.meeting_details = store.meeting_details(lambda row: MeetingDetail(**row))
+    # `known_meetings` is the existence guard on the live-session routes and
+    # stays in memory. Seeding it from the meetings the store just loaded is
+    # what stops a restart making every previously created meeting 404.
+    backend.known_meetings.update(backend.meeting_details)
     backend.requirements_states = store.requirements_state(
         lambda row: RequirementsState(**row)
     )
@@ -512,6 +517,27 @@ def build_app(
         backend.next_meeting_id += 1
         meeting_id = f"meeting-{backend.next_meeting_id}"
         backend.meeting_engagement_ids[meeting_id] = payload.engagement_id
+        # Everything downstream of creation asks one of two questions about a
+        # meeting: "does it exist?" (`known_meetings`, guarding session start,
+        # the stream and the slow-lane tick) and "what is it?"
+        # (`meeting_details`, behind GET /api/meetings/{id}). Creation is the
+        # only event that can answer either, so it answers both here — the
+        # split that let a meeting be issued by the API and then not found by
+        # it was exactly these two writes missing.
+        backend.known_meetings.add(meeting_id)
+        backend.meeting_details[meeting_id] = MeetingDetail(
+            meeting_id=meeting_id,
+            engagement_id=payload.engagement_id,
+            # The state and the attendee list the create response reports.
+            # `coverage_summary` stays None until a debrief pipeline run
+            # classifies sections, which is what its own docstring promises.
+            state="planned",
+            capture_mode=payload.capture_mode,
+            scheduled_at=payload.scheduled_at,
+            attendees=[],
+            coverage_summary=None,
+            nudge_count=0,
+        )
         return meeting_id
 
     async def update_meeting(
@@ -858,7 +884,38 @@ def _include_operational_routers(
 
     # --- meeting detail ---------------------------------------------------
     async def get_meeting_detail(meeting_id: str) -> Any:
-        return backend.meeting_details.get(meeting_id)
+        """The meeting's stored row, with the parts that move overlaid.
+
+        `meeting_details` holds what creation knew and what a durable store
+        persists. Attendees and nudge dispositions accumulate afterwards and
+        are keyed by meeting elsewhere on the backend, so reading them here
+        rather than copying them into the stored row at write time is what
+        stops the detail going stale the moment an attendee is added.
+        """
+
+        stored = backend.meeting_details.get(meeting_id)
+        if stored is None:
+            return None
+        return stored.model_copy(
+            update={
+                "attendees": [
+                    MeetingAttendee(
+                        id=attendee.id,
+                        display_name=attendee.display_name,
+                        role=attendee.role,
+                        business_function=attendee.business_function,
+                        decision_authority=attendee.decision_authority,
+                        domain_expertise=attendee.domain_expertise,
+                    )
+                    for attendee in backend.attendees.get(meeting_id, [])
+                ],
+                "nudge_count": sum(
+                    1
+                    for disposition in backend.nudge_dispositions
+                    if disposition.meeting_id == meeting_id
+                ),
+            }
+        )
 
     app.include_router(build_meeting_detail_router(get_meeting_detail))
 
