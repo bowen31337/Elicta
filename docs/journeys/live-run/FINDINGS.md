@@ -252,6 +252,53 @@ chooses which engagement and meeting they are about — `select()` existed
 but no component called it, so until that control was added every screen
 showed whatever the oldest engagement held.
 
+## Two of the thirteen stories were found by verifying, not by reading
+
+Eleven stories came from this document. Two did not, and they are the
+argument for re-running the harness rather than trusting a green suite:
+
+- **The screens were wired to nothing selectable.** After the six screens
+  were connected, `useCurrentEngagement` exposed `select()` and *no
+  component called it* — there was no picker. The app fell back to the
+  first engagement the service returned, which on this machine was the
+  oldest and had no meetings, so every screen honestly reported it had
+  nothing to show. A test asserting "the screen renders" would have
+  passed throughout.
+- **A rate limit looked like a broken deployment.** With the `ack:` stub
+  removed, the debrief called Claude for real — and an
+  `anthropic.RateLimitError` escaped as a bare `500 Internal Server
+  Error`, while the unconfigured case correctly returned 503 naming what
+  was missing. Two failures that need opposite responses from an operator
+  looked identical.
+
+Neither was visible in the code review that produced the first eleven
+stories. Both appeared the first time the whole thing was driven.
+
+## What the harness got wrong
+
+Three faults in the test, not the product, each of which made the product
+look worse than it was. They are recorded because the before-and-after
+numbers cannot be read honestly without them.
+
+- **`reloadTo` never reloaded.** It navigated to a URL differing only in
+  its fragment, which Chrome treats as a same-document change: the hash
+  moved and the document did not reload, so the toolbar picker kept the
+  engagement list it fetched at first mount. Setting a `<select>` to a
+  value with no matching option leaves the old value silently, so the run
+  reported the picker reading `eng-1` after choosing `eng-10` — and the
+  screens looked unwired when they were not.
+- **The consent gate was asserted in one state only.** Journey 2 checked
+  that the Start button was disabled *after* consent had been confirmed.
+  It passed originally because the screen was hardcoded to
+  `confirmedBy={null}` — for the wrong reason entirely. It now reads the
+  screen before consent and again after, so it tests the transition. A
+  gate observed in a single state is not being tested.
+- **Checks passed on non-empty strings.** The first run scored the panel
+  as showing coverage because `— / —` is not the empty string, and scored
+  the debrief as answering because two conversation turns existed — one
+  of which was `ack:` echoing the question back. Those were tightened
+  before the baseline in this document was recorded.
+
 ## The guard that makes this stay closed
 
 `apps/service/src/app/test_composition_seams.py` asserts the structural
