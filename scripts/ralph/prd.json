@@ -208,7 +208,7 @@
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Traceback: modules/debrief/session/service.py:127 -> composition.py:1017 -> orchestration/anthropic_engines.py:389 -> anthropic.RateLimitError 429. Mirror the existing unconfigured-engine handling, which already returns 503 with a named reason."
     }
   ]
