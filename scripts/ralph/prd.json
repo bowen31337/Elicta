@@ -54,7 +54,7 @@
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md section 3. composition.py ~609. Root CLAUDE.md: 'The default raises rather than returning plausible output.'"
     },
     {

@@ -21,6 +21,7 @@ import importlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -339,6 +340,22 @@ class Backend:
 
     replay_ratings: list[tuple[str, SuggestionRatingRequest]] = field(default_factory=list)
     replay_statuses: dict[str, ReplayRunStatusResponse] = field(default_factory=dict)
+
+
+
+def _document_name_from_url(url: str) -> str:
+    """A human name for a linked document: its filename, else the URL itself.
+
+    A SharePoint link ends in the document's own filename, percent-encoded,
+    which is what an operator recognises in a list. The whole URL is the
+    honest fallback when there is no such segment — never a placeholder, since
+    `EngagementDocument.name` is what the operator reads to tell two documents
+    apart.
+    """
+
+    path = urlsplit(url).path
+    segment = unquote(path.rsplit("/", 1)[-1]) if path else ""
+    return segment or url
 
 
 def attach_state_store(backend: Backend, store: StateStore) -> Backend:
@@ -1099,6 +1116,22 @@ def _include_operational_routers(
     async def attach_document(
         engagement_id: str, request: DocumentLinkAttachmentRequest, body: str
     ) -> ReferenceDocument:
+        """Attach a document by link, into the same list an upload lands in.
+
+        FR-3.2 makes the link a second *intake path*, not a second kind of
+        document: once attached, an operator reviewing the engagement should
+        see one list. Writing only `reference_documents` — which the list
+        endpoint does not read — is what made an attached SharePoint document
+        vanish after a 201.
+
+        The `reference-document-N` id the caller is handed is the id it keeps;
+        minting a second one for the list would give one document two names
+        depending on which route you asked.
+        """
+
+        if engagement_id not in backend.engagements:
+            raise DocumentEngagementNotFoundError(f"no engagement: {engagement_id}")
+
         backend.next_reference_document_id += 1
         document = ReferenceDocument(
             id=f"reference-document-{backend.next_reference_document_id}",
@@ -1107,6 +1140,13 @@ def _include_operational_routers(
             source_uri=request.url,
         )
         backend.reference_documents.append((document, body))
+        backend.engagement_documents.setdefault(engagement_id, []).append(
+            EngagementDocument(
+                document_id=document.id,
+                name=_document_name_from_url(request.url),
+                status=request.status,
+            )
+        )
         return document
 
     app.include_router(build_reference_document_link_router(fetch_body, attach_document))
