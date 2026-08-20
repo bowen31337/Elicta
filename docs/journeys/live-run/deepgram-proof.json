@@ -1,0 +1,19 @@
+{
+  "bytesSent": 1621278,
+  "turnsSeen": 2,
+  "finalTurns": 1,
+  "turns": [
+    {
+      "turn": 0,
+      "transcript": "in the modern era. It's not against an all out Russian attack with every every single thing they've got. And I don't know too many people who are working this system who really believe that kind of vision is realistic, who really believe the executive order that president Trump made in January of twenty five really could ever be, uh, brought to fruition. But there are other more modest architectures that I think are worth talking about.",
+      "final": true,
+      "confidence": 0.8706
+    },
+    {
+      "turn": 1,
+      "transcript": "And just to clarify, in the Kansas scenario, is your thinking that that threat would be dealt with in theater also? Or if you are thinking about having a national missile defense construct, how... what would the success rate have to be to make you feel like Kansas was protected? Well, that's a great question because it also sets up Steve to comment because he's done important work on this, talking about how you could, in theory, keep airborne interceptors in northern Japan.",
+      "final": false,
+      "confidence": 0.5029
+    }
+  ]
+}

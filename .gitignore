@@ -57,3 +57,21 @@ handbook/preview/
 # testing). Build output, not source — the canonical copies live on the
 # GitHub Release and the workflow artifact.
 /release/
+
+# Recordings from a live journey run (tests/e2e/journeys/live-run.mjs). The
+# video and screenshots are regenerable evidence of one run against one
+# machine, and git cannot prune them later without rewriting history; the
+# reports beside them are small, diffable, and the part worth versioning.
+# Scoped to this directory on purpose -- the handbook embeds
+# docs/journeys/screenshots/*.png by name, and a bare *.png rule would
+# silently swallow the whole set.
+docs/journeys/live-run/**/*.mp4
+docs/journeys/live-run/**/*.png
+
+# Autonomous agent loop state (scripts/ralph). prd.json and the scripts are
+# the inputs and are committed; progress.txt, handoff.json and the archives
+# are per-run scratch written by the loop itself.
+scripts/ralph/progress.txt
+scripts/ralph/handoff.json
+scripts/ralph/.last-branch
+scripts/ralph/archive/

@@ -1,0 +1,688 @@
+{
+  "startedAgainst": {
+    "app": "http://192.168.99.233:1420",
+    "api": "http://192.168.99.233:8000"
+  },
+  "ffmpeg": "/usr/bin/ffmpeg",
+  "consoleErrors": [],
+  "journeys": [
+    {
+      "id": "01",
+      "slug": "prepare-an-engagement",
+      "title": "Prepare for the engagement",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "engagement is created",
+          "ok": true,
+          "detail": "status 201, body {\"engagement_id\":\"eng-6\"}"
+        },
+        {
+          "name": "the service returns an engagement id",
+          "ok": true,
+          "detail": "eng-6"
+        },
+        {
+          "name": "all three vocabulary terms are accepted",
+          "ok": true,
+          "detail": "3 of 3"
+        },
+        {
+          "name": "an unknown term type is rejected rather than stored",
+          "ok": true,
+          "detail": "status 422"
+        },
+        {
+          "name": "a non-SharePoint link is refused",
+          "ok": true,
+          "detail": "status 422"
+        },
+        {
+          "name": "a SharePoint link is attached",
+          "ok": true,
+          "detail": "status 201, id reference-document-6"
+        },
+        {
+          "name": "the attached document appears in the document list",
+          "ok": false,
+          "detail": "list returned {\"engagement_id\":\"eng-6\",\"documents\":[]} after attaching reference-document-6"
+        },
+        {
+          "name": "compilation is accepted",
+          "ok": true,
+          "detail": "status 202"
+        },
+        {
+          "name": "the compiled bank contains candidate questions",
+          "ok": false,
+          "detail": "bank after compile: {\"engagement_id\":\"eng-6\",\"sections\":[],\"generated_at\":\"2026-08-20T03:22:10.262912Z\"}"
+        },
+        {
+          "name": "the preparation screen names the client organisation",
+          "ok": false,
+          "detail": "heading reads \"—\""
+        },
+        {
+          "name": "the screen lists the reference document just attached",
+          "ok": false,
+          "detail": "0 rows in the reference-documents section"
+        },
+        {
+          "name": "the screen shows the engagement vocabulary just added",
+          "ok": false,
+          "detail": "0 vocabulary chips rendered"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-prep-screen.png"
+      ],
+      "error": null,
+      "video": "01-prepare-an-engagement/journey.mp4",
+      "frames": 141,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 7,
+      "failed": 5
+    },
+    {
+      "id": "02",
+      "slug": "start-a-meeting-with-consent",
+      "title": "Start the meeting, with consent on the record",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "the meeting is created",
+          "ok": true,
+          "detail": "status 201, id meeting-8"
+        },
+        {
+          "name": "the meeting carries its engagement context",
+          "ok": true,
+          "detail": "{\"client_organisation\":\"Northwind Logistics\",\"sector\":\"Freight and logistics\",\"commercial_context\":\"Fixed-price discovery, three meetings\",\"purpose\":null,\"scope_boundary\":null,\"target_requirements_template\":null}"
+        },
+        {
+          "name": "the gate reports consent is still awaited",
+          "ok": true,
+          "detail": "\"awaiting_confirmation\""
+        },
+        {
+          "name": "the gate states its legal basis",
+          "ok": true,
+          "detail": "NSW Surveillance Devices Act — all-party consent (PRD §11, L1/L2)"
+        },
+        {
+          "name": "starting a session before consent is refused",
+          "ok": true,
+          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+        },
+        {
+          "name": "the refusal is about consent, not a meeting the service cannot find",
+          "ok": false,
+          "detail": "refused with {\"detail\":\"meeting not found\"} — 4xx here does not demonstrate a consent gate"
+        },
+        {
+          "name": "consent is recorded against a named person",
+          "ok": true,
+          "detail": "{\"meeting_id\":\"meeting-8\",\"confirmed_by\":\"Dana Whitfield, COO\",\"confirmed_at\":\"2026-08-20T03:22:17.987572Z\"}"
+        },
+        {
+          "name": "consent is timestamped",
+          "ok": true,
+          "detail": "2026-08-20T03:22:17.987572Z"
+        },
+        {
+          "name": "the gate opens once consent is confirmed",
+          "ok": false,
+          "detail": "gate still reads \"awaiting_confirmation\" after a confirmation was accepted"
+        },
+        {
+          "name": "the session starts once consent is confirmed",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+        },
+        {
+          "name": "capture cannot be started until consent is confirmed",
+          "ok": true,
+          "detail": "the Start button's disabled state is true"
+        },
+        {
+          "name": "the consent screen names the meeting it gates",
+          "ok": false,
+          "detail": "title reads \"—\""
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-consent-screen.png"
+      ],
+      "error": null,
+      "video": "02-start-a-meeting-with-consent/journey.mp4",
+      "frames": 85,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 8,
+      "failed": 4
+    },
+    {
+      "id": "03",
+      "slug": "catch-a-vague-answer-live",
+      "title": "Catch a vague answer while it still matters",
+      "blocked": "No Deepgram backend exists. `TranscriptionBackend` has three implementations in `core/crates/asr-live` and all three are fakes; the crate has no dependencies, so it cannot open a socket.",
+      "checks": [
+        {
+          "name": "the session stream is reachable",
+          "ok": true,
+          "detail": "status 200, \"event: lane\\ndata: {\\\"model_reachable\\\": true, \\\"reason\\\": null}\\n\\n\""
+        },
+        {
+          "name": "the slow lane accepts a tick",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"meeting not found\"}"
+        },
+        {
+          "name": "the panel renders",
+          "ok": true,
+          "detail": "1 panels found"
+        },
+        {
+          "name": "the panel shows live coverage from the session",
+          "ok": false,
+          "detail": "coverage chrome reads \"— / —\""
+        },
+        {
+          "name": "a follow-up question is surfaced to the operator",
+          "ok": false,
+          "detail": "nudge area reads \"No active nudge\""
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-panel-screen.png"
+      ],
+      "error": null,
+      "video": "03-catch-a-vague-answer-live/journey.mp4",
+      "frames": 58,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 2,
+      "failed": 3
+    },
+    {
+      "id": "04",
+      "slug": "run-a-code-switched-meeting",
+      "title": "Run a meeting in two languages",
+      "blocked": "Same missing vendor backend as journey 3 — the credential is configured and verified, but nothing can connect to Deepgram to transcribe.",
+      "checks": [
+        {
+          "name": "the panel reports which languages are being heard",
+          "ok": false,
+          "detail": "language chrome reads \"No language detected\""
+        },
+        {
+          "name": "keyterm prompting is on, so client terms survive transcription",
+          "ok": true,
+          "detail": "true"
+        },
+        {
+          "name": "a live transcription vendor is selected",
+          "ok": true,
+          "detail": "deepgram"
+        },
+        {
+          "name": "the selected speech vendor has a credential",
+          "ok": true,
+          "detail": "asr_vendor_api_key configured: true"
+        },
+        {
+          "name": "the speech vendor accepts the configured credential",
+          "ok": true,
+          "detail": "{\"key\":\"asr_vendor_api_key\",\"reachable\":true,\"detail\":\"Verified (…8285).\"}"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-panel-language-chrome.png"
+      ],
+      "error": null,
+      "video": "04-run-a-code-switched-meeting/journey.mp4",
+      "frames": 65,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 4,
+      "failed": 1
+    },
+    {
+      "id": "05",
+      "slug": "degraded-mode",
+      "title": "When the connection drops",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "the panel is not falsely claiming degraded mode while the model is reachable",
+          "ok": true,
+          "detail": "degraded pill present: false, note: null"
+        },
+        {
+          "name": "the configured model credential is reachable",
+          "ok": true,
+          "detail": "{\"key\":\"anthropic_oauth_token\",\"reachable\":true,\"detail\":\"Verified (…wgAA).\"}"
+        },
+        {
+          "name": "an egress audit trail is available",
+          "ok": true,
+          "detail": "status 200, []"
+        },
+        {
+          "name": "the audit records what left the machine",
+          "ok": false,
+          "detail": "audit returned [] after a live model call was made"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-panel-degraded-check.png"
+      ],
+      "error": null,
+      "video": "05-degraded-mode/journey.mp4",
+      "frames": 61,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 3,
+      "failed": 1
+    },
+    {
+      "id": "06",
+      "slug": "reconcile-the-recording",
+      "title": "Check the recording",
+      "blocked": "`app/modules/asr-record` makes no outbound HTTP call, so the record path has no vendor client to reconcile two engines with.",
+      "checks": [
+        {
+          "name": "the record path accepts a transcription request",
+          "ok": true,
+          "detail": "status 202, {\"job_id\":\"8cc176e8c2284281ab037f58aaf0a4b5\",\"meeting_id\":\"meeting-8\",\"status\":\"queued\",\"created_at\":\"2026-08-20T03:22:42.649831Z\",\"engine_lineages\":[\"engine-a\",\"engine-b\"]}"
+        },
+        {
+          "name": "divergences between the two engines are reported",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"record-path alignment not found\"}"
+        },
+        {
+          "name": "the screen names the engines that transcribed the meeting",
+          "ok": false,
+          "detail": "0 engine rows rendered"
+        },
+        {
+          "name": "the screen reports how far the engines agreed",
+          "ok": false,
+          "detail": "agreement reads \"0%\""
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-recording-screen.png"
+      ],
+      "error": null,
+      "video": "06-reconcile-the-recording/journey.mp4",
+      "frames": 48,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 1,
+      "failed": 3
+    },
+    {
+      "id": "07",
+      "slug": "produce-the-debrief",
+      "title": "Get the write-up",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "a debrief conversation opens",
+          "ok": true,
+          "detail": "status 201"
+        },
+        {
+          "name": "the conversation is anchored to a session",
+          "ok": true,
+          "detail": "dc2590b143ea43c29dbbf9184482ca65"
+        },
+        {
+          "name": "the debrief accepts a free-text question",
+          "ok": true,
+          "detail": "status 200, {\"session_id\":\"dc2590b143ea43c29dbbf9184482ca65\",\"meeting_id\":\"meeting-8\",\"conversation_ref\":\"conversation-dc2590b143ea43c29dbbf9184482ca65\",\"status\":\"open\",\"streaming_enabled\":true,\"length_cap\":null,\"latency_budget_seconds\":null,\"opened_at\":\"2026-08-20T03:22:47.735275Z\",\"nudge_dispositions\":[],\"history\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"What did the client say about the March dead"
+        },
+        {
+          "name": "the answer comes from the model rather than a stub echo",
+          "ok": false,
+          "detail": "the service replied {\"session_id\":\"dc2590b143ea43c29dbbf9184482ca65\",\"meeting_id\":\"meeting-8\",\"conversation_ref\":\"conversation-dc2590b143ea43c29dbbf9184482ca65\",\"status\":\"open\",\"streaming_enabled\":true,\"length_cap\":null,\"latency_budget_seconds\":null,\"opened_at\":\"2026-08-20T03:22:47.735275Z\",\"nudge_dispositions\":[],\"his"
+        },
+        {
+          "name": "the project brief is produced",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"draft project brief not found\"}"
+        },
+        {
+          "name": "the decision log is produced",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"decision log not found\"}"
+        },
+        {
+          "name": "the open questions is produced",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"open questions list not found\"}"
+        },
+        {
+          "name": "the follow-up email is produced",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"draft follow-up email not found\"}"
+        },
+        {
+          "name": "the meeting lists its artifacts",
+          "ok": false,
+          "detail": "[]"
+        },
+        {
+          "name": "the conversation opens from the screen",
+          "ok": true,
+          "detail": "ask form present: true"
+        },
+        {
+          "name": "the screen shows the question and an answer",
+          "ok": true,
+          "detail": "2 turns rendered"
+        },
+        {
+          "name": "the answer on screen is a real answer, not the question echoed back",
+          "ok": false,
+          "detail": "Elicta replied \"ack: Which requirements are still only inferred?\""
+        },
+        {
+          "name": "the debrief screen reports no error",
+          "ok": true,
+          "detail": "error region reads null"
+        },
+        {
+          "name": "every claim on the debrief screen carries its citation",
+          "ok": false,
+          "detail": "0 cited claims rendered"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-debrief-chat-before-start.png",
+        "02-debrief-chat-started.png",
+        "03-debrief-chat-question-typed.png",
+        "04-debrief-chat-answer.png",
+        "05-debrief-artifacts-screen.png"
+      ],
+      "error": null,
+      "video": "07-produce-the-debrief/journey.mp4",
+      "frames": 393,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 6,
+      "failed": 8
+    },
+    {
+      "id": "08",
+      "slug": "carry-state-forward",
+      "title": "Carry what you learned forward",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "engagement state is readable",
+          "ok": true,
+          "detail": "status 200"
+        },
+        {
+          "name": "open questions are carried forward to the next meeting",
+          "ok": false,
+          "detail": "state reads {\"engagement_id\":\"eng-6\",\"inherited_open_questions\":[],\"requirements_state\":null}"
+        },
+        {
+          "name": "the requirements state is readable",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"requirements state not found\"}"
+        },
+        {
+          "name": "a second meeting is created in the same engagement",
+          "ok": true,
+          "detail": "meeting-9"
+        },
+        {
+          "name": "the second meeting inherits candidate questions",
+          "ok": false,
+          "detail": "inherited bank: {\"meeting_id\":\"meeting-9\",\"candidates\":[],\"generated_at\":\"2026-08-20T03:23:28.167799Z\"}"
+        },
+        {
+          "name": "the arc shows the meetings held so far",
+          "ok": false,
+          "detail": "0 meetings on the timeline"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-arc-screen.png"
+      ],
+      "error": null,
+      "video": "08-carry-state-forward/journey.mp4",
+      "frames": 58,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 2,
+      "failed": 4
+    },
+    {
+      "id": "09",
+      "slug": "replay-and-tune-ranking",
+      "title": "Judge whether the suggestions are any good",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "a replay run starts",
+          "ok": true,
+          "detail": "status 202, {\"run_id\":\"run-3\"}"
+        },
+        {
+          "name": "the run reports its suggestions",
+          "ok": false,
+          "detail": "status 404, {\"detail\":\"no replay run: run-3\"}"
+        },
+        {
+          "name": "a rating is accepted",
+          "ok": true,
+          "detail": "status 201, {\"rating_id\":\"rating-3\"}"
+        },
+        {
+          "name": "the run reports the precision and embarrassment gates",
+          "ok": true,
+          "detail": "status 200, {\"run_id\":\"run-3\",\"languages\":[]}"
+        },
+        {
+          "name": "the replay screen names the run it is showing",
+          "ok": false,
+          "detail": "run label reads \"—\""
+        },
+        {
+          "name": "the screen lists suggestions to rate",
+          "ok": false,
+          "detail": "0 suggestions rendered"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-replay-screen.png"
+      ],
+      "error": null,
+      "video": "09-replay-and-tune-ranking/journey.mp4",
+      "frames": 58,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 3,
+      "failed": 3
+    },
+    {
+      "id": "10",
+      "slug": "configure-providers",
+      "title": "Set up the services Elicta uses",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "settings load from the service",
+          "ok": true,
+          "detail": "model field present: true"
+        },
+        {
+          "name": "the credential field never renders its value",
+          "ok": true,
+          "detail": "input type is \"password\""
+        },
+        {
+          "name": "the screen confirms the save",
+          "ok": true,
+          "detail": "\"Saved\" shown: true"
+        },
+        {
+          "name": "the service stores the token",
+          "ok": true,
+          "detail": "{\"key\":\"anthropic_oauth_token\",\"configured\":true,\"hint\":\"wgAA\",\"updated_at\":\"2026-08-20T03:23:47.420982Z\"}"
+        },
+        {
+          "name": "a stored secret is never returned, only hinted at",
+          "ok": true,
+          "detail": "hint wgAA; the response was checked for the raw value"
+        },
+        {
+          "name": "the screen reports the credential verified",
+          "ok": true,
+          "detail": "state line reads \"Verified (…wgAA).\""
+        },
+        {
+          "name": "a live transcription vendor can be chosen",
+          "ok": true,
+          "detail": "live vendor is deepgram"
+        },
+        {
+          "name": "Deepgram can be selected as the live vendor",
+          "ok": true,
+          "detail": "#live-vendor now reads deepgram"
+        },
+        {
+          "name": "the service stores the speech-vendor key",
+          "ok": true,
+          "detail": "{\"key\":\"asr_vendor_api_key\",\"configured\":true,\"hint\":\"8285\",\"updated_at\":\"2026-08-20T03:24:08.985203Z\"}"
+        },
+        {
+          "name": "the live vendor is now Deepgram",
+          "ok": true,
+          "detail": "live_vendor is deepgram"
+        },
+        {
+          "name": "the speech key is write-only too, like the model credential",
+          "ok": true,
+          "detail": "the settings response was checked for the raw key"
+        },
+        {
+          "name": "the screen reports the Deepgram credential verified",
+          "ok": true,
+          "detail": "state line reads \"Verified (…8285).\""
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-settings-loaded.png",
+        "02-settings-token-entered.png",
+        "03-settings-saved.png",
+        "04-settings-credential-tested.png",
+        "05-settings-speech-vendors.png",
+        "06-settings-deepgram-entered.png",
+        "07-settings-deepgram-saved.png",
+        "08-settings-deepgram-tested.png"
+      ],
+      "error": null,
+      "video": "10-configure-providers/journey.mp4",
+      "frames": 470,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 12,
+      "failed": 0
+    },
+    {
+      "id": "11",
+      "slug": "control-capture",
+      "title": "Control the recording",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "the capture state is stated in words, not colour alone",
+          "ok": true,
+          "detail": "state reads \"Stopped\""
+        },
+        {
+          "name": "an unavailable audio backend is explained rather than left looking like a choice",
+          "ok": true,
+          "detail": "pause disabled: true, warning: \"Audio capture is unavailable outside the desktop app, so nothing is being recorded.\""
+        },
+        {
+          "name": "the screen lists the audio sources it can record from",
+          "ok": false,
+          "detail": "0 sources listed"
+        }
+      ],
+      "notes": [
+        {
+          "name": "capture in a browser",
+          "detail": "pause control disabled: true; reason shown: \"Audio capture is unavailable outside the desktop app, so nothing is being recorded.\""
+        }
+      ],
+      "shots": [
+        "01-capture-screen.png"
+      ],
+      "error": null,
+      "video": "11-control-capture/journey.mp4",
+      "frames": 39,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 2,
+      "failed": 1
+    },
+    {
+      "id": "12",
+      "slug": "install-and-roll-out",
+      "title": "Get Elicta onto people’s machines",
+      "blocked": null,
+      "checks": [
+        {
+          "name": "the build identifies its version and platform",
+          "ok": true,
+          "detail": "reads \"0.1.0 · Linux x64\""
+        },
+        {
+          "name": "the signing state is stated, and unknown is distinguished from unsigned",
+          "ok": true,
+          "detail": "signing row present: true"
+        },
+        {
+          "name": "the OS permissions this build holds are listed",
+          "ok": false,
+          "detail": "0 permission rows rendered"
+        }
+      ],
+      "notes": [],
+      "shots": [
+        "01-about-screen.png"
+      ],
+      "error": null,
+      "video": "12-install-and-roll-out/journey.mp4",
+      "frames": 39,
+      "videoOk": true,
+      "networkFailures": [],
+      "passed": 2,
+      "failed": 1
+    }
+  ],
+  "totals": {
+    "passed": 52,
+    "failed": 34
+  }
+}
