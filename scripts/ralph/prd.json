@@ -192,7 +192,7 @@
         "tests/e2e/journeys/audit-a11y.mjs still passes if it can be run"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Found by re-running the live harness after US-010. apps/desktop/src/services/selection.ts already has select(), loadSelected*, saveSelected*. Keep the first-not-newest fallback: its docstring gives a good reason. Do not change the presentational components' props."
     },
     {
