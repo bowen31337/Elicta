@@ -1,7 +1,9 @@
 import './screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
 import type { QuestionBank, ReferenceDocument } from './types';
+import { usePrep } from './usePrep';
 
 /**
  * Journey 1 — prepare an engagement.
@@ -130,8 +132,33 @@ export function PrepScreen({
   );
 }
 
+/**
+ * The mounted screen: the same component, over the service instead of over
+ * four hardcoded empty values. What it showed before — an em dash and three
+ * empty lists — was indistinguishable from a working screen for an engagement
+ * with nothing in it, and from a service that was not running at all. Those
+ * are now three different pictures.
+ */
 export default function PrepRoute() {
+  const prep = usePrep();
+
+  if (prep.status !== 'ready' && prep.status !== 'missing') {
+    return (
+      <ScreenState
+        eyebrow="Engagement"
+        status={prep.status}
+        error={prep.error}
+        idleHint="No engagement exists yet. Create one to prepare for a meeting."
+      />
+    );
+  }
+
   return (
-    <PrepScreen clientOrganisation="—" documents={[]} vocabulary={[]} bank={null} />
+    <PrepScreen
+      clientOrganisation={prep.clientOrganisation}
+      documents={prep.documents}
+      vocabulary={prep.vocabulary}
+      bank={prep.bank}
+    />
   );
 }

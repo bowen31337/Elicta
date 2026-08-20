@@ -179,6 +179,20 @@ export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
   };
 }
 
+/**
+ * What a screen that needs an id should show, given the read that was meant
+ * to supply one.
+ *
+ * A service that answered with an empty list is `ready` as a *fetch* and
+ * `idle` as a *screen*: there is genuinely nothing to be about yet, which is
+ * a different thing to say than "here is your engagement, and it is empty".
+ * Keeping the two apart is what stops a fresh install looking like a broken
+ * one.
+ */
+export function selectionStatus(status: ResourceStatus, id: string | null): ResourceStatus {
+  return status === 'ready' && id === null ? 'idle' : status;
+}
+
 /** A meeting's human label, for a screen heading. */
 export function meetingTitle(
   engagement: EngagementSummary | null,

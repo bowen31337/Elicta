@@ -143,7 +143,10 @@ from app.modules.engagement.vocabulary.language import (
     derive_and_persist_expected_languages,
 )
 from app.modules.engagement.vocabulary.router import build_vocabulary_router
-from app.modules.engagement.vocabulary.schemas import VocabularyTermCreateRequest
+from app.modules.engagement.vocabulary.schemas import (
+    VocabularyTermCreateRequest,
+    VocabularyTermResponse,
+)
 from app.modules.nudges.models import NudgeDispositionRequest, NudgeDispositionResponse
 from app.modules.nudges.router import build_nudge_disposition_router
 from app.modules.replay.api.errors import ReplayRunNotFoundError
@@ -261,7 +264,13 @@ class Backend:
     # In-flight background jobs, held so the event loop's weak reference is
     # not the only one keeping them alive. See `schedule` in `build_app`.
     scheduled_work: set[Any] = field(default_factory=set)
-    engagement_vocabulary: dict[str, list[str]] = field(default_factory=dict)
+    # The vocabulary as entered, not just its words: `term_type` is part of
+    # what FR-3.6 asks to be captured, and a second field holding the bare
+    # strings would be the same two-fields-one-concept split this whole
+    # branch has been undoing. The keyterm handshake derives its list.
+    engagement_vocabulary: dict[str, list[VocabularyTermResponse]] = field(
+        default_factory=dict
+    )
     vocabulary_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
 
     citation_rows: list[CitationRow] = field(default_factory=list)
@@ -813,7 +822,10 @@ def build_app(
     engines = [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
 
     async def get_vocabulary(session_or_meeting_id: str) -> list[str]:
-        return backend.engagement_vocabulary.get(session_or_meeting_id, [])
+        return [
+            entry.term
+            for entry in backend.engagement_vocabulary.get(session_or_meeting_id, [])
+        ]
 
     audio_lifecycle = _install_audio_lifecycle(backend)
 
@@ -1381,10 +1393,30 @@ def _include_operational_routers(
     ) -> str:
         backend.next_vocabulary_term_id += 1
         term_id = f"term-{backend.next_vocabulary_term_id}"
-        backend.engagement_vocabulary.setdefault(engagement_id, []).append(request.term)
+        backend.engagement_vocabulary.setdefault(engagement_id, []).append(
+            VocabularyTermResponse(
+                term_id=term_id,
+                engagement_id=engagement_id,
+                term=request.term,
+                term_type=request.term_type,
+            )
+        )
         return term_id
 
-    app.include_router(build_vocabulary_router(add_vocabulary_term))
+    async def list_vocabulary_terms(engagement_id: str) -> list[VocabularyTermResponse] | None:
+        """This engagement's vocabulary, or `None` if there is no such engagement.
+
+        The terms were write-only until now: `POST .../vocabulary` accepted
+        them, the keyterm handshake consumed them, and nothing served them
+        back — so the prep screen could not show the reviewer the list that
+        decides which words the transcriber will get right.
+        """
+
+        if engagement_id not in backend.engagements:
+            return None
+        return list(backend.engagement_vocabulary.get(engagement_id, []))
+
+    app.include_router(build_vocabulary_router(add_vocabulary_term, list_vocabulary_terms))
 
     # --- meeting attendees ------------------------------------------------
     async def add_attendee(meeting_id: str, request: AttendeeCreateRequest) -> Attendee:

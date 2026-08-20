@@ -139,3 +139,34 @@ def test_the_replay_run_list_is_empty_rather_than_absent(client: TestClient) -> 
 
     assert response.status_code == 200, response.text
     assert response.json()["runs"] == []
+
+
+def test_vocabulary_added_to_an_engagement_can_be_read_back(client: TestClient) -> None:
+    engagement_id = _create_engagement(client, "Northwind Freight")
+    added = client.post(
+        f"/api/engagements/{engagement_id}/vocabulary",
+        json={"term": "Depot Sequencer", "term_type": "product_name"},
+    )
+    assert added.status_code == 201, added.text
+
+    response = client.get(f"/api/engagements/{engagement_id}/vocabulary")
+
+    assert response.status_code == 200, response.text
+    terms = response.json()["terms"]
+    assert [term["term"] for term in terms] == ["Depot Sequencer"]
+    # The category FR-3.6 asks to be captured survives the round trip; storing
+    # only the word would quietly drop half of what the caller sent.
+    assert terms[0]["term_type"] == "product_name"
+
+
+def test_an_engagement_with_no_vocabulary_lists_none(client: TestClient) -> None:
+    engagement_id = _create_engagement(client, "Northwind Freight")
+
+    response = client.get(f"/api/engagements/{engagement_id}/vocabulary")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["terms"] == []
+
+
+def test_vocabulary_for_an_unknown_engagement_is_a_404(client: TestClient) -> None:
+    assert client.get("/api/engagements/eng-nope/vocabulary").status_code == 404

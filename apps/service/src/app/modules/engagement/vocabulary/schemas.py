@@ -25,3 +25,17 @@ class VocabularyTermResponse(BaseModel):
     engagement_id: str
     term: str
     term_type: VocabularyTermType
+
+
+class VocabularyListResponse(BaseModel):
+    """An engagement's vocabulary list, in the order terms were added (PRD FR-3.6).
+
+    The terms are what the ASR keyterm handshake is primed with, and the prep
+    screen shows them for exactly that reason: a client or product name the
+    transcriber has never heard is the word most often misheard, and a
+    misheard product name fires a trigger about nothing. A reviewer can only
+    check that list if something serves it back.
+    """
+
+    engagement_id: str
+    terms: list[VocabularyTermResponse]

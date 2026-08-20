@@ -36,6 +36,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/engagements/{engagement_id}/prd", "post"),
     ("/api/engagements/{engagement_id}/requirements-state", "get"),
     ("/api/engagements/{engagement_id}/state", "get"),
+    ("/api/engagements/{engagement_id}/vocabulary", "get"),
     ("/api/engagements/{engagement_id}/vocabulary", "post"),
     ("/api/meetings", "post"),
     ("/api/meetings/{meeting_id}", "get"),

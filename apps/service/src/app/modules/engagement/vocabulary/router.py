@@ -15,12 +15,20 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 
 from .errors import EngagementNotFoundError
-from .schemas import VocabularyTermCreateRequest, VocabularyTermResponse
+from .schemas import (
+    VocabularyListResponse,
+    VocabularyTermCreateRequest,
+    VocabularyTermResponse,
+)
 
 AddVocabularyTerm = Callable[[str, VocabularyTermCreateRequest], Awaitable[str]]
+ListVocabularyTerms = Callable[[str], Awaitable[list[VocabularyTermResponse] | None]]
 
 
-def build_vocabulary_router(add_vocabulary_term: AddVocabularyTerm) -> APIRouter:
+def build_vocabulary_router(
+    add_vocabulary_term: AddVocabularyTerm,
+    list_vocabulary_terms: ListVocabularyTerms | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api/engagements", tags=["engagement-vocabulary"])
 
     @router.post(
@@ -43,5 +51,18 @@ def build_vocabulary_router(add_vocabulary_term: AddVocabularyTerm) -> APIRouter
             term=payload.term,
             term_type=payload.term_type,
         )
+
+    if list_vocabulary_terms is not None:
+
+        @router.get(
+            "/{engagement_id}/vocabulary",
+            response_model=VocabularyListResponse,
+            status_code=200,
+        )
+        async def list_vocabulary_endpoint(engagement_id: str) -> VocabularyListResponse:
+            terms = await list_vocabulary_terms(engagement_id)
+            if terms is None:
+                raise HTTPException(status_code=404, detail=f"no engagement: {engagement_id}")
+            return VocabularyListResponse(engagement_id=engagement_id, terms=terms)
 
     return router
