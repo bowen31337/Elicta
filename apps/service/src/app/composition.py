@@ -42,9 +42,6 @@ from app.modules.compiler.api.models import (
 from app.modules.compiler.api.models import (
     CandidatePatchRequest,
 )
-from app.modules.compiler.api.recompile import (
-    InheritedOpenQuestion as ApiInheritedOpenQuestion,
-)
 from app.modules.compiler.api.router import (
     build_bank_candidates_router,
     build_engagement_bank_compile_router,
@@ -139,6 +136,15 @@ from app.modules.engagement.meetings.router import (
     build_engagement_meetings_router,
     build_meeting_attendees_router,
     build_meeting_router,
+)
+
+# The engagement-state route validates its response against
+# `engagement/state/models.InheritedOpenQuestion`, so that is the type this
+# collection has to hold. It used to hold `compiler/api/recompile`'s
+# same-named model, which pydantic rejects as a different class -- invisible
+# only because nothing ever put a question in the collection to be rejected.
+from app.modules.engagement.state.models import (
+    InheritedOpenQuestion as ApiInheritedOpenQuestion,
 )
 from app.modules.engagement.state.router import build_engagement_state_router
 from app.modules.engagement.vocabulary.language import (
@@ -1721,6 +1727,38 @@ async def _run_debrief_when_record_path_completes(
         # `analyst_chains`, which nothing read — the same record under two
         # names, so all four routes 404'd on a session that had one.
         backend.bmad_chains[session_id] = record
+
+        # FR-3.11: what a meeting leaves unanswered is what the next meeting
+        # in the engagement is for. `engagement_open_questions` is what
+        # `GET /api/engagements/{id}/state` reads, and only rehydration from
+        # the durable store ever filled it -- so a debrief could raise five
+        # open questions and the engagement carried none of them forward.
+        #
+        # Merged by text rather than appended: the same question surviving two
+        # meetings is one standing question, not two, and the better (lower)
+        # impact rank wins so a question that mattered more the second time is
+        # not demoted by its first appearance.
+        carried = {
+            question.text: question
+            for question in backend.engagement_open_questions.get(engagement_id, [])
+        }
+        # A FAILED chain run carries `artifacts=None` -- there is nothing to
+        # carry forward, and inventing an empty list would read as "this
+        # meeting raised no questions" rather than "the run did not finish".
+        artifacts = getattr(record, "artifacts", None)
+        for raised in [] if artifacts is None else artifacts.open_questions:
+            existing = carried.get(raised.text)
+            rank = (
+                min(existing.impact_rank, raised.impact_rank)
+                if existing is not None
+                else raised.impact_rank
+            )
+            carried[raised.text] = ApiInheritedOpenQuestion(
+                text=raised.text, impact_rank=rank
+            )
+        backend.engagement_open_questions[engagement_id] = sorted(
+            carried.values(), key=lambda question: question.impact_rank
+        )
 
     async def save_citation_table(record: Any) -> None:
         backend.citation_tables[session_id] = record

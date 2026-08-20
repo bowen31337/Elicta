@@ -218,3 +218,53 @@ def test_the_audio_destruction_is_readable_once_the_debrief_has_run(
     assert event["status"] == "complete"
     assert event["audio_ref"] == "s3://recordings/ridgeway-01.wav"
     assert event["completed_at"]
+
+
+def test_open_questions_carry_forward_onto_the_engagement(
+    debriefing_client: TestClient,
+) -> None:
+    """FR-3.11: what one meeting leaves unanswered is what the next is for.
+
+    `engagement_open_questions` is what `GET /api/engagements/{id}/state`
+    reads, and only rehydration from the durable store ever filled it — so a
+    debrief could raise five open questions and the engagement carried none of
+    them into the next meeting.
+    """
+
+    engagement = debriefing_client.post(
+        "/api/engagements",
+        json={
+            "client_organisation": "Ridgeway Health",
+            "sector": "healthcare",
+            "commercial_context": "Discovery for a referrals rebuild",
+        },
+    )
+    assert engagement.status_code == 201, engagement.text
+    engagement_id = engagement.json()["engagement_id"]
+
+    meeting = debriefing_client.post(
+        "/api/meetings",
+        json={"engagement_id": engagement_id, "capture_mode": "record"},
+    )
+    assert meeting.status_code == 201, meeting.text
+    meeting_id = meeting.json()["meeting_id"]
+
+    started = debriefing_client.post(
+        f"/api/meetings/{meeting_id}/record/transcribe",
+        json={"audio_ref": "s3://recordings/ridgeway-03.wav"},
+    )
+    assert started.status_code == 202, started.text
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if debriefing_client.get(f"/api/meetings/{meeting_id}/artifacts").json():
+            break
+        time.sleep(0.02)
+
+    response = debriefing_client.get(f"/api/engagements/{engagement_id}/state")
+
+    assert response.status_code == 200, response.text
+    carried = response.json()["inherited_open_questions"]
+    assert [question["text"] for question in carried] == [
+        "What does 'fast' mean in seconds?"
+    ]
