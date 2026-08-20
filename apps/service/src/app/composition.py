@@ -400,7 +400,16 @@ def build_app(
         return meeting_id in backend.confirmed_meetings
 
     async def save_consent_record(record: ConsentRecord) -> None:
+        """Record the confirmation, and open the gate it confirms.
+
+        These are one event, not two. Keeping the durable record and the
+        gate's own answer in separate fields is what let consent be captured
+        perfectly and read back as never given -- the audit trail was right
+        and the gate stayed shut.
+        """
+
         backend.consent_records.append(record)
+        backend.confirmed_meetings.add(record.meeting_id)
 
     app.include_router(
         build_consent_router(get_engagement_consent_model, is_confirmed_for_meeting, save_consent_record)
@@ -771,6 +780,7 @@ _slow_lane_models = importlib.import_module("app.modules.slow-lane.models")
 _slow_lane_router = importlib.import_module("app.modules.slow-lane.router")
 
 SessionStart = _live_session_models.SessionStart
+CaptureAdmission = _live_session_router.CaptureAdmission
 SlowLaneTickResult = _slow_lane_models.SlowLaneTickResult
 
 
@@ -812,7 +822,23 @@ def _include_operational_routers(
         backend.live_sessions[started.session_id] = started
         return started
 
-    app.include_router(_live_session_router.build_live_session_router(start_session))
+    async def admit_capture(meeting_id: str) -> Any:
+        """Whether this meeting may open a capture session (PRD L1/L2, D3).
+
+        Answered before anything is allocated. Consent is per meeting, so a
+        confirmation on one meeting says nothing about another; anything this
+        function cannot positively establish stays refused.
+        """
+
+        if meeting_id not in backend.known_meetings:
+            return CaptureAdmission.NOT_FOUND
+        if meeting_id not in backend.confirmed_meetings:
+            return CaptureAdmission.CONSENT_REQUIRED
+        return CaptureAdmission.ALLOWED
+
+    app.include_router(
+        _live_session_router.build_live_session_router(start_session, admit_capture)
+    )
 
     def _lane_status() -> dict[str, Any]:
         """Whether the slow lane can reach a model right now.

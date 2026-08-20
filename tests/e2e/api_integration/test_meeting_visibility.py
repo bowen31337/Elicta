@@ -55,6 +55,13 @@ def test_created_meeting_can_be_read_back_by_id(client: TestClient) -> None:
 def test_created_meeting_is_known_to_the_live_session_routes(client: TestClient) -> None:
     engagement_id = _create_engagement(client)
     meeting_id = _create_meeting(client, engagement_id)
+    # Capture is gated on consent (PRD L1/L2, D3), which is its own seam and
+    # its own test — confirmed here so that what this test measures is
+    # whether the meeting is *known*, not whether the gate is open.
+    client.post(
+        f"/api/meetings/{meeting_id}/consent-confirmation",
+        json={"confirmed_by": "Priya Raman"},
+    )
 
     started = client.post(f"/api/meetings/{meeting_id}/session/start")
     assert started.status_code != 404, "the meeting the API just issued is not found"
@@ -75,5 +82,7 @@ def test_a_meeting_id_that_was_never_issued_is_still_not_found(client: TestClien
     """The guard must stay a guard — fixing the write side must not open it to anything."""
 
     assert client.get("/api/meetings/meeting-404").status_code == 404
+    # 404, not the 403 an unconfirmed meeting gets: a meeting that was never
+    # issued does not exist, which is a different answer from "not yet".
     assert client.post("/api/meetings/meeting-404/session/start").status_code == 404
     assert client.post("/api/meetings/meeting-404/slow-lane/tick").status_code == 404

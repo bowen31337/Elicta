@@ -20,13 +20,18 @@ _models = importlib.import_module("app.modules.live-session.models")
 _router = importlib.import_module("app.modules.live-session.router")
 
 SessionStart = _models.SessionStart
+CaptureAdmission = _router.CaptureAdmission
 build_live_session_router = _router.build_live_session_router
 
 
 def make_client(
     known_meetings: set[str] | None = None,
+    consented_meetings: set[str] | None = None,
 ) -> tuple[TestClient, list[str]]:
     known_ids = known_meetings if known_meetings is not None else {"meeting-1"}
+    # Consent defaults to given so the tests about *starting* a session are
+    # not also tests about the gate; the gate has its own cases below.
+    consented = consented_meetings if consented_meetings is not None else known_ids
     received: list[str] = []
 
     async def start_session(meeting_id: str):
@@ -39,8 +44,15 @@ def make_client(
             started_at=datetime(2026, 8, 19, 9, 0, tzinfo=UTC),
         )
 
+    async def admit_capture(meeting_id: str):
+        if meeting_id not in known_ids:
+            return CaptureAdmission.NOT_FOUND
+        if meeting_id not in consented:
+            return CaptureAdmission.CONSENT_REQUIRED
+        return CaptureAdmission.ALLOWED
+
     app = FastAPI()
-    app.include_router(build_live_session_router(start_session))
+    app.include_router(build_live_session_router(start_session, admit_capture))
     return TestClient(app), received
 
 
@@ -70,3 +82,22 @@ def test_starting_a_session_for_an_unknown_meeting_returns_404():
     response = client.post("/api/meetings/does-not-exist/session/start")
 
     assert response.status_code == 404
+
+
+def test_starting_a_session_without_consent_is_refused_with_403():
+    client, _ = make_client(known_meetings={"meeting-1"}, consented_meetings=set())
+
+    response = client.post("/api/meetings/meeting-1/session/start")
+
+    assert response.status_code == 403
+    assert "consent" in response.json()["detail"].lower()
+
+
+def test_a_session_refused_on_consent_is_never_allocated():
+    """The gate is asked first, so a refusal must not have started anything."""
+
+    client, received = make_client(known_meetings={"meeting-1"}, consented_meetings=set())
+
+    client.post("/api/meetings/meeting-1/session/start")
+
+    assert received == []
