@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
+import { useRecording } from './useRecording';
 
 /**
  * Journey 6 — reconcile the recording.
@@ -136,14 +138,35 @@ export function RecordingScreen({
   );
 }
 
+/**
+ * The mounted screen, over the service.
+ *
+ * A meeting that was never transcribed reads back as a 404 on all three of
+ * this screen's sources, and that is content rather than failure — so it
+ * renders the screen with nothing in it. Only a service that cannot be
+ * reached at all takes the screen away.
+ */
 export default function RecordingRoute() {
+  const recording = useRecording();
+
+  if (recording.status !== 'ready' && recording.status !== 'missing') {
+    return (
+      <ScreenState
+        eyebrow="Recording"
+        status={recording.status}
+        error={recording.error}
+        idleHint="No meeting exists yet. A recording is reconciled after one has been captured."
+      />
+    );
+  }
+
   return (
     <RecordingScreen
-      meetingTitle="—"
-      engines={[]}
-      agreementPercent={0}
-      divergences={[]}
-      audioDestroyedAt={null}
+      meetingTitle={recording.meetingTitle}
+      engines={recording.engines}
+      agreementPercent={recording.agreementPercent}
+      divergences={recording.divergences}
+      audioDestroyedAt={recording.audioDestroyedAt}
     />
   );
 }
