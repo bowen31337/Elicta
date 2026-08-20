@@ -138,9 +138,11 @@ from app.modules.nudges.models import NudgeDispositionRequest, NudgeDispositionR
 from app.modules.nudges.router import build_nudge_disposition_router
 from app.modules.replay.api.errors import ReplayRunNotFoundError
 from app.modules.replay.api.models import (
+    ReplayRunStatus,
     ReplayRunStatusResponse,
     StartReplayRunRequest,
     SuggestionRatingRequest,
+    SuggestionVerdict,
 )
 from app.modules.replay.api.router import (
     build_replay_ratings_router,
@@ -762,7 +764,32 @@ def build_app(
     app.include_router(build_follow_up_email_router(get_bmad_chain))
 
     async def save_rating(run_id: str, payload: SuggestionRatingRequest) -> str:
+        """Record one analyst's verdict, and score it under its run.
+
+        Two writes, because they answer different questions: `replay_ratings`
+        is the verbatim audit of what was submitted, and `run_ratings` is what
+        the metrics endpoint reads. Only the first existed, so a rating was
+        accepted, given an id, and moved no number anywhere.
+
+        The verdict enum offers one choice where PRD §5 asks two senior BAs to
+        rate three independent things -- useful, timely, and would this have
+        embarrassed me. Until the API carries all three, "timely" is scored as
+        surfaced-but-not-useful: it counts in the denominator and not the
+        numerator, so the collapse can only understate M1, never flatter it.
+        """
+
+        run = backend.replay_statuses.get(run_id)
+        if run is None:
+            raise ReplayRunNotFoundError(f"no replay run: {run_id}")
+
         backend.replay_ratings.append((run_id, payload))
+        backend.run_ratings.setdefault(run_id, []).append(
+            RatedSuggestion(
+                language=backend.replay_run_requests[run_id].language,
+                useful=payload.verdict is SuggestionVerdict.USEFUL,
+                embarrassing=payload.verdict is SuggestionVerdict.EMBARRASSING,
+            )
+        )
         return f"rating-{len(backend.replay_ratings)}"
 
     async def get_base_candidates(meeting_id: str) -> list[BankCandidate]:
@@ -966,14 +993,39 @@ def _include_operational_routers(
 
     # --- replay: start a run, read its metrics ---------------------------
     async def start_run(request: StartReplayRunRequest) -> str:
+        """Queue a replay run, and make it answerable by its own id.
+
+        `replay_statuses` is what `GET /api/replay/runs/{id}` reads, so a run
+        that only landed in `replay_run_requests` answered "no replay run"
+        the moment it was asked about. It starts PENDING with nothing
+        surfaced, and stays there: nothing in this deployment executes a
+        replay, and reporting progress it has not made would be worse than
+        reporting none.
+        """
+
         backend.next_replay_run_id += 1
         run_id = f"run-{backend.next_replay_run_id}"
         backend.replay_run_requests[run_id] = request
+        backend.replay_statuses[run_id] = ReplayRunStatusResponse(
+            run_id=run_id,
+            status=ReplayRunStatus.PENDING,
+            progress=0.0,
+            suggestion_count=0,
+        )
         return run_id
 
     app.include_router(build_replay_start_router(start_run))
 
     async def get_ratings(run_id: str) -> list[RatedSuggestion]:
+        """This run's ratings — raising for a run that does not exist.
+
+        An unknown run answering with an empty list is indistinguishable from
+        a real run nobody has rated yet, and the caller would read 0.0 as a
+        measurement rather than as an absence.
+        """
+
+        if run_id not in backend.replay_statuses:
+            raise ReplayRunNotFoundError(f"no replay run: {run_id}")
         return backend.run_ratings.get(run_id, [])
 
     app.include_router(build_replay_metrics_router(get_ratings))

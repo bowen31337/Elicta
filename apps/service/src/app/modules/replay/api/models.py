@@ -27,9 +27,19 @@ class SuggestionRatingResponse(BaseModel):
 
 
 class StartReplayRunRequest(BaseModel):
-    """A request to start a replay run against an already-uploaded recording."""
+    """A request to start a replay run against an already-uploaded recording.
+
+    `language` is the language the run is conducted in, and it is carried
+    here because M1 (precision@surfaced) and M2 (embarrassment rate) are
+    partitioned by it (architecture T13) -- a rating has no language of its
+    own, it inherits the run's. It defaults rather than being required so
+    that existing callers keep working, but a run in another language must
+    say so: scoring a Portuguese run under `en` does not make the figure
+    wrong by a little, it files it under the wrong gate entirely.
+    """
 
     recording_id: str = Field(min_length=1)
+    language: str = Field(default="en", min_length=1)
 
 
 class StartReplayRunResponse(BaseModel):

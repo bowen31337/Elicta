@@ -70,7 +70,7 @@
         "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md section 4. composition.py ~1196-1208."
     },
     {
@@ -85,7 +85,7 @@
         "cd apps/service && uv run pytest passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md write/read table row 3. composition.py ~464 (read), ~477 (upload write), ~983 (link write)."
     },
     {

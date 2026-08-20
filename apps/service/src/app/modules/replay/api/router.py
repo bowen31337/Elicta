@@ -61,7 +61,10 @@ def build_replay_ratings_router(save_rating: SaveSuggestionRating) -> APIRouter:
     async def rate_suggestion(
         run_id: str, payload: SuggestionRatingRequest
     ) -> SuggestionRatingResponse:
-        rating_id = await save_rating(run_id, payload)
+        try:
+            rating_id = await save_rating(run_id, payload)
+        except ReplayRunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return SuggestionRatingResponse(rating_id=rating_id)
 
     return router
