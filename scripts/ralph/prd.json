@@ -128,7 +128,7 @@
         "cd apps/service && uv run pytest passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "backend.meeting_artifacts and backend.artifacts_by_id are read at composition.py ~623 and ~628 and written nowhere."
     },
     {

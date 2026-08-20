@@ -30,7 +30,10 @@ from fastapi.responses import JSONResponse
 
 from app.core.consent.models import ConsentModel, ConsentRecord
 from app.core.consent.router import build_consent_router
+from app.core.egress.audit import audited
+from app.core.egress.clock import SystemClock
 from app.core.egress.models import EgressLogRow
+from app.core.egress.region import EngagementRegionRegistry
 from app.core.egress.router import build_egress_audit_router
 from app.modules.compiler.api.errors import CandidateNotFoundError
 from app.modules.compiler.api.models import (
@@ -230,6 +233,9 @@ class Backend:
     consent_records: list[ConsentRecord] = field(default_factory=list)
 
     egress_rows: list[EgressLogRow] = field(default_factory=list)
+    # Which processing region each engagement is pinned to (NFR-2.2). Recorded
+    # on every audit row, so a call made with no pin is visible as one.
+    egress_regions: EngagementRegionRegistry = field(default_factory=EngagementRegionRegistry)
 
     engagement_ids: dict[int, str] = field(default_factory=dict)
     next_engagement_id: int = 0
@@ -360,6 +366,70 @@ class Backend:
 
 
 
+def _audit_seam(backend: Backend, engagement_id: str, engine: Any, name: str) -> Any:
+    """One inference seam, wrapped so every call across it is audited (NFR-2.7)."""
+
+    return audited(
+        engine,
+        sink=_BackendEgressSink(backend),
+        clock=SystemClock(),
+        regions=backend.egress_regions,
+        engagement_id=engagement_id,
+        processor_name=name,
+    )
+
+
+def _audited_compiler_engines(
+    backend: Backend, engagement_id: str, engines: CompilerEngines
+) -> CompilerEngines:
+    """The §3.10 compiler seams, audited.
+
+    Wrapping here rather than at each stage means a stage added to the chain
+    later is audited without anyone remembering to do it — the audit is a
+    property of the boundary, which is what "single audited chokepoint" means.
+    An unconfigured engine is left alone: it never reaches a vendor, it
+    raises, and an audit row for a call that did not happen is noise.
+    """
+
+    if not engines.is_configured:
+        return engines
+    return CompilerEngines(
+        name=engines.name,
+        extract=_audit_seam(backend, engagement_id, engines.extract, engines.name),
+        structure=_audit_seam(backend, engagement_id, engines.structure, engines.name),
+        submit_batch=_audit_seam(backend, engagement_id, engines.submit_batch, engines.name),
+        fetch_batch=_audit_seam(backend, engagement_id, engines.fetch_batch, engines.name),
+    )
+
+
+def _audited_debrief_engines(
+    backend: Backend, engagement_id: str, engines: DebriefEngines
+) -> DebriefEngines:
+    """The §7 debrief seams, audited. See `_audited_compiler_engines`."""
+
+    if not engines.is_configured:
+        return engines
+    return DebriefEngines(
+        name=engines.name,
+        diarize=_audit_seam(backend, engagement_id, engines.diarize, engines.name),
+        clean=_audit_seam(backend, engagement_id, engines.clean, engines.name),
+        translate=_audit_seam(backend, engagement_id, engines.translate, engines.name),
+        classify=_audit_seam(backend, engagement_id, engines.classify, engines.name),
+        run_chain=_audit_seam(backend, engagement_id, engines.run_chain, engines.name),
+        converse=_audit_seam(backend, engagement_id, engines.converse, engines.name),
+    )
+
+
+class _BackendEgressSink:
+    """Writes each audited call's row where `GET /api/audit/egress` reads."""
+
+    def __init__(self, backend: Backend) -> None:
+        self._backend = backend
+
+    def record(self, row: EgressLogRow) -> None:
+        self._backend.egress_rows.append(row)
+
+
 def _document_name_from_url(url: str) -> str:
     """A human name for a linked document: its filename, else the URL itself.
 
@@ -482,6 +552,13 @@ def build_app(
         backend.engagement_ids[backend.next_engagement_id] = engagement_id
         backend.engagement_updates[engagement_id] = EngagementUpdateResponse(engagement_id=engagement_id)
         backend.engagements[engagement_id] = payload
+        # NFR-2.2 pins residency once, at engagement setup. The vendor region
+        # in Settings is the only region this deployment has been told about;
+        # with none configured the engagement stays unpinned and its audit
+        # rows say so, rather than being stamped with a region nobody chose.
+        region = settings_store.read().connectors.region
+        if region:
+            backend.egress_regions.pin(engagement_id, region)
 
         # FR-2.14: derive the expected-language set the moment client context
         # becomes known, which is exactly here (FR-3.1). Without this, ASR
@@ -1418,6 +1495,8 @@ async def _run_debrief_when_record_path_completes(
             utterance_id=utterance_id, start_seconds=start, end_seconds=end
         )
 
+    engines = _audited_debrief_engines(backend, engagement_id, engines)
+
     run = await run_debrief_pipeline(
         session_id,
         engagement_id=engagement_id,
@@ -1547,6 +1626,8 @@ async def _run_engagement_compile(
     backend: Backend, engagement_id: str, engines: CompilerEngines
 ) -> Any:
     """Run the §3.10 compiler chain for one engagement."""
+
+    engines = _audited_compiler_engines(backend, engagement_id, engines)
 
     # Both intake paths (FR-3.2 upload and link) land in
     # `engagement_documents`, so one read covers both. The text comes from
