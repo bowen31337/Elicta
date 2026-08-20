@@ -1,7 +1,7 @@
 {
   "project": "Elicta",
   "branchName": "ralph/close-live-run-gaps",
-  "description": "Close the gaps found by the live journey run (docs/journeys/live-run/FINDINGS.md). Writes and reads in the service composition root are bound to different Backend fields, so most of what a journey writes cannot be read back. Each story reconnects one seam and proves it with a test that goes through the API in both directions.",
+  "description": "Close the gaps found by the live journey run (docs/journeys/live-run/FINDINGS.md). Writes and reads in the service composition root are bound to different Backend fields, so most of what a journey writes cannot be read back. Each story reconnects one seam and proves it with a test that goes through the API in both directions. Second pass: verification against the running system found two gaps the first pass left \u2014 the selection layer has no UI, and an upstream rate limit surfaces as a bare 500.",
   "complexity": {
     "score": 18.0,
     "category": "medium-large",
@@ -177,6 +177,39 @@
       "priority": 11,
       "passes": true,
       "notes": "FINDINGS.md 'Why the existing suites do not catch any of this'. This is the anti-regression story \u2014 it must be able to fail."
+    },
+    {
+      "id": "US-012",
+      "title": "An operator can choose which engagement and meeting the screens are about",
+      "description": "As an operator, I need to pick the engagement I am working on. useCurrentEngagement exposes select() and no component calls it, so there is no picker anywhere; the app falls back to the first engagement the service returns. On a machine holding nine engagements that is the oldest one, which has no meetings, so every screen reports there is nothing to show.",
+      "acceptanceCriteria": [
+        "A control in the app lets the operator choose the current engagement, and where relevant the current meeting",
+        "The choice persists across a reload (it already writes to localStorage \u2014 wire the UI to it)",
+        "Choosing an engagement updates every screen that depends on it without a manual refresh",
+        "The empty state distinguishes 'no engagement is selected' from 'this engagement has no meetings' \u2014 the current copy says 'No meeting exists yet' when meetings do exist under another engagement",
+        "The control is reachable by keyboard and has an accessible name",
+        "pnpm --filter elicta-desktop test, typecheck and build all pass",
+        "tests/e2e/journeys/audit-a11y.mjs still passes if it can be run"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Found by re-running the live harness after US-010. apps/desktop/src/services/selection.ts already has select(), loadSelected*, saveSelected*. Keep the first-not-newest fallback: its docstring gives a good reason. Do not change the presentational components' props."
+    },
+    {
+      "id": "US-013",
+      "title": "An upstream rate limit is reported as a rate limit, not a 500",
+      "description": "As an operator, when the model provider rate-limits us I need to be told that, so I know to wait rather than to go hunting for a broken deployment. Today anthropic.RateLimitError escapes the debrief path and FastAPI turns it into a bare 500 'Internal Server Error', while the unconfigured case correctly returns 503 naming what is missing.",
+      "acceptanceCriteria": [
+        "A provider rate limit surfaces as 429 (or 503) with a message naming the cause, never a bare 500",
+        "The same handling covers the other provider failures that are transient rather than misconfiguration \u2014 at least timeout and connection errors",
+        "A genuine bug still surfaces as a 500; this must not become a blanket except-everything",
+        "A test asserts a raised RateLimitError becomes the chosen status with a message, not a 500",
+        "cd apps/service && uv run pytest passes",
+        "uv run --project apps/service python -m pytest tests/e2e/api_integration passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Traceback: modules/debrief/session/service.py:127 -> composition.py:1017 -> orchestration/anthropic_engines.py:389 -> anthropic.RateLimitError 429. Mirror the existing unconfigured-engine handling, which already returns 503 with a named reason."
     }
   ]
 }
