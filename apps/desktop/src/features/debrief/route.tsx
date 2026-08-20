@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
+import { useDebrief } from './useDebrief';
 
 /**
  * Journey 7 — the debrief artifacts.
@@ -97,8 +99,35 @@ export function DebriefScreen({
   );
 }
 
+/**
+ * The mounted screen, over the service.
+ *
+ * A meeting that has not been debriefed 404s on all three artifacts, and that
+ * is content rather than failure — the screen renders with nothing in it. What
+ * it must never do is render a claim without saying which kind it is, so the
+ * provenance mapping fails toward `inferred`: an operator wrongly told "the
+ * client said this" cannot un-hear it.
+ */
 export default function DebriefRoute() {
+  const debrief = useDebrief();
+
+  if (debrief.status !== 'ready' && debrief.status !== 'missing') {
+    return (
+      <ScreenState
+        eyebrow="Debrief"
+        status={debrief.status}
+        error={debrief.error}
+        idleHint="No meeting exists yet. Artifacts appear after one has been debriefed."
+      />
+    );
+  }
+
   return (
-    <DebriefScreen meetingTitle="—" openQuestions={[]} decisions={[]} brief={null} />
+    <DebriefScreen
+      meetingTitle={debrief.meetingTitle}
+      openQuestions={debrief.openQuestions}
+      decisions={debrief.decisions}
+      brief={debrief.brief}
+    />
   );
 }

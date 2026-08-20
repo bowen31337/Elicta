@@ -3,7 +3,15 @@ import { useState } from 'react';
 import '../prep/screens.css';
 import './debriefChat.css';
 
+import {
+  meetingTitle,
+  selectionStatus,
+  useCurrentEngagement,
+  useCurrentMeeting,
+} from '../../services/selection';
+import { combineStatus } from '../../services/useResource';
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
 import type { DebriefTurn } from './useDebriefChat';
 import { useDebriefChat } from './useDebriefChat';
 
@@ -160,12 +168,40 @@ export function DebriefChatScreen({
   );
 }
 
+/**
+ * The mounted screen.
+ *
+ * It used to open a conversation against the literal meeting id `'meeting-1'`
+ * under a hardcoded client name — the id the first meeting on a fresh service
+ * happens to get, and nothing else. Asking questions about somebody else's
+ * meeting is a worse failure than asking about none, so the id now comes from
+ * the same selection every other screen reads, and there is no fallback: with
+ * no meeting selected the screen says so rather than guessing one.
+ */
 export default function DebriefChatRoute() {
-  const chat = useDebriefChat('meeting-1');
+  const engagement = useCurrentEngagement();
+  const meeting = useCurrentMeeting(engagement.engagementId);
+  const chat = useDebriefChat(meeting.meetingId ?? '');
+
+  const status = selectionStatus(
+    combineStatus(engagement.status, meeting.status),
+    meeting.meetingId,
+  );
+
+  if (meeting.meetingId === null || (status !== 'ready' && status !== 'missing')) {
+    return (
+      <ScreenState
+        eyebrow="Debrief"
+        status={status === 'ready' || status === 'missing' ? 'idle' : status}
+        error={engagement.error ?? meeting.error}
+        idleHint="No meeting exists yet. There is nothing to ask about until one has been captured."
+      />
+    );
+  }
 
   return (
     <DebriefChatScreen
-      meetingTitle="Northwind Logistics — Discovery 2"
+      meetingTitle={meetingTitle(engagement.engagement, meeting.meeting)}
       turns={chat.turns}
       busy={chat.busy}
       error={chat.error}
