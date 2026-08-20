@@ -179,3 +179,87 @@ For UI stories, verify in browser if tools available.
 ```
 
 Now begin. Read the state files and start working.
+
+---
+
+# Elicta — project-specific rules
+
+Read `/home/ubuntu/projects/Elicta/CLAUDE.md` first. It is the authority on
+conventions; everything below is the part that matters most for these stories.
+
+## The bug class you are fixing
+
+`apps/service/src/app/composition.py` binds write paths and read paths to
+**different `Backend` fields**. The write endpoint accepts and returns an id;
+the matching read endpoint 404s or returns empty. 17 of the 64 declared fields
+are read and never written. `docs/journeys/live-run/FINDINGS.md` has the full
+account — read it before your first story.
+
+Find the pairs mechanically rather than by eye:
+
+```bash
+python3 - <<'PY'
+import re, pathlib
+src = pathlib.Path('apps/service/src/app/composition.py').read_text()
+decl = list(dict.fromkeys(re.findall(r'^\s{4}(\w+):\s*[^=\n]+= field\(', src, re.M)))
+lines = src.split('\n')
+for f in decl:
+    w = [i for i, l in enumerate(lines, 1)
+         if re.search(rf'backend\.{f}\s*(=[^=]|\[[^\]]*\]\s*=)', l)
+         or re.search(rf'backend\.{f}\.(append|add|update|setdefault|extend|pop|clear)\(', l)]
+    r = [i for i, l in enumerate(lines, 1) if re.search(rf'backend\.{f}\b', l) and i not in w]
+    if r and not w:
+        print(f'READ-ONLY  backend.{f}  read at {r}')
+PY
+```
+
+## Quality gates — run the ones your story touches
+
+```bash
+cd apps/service && uv run pytest                 # 706 tests; run the FULL suite
+cd apps/service && uv run ruff check .
+uv run --project apps/service python -m pytest tests/e2e/api_integration   # from repo root
+pnpm --filter elicta-desktop test                # 199 tests
+pnpm --filter elicta-desktop typecheck
+pnpm --filter elicta-desktop build
+python3 handbook/tools/gen.py check              # only if you touched docs/ or handbook/
+```
+
+Rust is untouched by these stories; do not run the cargo suite unless you
+changed a crate.
+
+## Rules that are not negotiable
+
+1. **A test must not set up its own read side.** The whole defect class hides
+   behind `backend.some_field["x"] = ...` in a test. For these stories, the
+   test performs the write **through the API** and then the read **through the
+   API**. If you need a fixture, build it with API calls.
+2. **Fail closed, never plausible.** An unconfigured stage raises and names what
+   is missing. Never return placeholder text that renders like real output —
+   that is exactly what `ack: {message}` did.
+3. **`composition.py` is the composition root.** Routers are built by
+   `build_*_router(...)` factories taking their persistence callables as
+   arguments. Wire there; do not let a router reach for a global.
+4. **Run the full service suite**, not just your directory — duplicate test
+   basenames across modules collide under pytest.
+5. **Never edit** `docs/journeys/screenshots/`, anything carrying
+   `<!-- HANDBOOK-GENERATED -->`, or `packages/api-client` by hand.
+6. **Never commit media.** `.gitignore` excludes `docs/journeys/live-run/**`
+   video and screenshots. Do not add `*.mp4` or `*.png` anywhere.
+7. **Keep the fixed-scene harness working.** `apps/desktop/src/journeys/` feeds
+   `journeys.html`; US-010 must not break it.
+8. **Do not `git push`** and do not open a PR. Commit to the feature branch only.
+
+## Verifying against the running system (optional, US-010 especially)
+
+The panel is on `:1420` and the service on `:8000` via `./start.sh`. The live
+harness that found these gaps can re-run a single journey:
+
+```bash
+node tests/e2e/journeys/live-run.mjs --app http://127.0.0.1:1420 \
+  --api http://127.0.0.1:8000 --out /tmp/verify --only 02
+```
+
+It needs `ELICTA_ANTHROPIC_TOKEN`; without it, skip it and rely on pytest.
+Treat it as confirmation, never as the only gate — it is slow and needs the
+servers up.
