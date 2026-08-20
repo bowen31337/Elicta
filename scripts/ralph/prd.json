@@ -160,7 +160,7 @@
         "pnpm --filter elicta-desktop build passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "FINDINGS.md 'Six screens are not connected to anything'. Large story \u2014 hand off rather than rush. Keep the presentational components' props exactly as they are; only the route.tsx defaults change."
     },
     {
