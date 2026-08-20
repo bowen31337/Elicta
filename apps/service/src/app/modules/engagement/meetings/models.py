@@ -174,3 +174,46 @@ class MeetingCreateResponse(BaseModel):
     capture_mode: str
     scheduled_at: datetime | None = None
     engagement_context: EngagementContext
+
+
+class MeetingSummary(BaseModel):
+    """One row of an engagement's meeting list (GET /api/engagements/{id}/meetings).
+
+    An engagement is a sequence of meetings, and until this list existed the
+    only way to learn a meeting's id was to have been the caller that created
+    it — which is why the desktop's debrief screen shipped with a hard-coded
+    one. The row carries what a chooser needs to tell two meetings apart
+    (when it was scheduled, what it was for, how far it got) and nothing that
+    would cost a per-row lookup; attendees and nudge counts stay on
+    `GET /api/meetings/{id}`.
+
+    `sections_filled`/`sections_total` mirror the coverage summary that route
+    returns, as two optional scalars rather than an import of
+    `debrief/api`'s `MeetingCoverageSummary`: this package does not own that
+    type, and the same cross-module boundary is why `EngagementContext` is a
+    local mirror. Both are `None` until the meeting's debrief pipeline has
+    classified sections — a meeting that has not happened yet has no coverage,
+    which is not the same as coverage of zero.
+    """
+
+    meeting_id: str
+    engagement_id: str
+    state: str
+    capture_mode: str
+    scheduled_at: datetime | None = None
+    session_purpose: str | None = None
+    sections_filled: int | None = Field(default=None, ge=0)
+    sections_total: int | None = Field(default=None, ge=0)
+
+
+class MeetingListResponse(BaseModel):
+    """Every meeting belonging to one engagement, oldest first.
+
+    Ordered by creation rather than by `scheduled_at`, since a meeting can be
+    created before a time is settled (`MeetingCreateRequest.scheduled_at` is
+    optional) and an unscheduled meeting must still have a stable place in
+    the list rather than sorting to an arbitrary end of it.
+    """
+
+    engagement_id: str
+    meetings: list[MeetingSummary]

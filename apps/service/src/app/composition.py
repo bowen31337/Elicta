@@ -101,6 +101,8 @@ from app.modules.debrief.session.router import build_debrief_session_router
 from app.modules.engagement.api.router import build_engagement_router
 from app.modules.engagement.api.schemas import (
     EngagementCreateRequest,
+    EngagementRecord,
+    EngagementSummary,
     EngagementUpdateRequest,
     EngagementUpdateResponse,
 )
@@ -126,10 +128,12 @@ from app.modules.engagement.meetings.models import (
     AttendeeCreateRequest,
     EngagementContext,
     MeetingCreateRequest,
+    MeetingSummary,
     MeetingUpdateRequest,
     MeetingUpdateResponse,
 )
 from app.modules.engagement.meetings.router import (
+    build_engagement_meetings_router,
     build_meeting_attendees_router,
     build_meeting_router,
 )
@@ -146,12 +150,14 @@ from app.modules.replay.api.errors import ReplayRunNotFoundError
 from app.modules.replay.api.models import (
     ReplayRunStatus,
     ReplayRunStatusResponse,
+    ReplayRunSummary,
     StartReplayRunRequest,
     SuggestionRatingRequest,
     SuggestionVerdict,
 )
 from app.modules.replay.api.router import (
     build_replay_ratings_router,
+    build_replay_run_list_router,
     build_replay_start_router,
     build_replay_status_router,
 )
@@ -598,7 +604,78 @@ def build_app(
         backend.engagement_updates[engagement_id] = updated
         return updated
 
-    app.include_router(build_engagement_router(create_engagement, update_engagement))
+    async def get_engagement(engagement_id: str) -> EngagementRecord | None:
+        """One engagement's own context fields, create and update merged.
+
+        The two halves live in different collections because they are written
+        by different routes — `engagements` by POST, `engagement_updates` by
+        PATCH — and a reader wants them as one record.
+        """
+
+        created = backend.engagements.get(engagement_id)
+        if created is None:
+            return None
+        update = backend.engagement_updates.get(engagement_id)
+        return EngagementRecord(
+            client_organisation=created.client_organisation,
+            sector=created.sector,
+            commercial_context=created.commercial_context,
+            purpose=update.purpose if update else None,
+            scope_boundary=update.scope_boundary if update else None,
+            target_requirements_template=(
+                update.target_requirements_template if update else None
+            ),
+        )
+
+    async def count_engagement_documents(engagement_id: str) -> int:
+        return len(backend.engagement_documents.get(engagement_id, []))
+
+    async def list_engagements(page: int, page_size: int) -> tuple[list[EngagementSummary], int]:
+        """A page of engagements, in creation order.
+
+        This is the read that lets the desktop find its way back to work an
+        operator started before the app was last closed. Without it an id
+        existed for exactly as long as the process that created it, which is
+        why every screen either hard-coded one or showed an em dash.
+
+        Ordered by `engagement_ids` — the ordinal-to-id map creation fills —
+        rather than by dict insertion, so a durable store that rehydrates
+        `engagements` in arbitrary order still pages deterministically.
+        """
+
+        ordered = [
+            engagement_id
+            for _, engagement_id in sorted(backend.engagement_ids.items())
+            if engagement_id in backend.engagements
+        ]
+        # A durable store can hold engagements whose ordinal was never
+        # recorded; they belong in the list, after the ones that were.
+        ordered += [
+            engagement_id
+            for engagement_id in backend.engagements
+            if engagement_id not in ordered
+        ]
+        total = len(ordered)
+        window = ordered[(page - 1) * page_size : page * page_size]
+        items = []
+        for engagement_id in window:
+            record = await get_engagement(engagement_id)
+            if record is None:  # pragma: no cover - `ordered` is built from the same dict
+                continue
+            items.append(
+                EngagementSummary(engagement_id=engagement_id, **record.model_dump())
+            )
+        return items, total
+
+    app.include_router(
+        build_engagement_router(
+            create_engagement,
+            update_engagement,
+            get_engagement,
+            count_engagement_documents,
+            list_engagements,
+        )
+    )
 
     async def list_documents(engagement_id: str) -> list[EngagementDocument]:
         if engagement_id not in backend.engagements:
@@ -692,6 +769,46 @@ def build_app(
         return updated
 
     app.include_router(build_meeting_router(create_meeting, get_engagement_context, update_meeting))
+
+    async def list_engagement_meetings(engagement_id: str) -> list[MeetingSummary] | None:
+        """This engagement's meetings, oldest first — or `None` if it has none to have.
+
+        Reads the same `meeting_details` row `GET /api/meetings/{id}` serves,
+        filtered by engagement, and overlays the session purpose PATCH stores
+        separately in `meeting_updates`. Creation order comes from the
+        `meeting-N` ordinal rather than dict order, for the same reason the
+        engagement list sorts on its ordinal.
+        """
+
+        if engagement_id not in backend.engagements:
+            return None
+
+        def ordinal(meeting_id: str) -> tuple[int, str]:
+            _, _, tail = meeting_id.rpartition("-")
+            return (int(tail), meeting_id) if tail.isdigit() else (1 << 31, meeting_id)
+
+        summaries = []
+        for meeting_id in sorted(backend.meeting_details, key=ordinal):
+            detail = backend.meeting_details[meeting_id]
+            if detail.engagement_id != engagement_id:
+                continue
+            update = backend.meeting_updates.get(meeting_id)
+            coverage = detail.coverage_summary
+            summaries.append(
+                MeetingSummary(
+                    meeting_id=meeting_id,
+                    engagement_id=detail.engagement_id,
+                    state=detail.state,
+                    capture_mode=detail.capture_mode,
+                    scheduled_at=detail.scheduled_at,
+                    session_purpose=update.session_purpose if update else None,
+                    sections_filled=coverage.filled_sections if coverage else None,
+                    sections_total=coverage.total_sections if coverage else None,
+                )
+            )
+        return summaries
+
+    app.include_router(build_engagement_meetings_router(list_engagement_meetings))
 
     engines = [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
 
@@ -1121,6 +1238,30 @@ def _include_operational_routers(
         return run_id
 
     app.include_router(build_replay_start_router(start_run))
+
+    async def list_replay_runs() -> list[ReplayRunSummary]:
+        """Every run this service has queued, oldest first.
+
+        Joins the request (`replay_run_requests`, which recording and which
+        language) to the lifecycle row (`replay_statuses`, how far it got) —
+        two collections written by the same event, and the replay screen
+        needs both to name a run and say whether its figures are final.
+        """
+
+        return [
+            ReplayRunSummary(
+                run_id=run_id,
+                recording_id=request.recording_id,
+                language=request.language,
+                status=status.status,
+                progress=status.progress,
+                suggestion_count=status.suggestion_count,
+            )
+            for run_id, request in backend.replay_run_requests.items()
+            if (status := backend.replay_statuses.get(run_id)) is not None
+        ]
+
+    app.include_router(build_replay_run_list_router(list_replay_runs))
 
     async def get_ratings(run_id: str) -> list[RatedSuggestion]:
         """This run's ratings — raising for a run that does not exist.

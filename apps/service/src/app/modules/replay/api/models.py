@@ -64,3 +64,30 @@ class ReplayRunStatusResponse(BaseModel):
     status: ReplayRunStatus
     progress: float = Field(ge=0.0, le=1.0)
     suggestion_count: int = Field(ge=0)
+
+
+class ReplayRunSummary(BaseModel):
+    """One row of the replay run list (GET /api/replay/runs).
+
+    Carries what a chooser needs to tell two runs apart -- which recording
+    was replayed and in which language the figures were scored -- plus the
+    lifecycle fields `ReplayRunStatusResponse` reports, so picking a run out
+    of the list needs no second call to find out whether it finished.
+
+    `language` matters more here than it looks: M1 and M2 are partitioned by
+    it (architecture T13), so two runs over the same recording in different
+    languages are two different results, not one result listed twice.
+    """
+
+    run_id: str = Field(min_length=1)
+    recording_id: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+    status: ReplayRunStatus
+    progress: float = Field(ge=0.0, le=1.0)
+    suggestion_count: int = Field(ge=0)
+
+
+class ReplayRunListResponse(BaseModel):
+    """Every replay run known to the service, oldest first."""
+
+    runs: list[ReplayRunSummary]

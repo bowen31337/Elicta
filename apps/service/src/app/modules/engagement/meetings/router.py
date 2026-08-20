@@ -48,6 +48,8 @@ from .models import (
     EngagementContext,
     MeetingCreateRequest,
     MeetingCreateResponse,
+    MeetingListResponse,
+    MeetingSummary,
     MeetingUpdateRequest,
     MeetingUpdateResponse,
 )
@@ -58,6 +60,7 @@ UpdateMeeting = Callable[
 ]
 CreateMeeting = Callable[[MeetingCreateRequest], Awaitable[str]]
 GetEngagementContext = Callable[[str], Awaitable[EngagementContext | None]]
+ListMeetings = Callable[[str], Awaitable[list[MeetingSummary] | None]]
 
 
 def build_meeting_attendees_router(add_attendee: AddAttendee) -> APIRouter:
@@ -133,5 +136,36 @@ def build_meeting_router(
         if updated is None:
             raise HTTPException(status_code=404, detail="meeting not found")
         return updated
+
+    return router
+
+
+def build_engagement_meetings_router(list_meetings: ListMeetings) -> APIRouter:
+    """Build the meetings-of-an-engagement list route.
+
+    Mounted under `/api/engagements` rather than `/api/meetings` because the
+    engagement is the key: this answers "which meetings belong to this
+    engagement", the read that lets an operator find their way back to work
+    they started in an earlier session. Without it the only way to hold a
+    meeting id was to be the caller that created it.
+
+    `list_meetings` returns `None` for an engagement that does not exist,
+    which becomes a 404 — the same shape `update_meeting` uses above. An
+    engagement that exists with no meetings yet returns an empty list and a
+    200: a brand-new engagement is a normal state, not an error.
+    """
+
+    router = APIRouter(prefix="/api/engagements", tags=["meetings"])
+
+    @router.get(
+        "/{engagement_id}/meetings",
+        response_model=MeetingListResponse,
+        status_code=200,
+    )
+    async def list_engagement_meetings(engagement_id: str) -> MeetingListResponse:
+        meetings = await list_meetings(engagement_id)
+        if meetings is None:
+            raise HTTPException(status_code=404, detail="engagement not found")
+        return MeetingListResponse(engagement_id=engagement_id, meetings=meetings)
 
     return router

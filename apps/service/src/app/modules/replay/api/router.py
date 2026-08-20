@@ -18,7 +18,9 @@ from app.modules.replay.api.errors import (
     ReplayRunNotFoundError,
 )
 from app.modules.replay.api.models import (
+    ReplayRunListResponse,
     ReplayRunStatusResponse,
+    ReplayRunSummary,
     StartReplayRunRequest,
     StartReplayRunResponse,
     SuggestionRatingRequest,
@@ -28,6 +30,7 @@ from app.modules.replay.api.models import (
 SaveSuggestionRating = Callable[[str, SuggestionRatingRequest], Awaitable[str]]
 GetReplayRunStatus = Callable[[str], Awaitable[ReplayRunStatusResponse]]
 StartReplayRun = Callable[[StartReplayRunRequest], Awaitable[str]]
+ListReplayRuns = Callable[[], Awaitable[list[ReplayRunSummary]]]
 
 
 def build_replay_start_router(start_run: StartReplayRun) -> APIRouter:
@@ -83,5 +86,31 @@ def build_replay_status_router(get_status: GetReplayRunStatus) -> APIRouter:
             return await get_status(run_id)
         except ReplayRunNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return router
+
+
+def build_replay_run_list_router(list_runs: ListReplayRuns) -> APIRouter:
+    """Build the replay run list route.
+
+    `POST /api/replay/runs` handed back a run id exactly once and nothing
+    listed them afterwards, so the replay screen had no way to name a run it
+    had not just started. This is that read. It is registered on its own
+    router, mounted before the status router, so that `""` and `/{run_id}`
+    stay unambiguous paths rather than one shadowing the other.
+
+    An empty list is a 200: a service that has replayed nothing yet is a
+    normal state.
+    """
+
+    router = APIRouter(prefix="/api/replay/runs", tags=["replay-runs"])
+
+    @router.get(
+        "",
+        response_model=ReplayRunListResponse,
+        status_code=200,
+    )
+    async def list_replay_runs() -> ReplayRunListResponse:
+        return ReplayRunListResponse(runs=await list_runs())
 
     return router
