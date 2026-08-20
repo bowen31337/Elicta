@@ -55,6 +55,26 @@ export interface UseDebriefChat {
   readonly ask: (question: string) => Promise<void>;
 }
 
+/**
+ * What the service said went wrong, in preference to what its status number
+ * was.
+ *
+ * The service goes to some trouble here: an unconfigured engine answers 503
+ * naming the setting that would fix it, and a rate-limited provider answers
+ * 429 saying to wait rather than to go looking for a broken deployment.
+ * "The debrief service answered 429." throws all of that away and leaves the
+ * operator with the one thing they cannot act on.
+ */
+async function failureMessage(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === 'string' && body.detail !== '') return body.detail;
+  } catch {
+    // Not JSON, or no body at all. The status is then genuinely all we know.
+  }
+  return `The debrief service answered ${response.status}.`;
+}
+
 async function post(path: string, body?: unknown): Promise<WireSession> {
   const response = await fetch(path, {
     method: 'POST',
@@ -62,7 +82,7 @@ async function post(path: string, body?: unknown): Promise<WireSession> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`The debrief service answered ${response.status}.`);
+    throw new Error(await failureMessage(response));
   }
   return (await response.json()) as WireSession;
 }

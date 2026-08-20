@@ -197,6 +197,8 @@ from app.orchestration.engines import (
     CompilerEngines,
     DebriefEngines,
     EngineNotConfiguredError,
+    UpstreamFailure,
+    UpstreamUnavailableError,
 )
 from app.persistence import StateStore
 
@@ -561,6 +563,42 @@ def build_app(
         """
 
         return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    # Which HTTP answer each provider failure earns. The mapping lives here
+    # and nowhere lower: `orchestration/` says *what happened* in terms of the
+    # provider, and this is the only layer that gets to translate that into
+    # something an HTTP client reads.
+    _UPSTREAM_STATUS = {
+        UpstreamFailure.RATE_LIMITED: 429,
+        UpstreamFailure.UNAVAILABLE: 503,
+        UpstreamFailure.CREDENTIAL_REJECTED: 503,
+    }
+
+    @app.exception_handler(UpstreamUnavailableError)
+    async def _upstream_unavailable(
+        _request: Request, exc: UpstreamUnavailableError
+    ) -> JSONResponse:
+        """Report a provider that did not answer as what it was.
+
+        The sibling of the handler above, and for the same reason. A rate
+        limit reaching FastAPI untranslated became a bare 500 "Internal Server
+        Error", which sends the operator to look for a broken deployment when
+        the correct move was to wait a minute. Nothing here is broken and
+        nothing here is unconfigured, so it is neither a 500 nor the 503 the
+        unconfigured case earns — 429 says the one thing that decides what to
+        do next.
+
+        `Retry-After` is set only when the provider itself supplied a number.
+        """
+
+        headers = (
+            {"Retry-After": str(int(exc.retry_after))} if exc.retry_after is not None else None
+        )
+        return JSONResponse(
+            status_code=_UPSTREAM_STATUS[exc.failure],
+            content={"detail": str(exc)},
+            headers=headers,
+        )
 
     async def get_engagement_consent_model(engagement_id: str) -> ConsentModel:
         return backend.consent_models.get(engagement_id, ConsentModel.PER_MEETING)

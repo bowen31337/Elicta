@@ -8,9 +8,19 @@ not under test here; the wiring around it is.
 
 from __future__ import annotations
 
+import dataclasses
 import types
 
+import httpx
 import pytest
+from anthropic import (
+    APIConnectionError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    OverloadedError,
+    RateLimitError,
+)
 
 from app.orchestration.anthropic_engines import (
     DEFAULT_MODEL,
@@ -27,7 +37,11 @@ from app.orchestration.anthropic_engines import (
     anthropic_debrief_engines,
     configured_engines,
 )
-from app.orchestration.engines import EngineNotConfiguredError
+from app.orchestration.engines import (
+    EngineNotConfiguredError,
+    UpstreamFailure,
+    UpstreamUnavailableError,
+)
 
 
 class _StubMessages:
@@ -457,3 +471,201 @@ def test_selecting_a_mode_whose_credential_is_missing_fails_closed() -> None:
 
     with pytest.raises(EngineNotConfiguredError, match="oauth token"):
         SettingsBackedClient(store)._resolve()
+
+
+# --- Provider failures ------------------------------------------------------
+#
+# A rate limit escaping this module reaches FastAPI as a bare 500, and the
+# operator goes looking for a broken deployment when the correct move was to
+# wait. The translation is per stage, so the guard that matters is the one that
+# enumerates *every* stage: a stage added later without the decorator is the
+# way this comes back.
+
+
+class _AlwaysFailingMessages:
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+        self.batches = _AlwaysFailingBatches(error)
+
+    async def parse(self, **_kwargs):
+        raise self._error
+
+    async def create(self, **_kwargs):
+        raise self._error
+
+
+class _AlwaysFailingBatches:
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    async def create(self, **_kwargs):
+        raise self._error
+
+    async def retrieve(self, *_args, **_kwargs):
+        raise self._error
+
+    async def results(self, *_args, **_kwargs):
+        raise self._error
+
+
+class _FailingClient:
+    def __init__(self, error: BaseException) -> None:
+        self.messages = _AlwaysFailingMessages(error)
+
+
+def _rate_limited() -> RateLimitError:
+    return RateLimitError(
+        "rate limited",
+        response=httpx.Response(
+            429,
+            headers={"retry-after": "12"},
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+        body=None,
+    )
+
+
+def _debrief_calls(engines):
+    """Every debrief stage that is a model call, ready to await.
+
+    `diarize` is excluded deliberately: it is an audio-vendor seam, not a
+    Claude call, and this module neither makes nor wraps it.
+    """
+
+    utterance = types.SimpleNamespace(
+        utterance_id="u1",
+        text="x",
+        cleaned_text="x",
+        speaker="A",
+        speaker_tag="A",
+        section_key="performance",
+    )
+    return {
+        "clean": lambda: engines.clean("session-1", [utterance]),
+        "translate": lambda: engines.translate("session-1", [utterance], "en"),
+        "classify": lambda: engines.classify("session-1", [utterance], []),
+        "run_chain": lambda: engines.run_chain("session-1", [utterance]),
+        "converse": lambda: engines.converse([{"role": "user", "content": "hello"}]),
+    }
+
+
+def _compiler_calls(engines):
+    pack = types.SimpleNamespace(documents=[], sector="logistics", project_type="brownfield")
+    return {
+        "extract": lambda: engines.extract("eng-1", []),
+        "structure": lambda: engines.structure("eng-1", []),
+        "submit_batch": lambda: engines.submit_batch("eng-1", pack),
+        "fetch_batch": lambda: engines.fetch_batch("batch-1"),
+    }
+
+
+# `diarize` is an audio-vendor seam and `name` is a label, so neither is a
+# model call this module makes.
+_NOT_MODEL_CALLS = {"name", "diarize"}
+
+
+def test_every_model_call_on_the_engines_is_probed_below() -> None:
+    """The list of stages is hand-written, so this is what keeps it honest.
+
+    A stage added to either dataclass without a probe here would otherwise be
+    a stage nobody ever checked translates its provider failures — which is
+    exactly how a rate limit gets back out as a 500. Adding one fails this
+    test until it is probed, and probing it fails until it is decorated.
+    """
+
+    for engines, probes in (
+        (anthropic_debrief_engines(_FailingClient(_rate_limited())), _debrief_calls),
+        (anthropic_compiler_engines(_FailingClient(_rate_limited())), _compiler_calls),
+    ):
+        declared = {f.name for f in dataclasses.fields(engines)} - _NOT_MODEL_CALLS
+        assert declared == set(probes(engines)), (
+            f"{type(engines).__name__} has stages with no provider-failure probe: "
+            f"{sorted(declared - set(probes(engines)))}"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["clean", "translate", "classify", "run_chain", "converse"])
+async def test_every_debrief_stage_reports_a_rate_limit_as_one(stage: str) -> None:
+    engines = anthropic_debrief_engines(_FailingClient(_rate_limited()))
+
+    with pytest.raises(UpstreamUnavailableError) as caught:
+        await _debrief_calls(engines)[stage]()
+
+    assert caught.value.failure is UpstreamFailure.RATE_LIMITED
+    assert caught.value.stage, "the failure does not say which stage hit the limit"
+    assert caught.value.retry_after == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["extract", "structure", "submit_batch", "fetch_batch"])
+async def test_every_compiler_stage_reports_a_rate_limit_as_one(stage: str) -> None:
+    engines = anthropic_compiler_engines(_FailingClient(_rate_limited()))
+
+    with pytest.raises(UpstreamUnavailableError) as caught:
+        await _compiler_calls(engines)[stage]()
+
+    assert caught.value.failure is UpstreamFailure.RATE_LIMITED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (APITimeoutError(request=httpx.Request("POST", "https://x")), UpstreamFailure.UNAVAILABLE),
+        (
+            APIConnectionError(request=httpx.Request("POST", "https://x")),
+            UpstreamFailure.UNAVAILABLE,
+        ),
+        (
+            OverloadedError(
+                "overloaded",
+                response=httpx.Response(529, request=httpx.Request("POST", "https://x")),
+                body=None,
+            ),
+            UpstreamFailure.UNAVAILABLE,
+        ),
+        (
+            AuthenticationError(
+                "bad key",
+                response=httpx.Response(401, request=httpx.Request("POST", "https://x")),
+                body=None,
+            ),
+            UpstreamFailure.CREDENTIAL_REJECTED,
+        ),
+    ],
+    ids=["timeout", "connection", "overloaded", "bad-credential"],
+)
+async def test_the_other_provider_failures_are_told_apart(
+    error: BaseException, failure: UpstreamFailure
+) -> None:
+    engines = anthropic_debrief_engines(_FailingClient(error))
+
+    with pytest.raises(UpstreamUnavailableError) as caught:
+        await engines.converse([{"role": "user", "content": "hello"}])
+
+    assert caught.value.failure is failure
+
+
+@pytest.mark.asyncio
+async def test_a_request_the_provider_rejects_as_malformed_stays_ours() -> None:
+    """A 400 means this codebase sent something wrong. That is a bug, and a bug
+    dressed as a provider outage is a bug nobody investigates."""
+
+    error = BadRequestError(
+        "max_tokens exceeds model maximum",
+        response=httpx.Response(400, request=httpx.Request("POST", "https://x")),
+        body=None,
+    )
+    engines = anthropic_debrief_engines(_FailingClient(error))
+
+    with pytest.raises(BadRequestError):
+        await engines.converse([{"role": "user", "content": "hello"}])
+
+
+@pytest.mark.asyncio
+async def test_a_plain_bug_in_a_stage_is_not_dressed_up_as_a_provider_failure() -> None:
+    engines = anthropic_debrief_engines(_FailingClient(ZeroDivisionError("division by zero")))
+
+    with pytest.raises(ZeroDivisionError):
+        await engines.converse([{"role": "user", "content": "hello"}])

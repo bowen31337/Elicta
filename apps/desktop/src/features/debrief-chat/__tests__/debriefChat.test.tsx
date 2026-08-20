@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DebriefChatScreen } from '../route';
-import { readableText } from '../useDebriefChat';
+import { readableText, useDebriefChat } from '../useDebriefChat';
 
 /**
  * The conversational half of debrief mode.
@@ -99,6 +99,70 @@ describe('when the service is unreachable', () => {
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('The debrief service answered 503.');
     expect(alert).toHaveTextContent('Nothing was lost');
+  });
+});
+
+/**
+ * The service is careful about this: an unconfigured engine answers 503
+ * naming the setting that would fix it, and a rate-limited provider answers
+ * 429 saying to wait rather than to go hunting for a broken deployment. A
+ * client that renders the status number instead discards the whole of it.
+ */
+describe('when the service refuses', () => {
+  function Probe() {
+    const chat = useDebriefChat('meeting-1');
+    return (
+      <div>
+        <span data-testid="error">{chat.error ?? ''}</span>
+        <button type="button" onClick={() => void chat.start()}>
+          open
+        </button>
+      </div>
+    );
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows what the service said, not what number it said it with', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          detail:
+            'the debrief conversation (FR-7.3): the model provider is rate limiting this ' +
+            'deployment. The same request should succeed shortly — this is a limit, not a fault.',
+        }),
+      })),
+    );
+    render(<Probe />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'open' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent('rate limiting this deployment'),
+    );
+  });
+
+  it('falls back to the status when the refusal carries no explanation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON');
+        },
+      })),
+    );
+    render(<Probe />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'open' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('error')).toHaveTextContent('The debrief service answered 502.'),
+    );
   });
 });
 

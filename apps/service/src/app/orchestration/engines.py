@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from app.core.agent_permissions import (
@@ -50,6 +51,73 @@ class EngineNotConfiguredError(RuntimeError):
             "(architecture ADR-012, §3.11)."
         )
         self.stage = stage
+
+
+class UpstreamFailure(str, Enum):
+    """Why the provider did not answer — the part that decides what to do next.
+
+    The distinction is not academic. An operator who reads "rate limited"
+    waits a minute; one who reads "internal server error" starts looking for a
+    broken deployment. Collapsing the two, which is what an untranslated
+    vendor exception does, costs exactly the information that chooses between
+    them.
+    """
+
+    RATE_LIMITED = "rate_limited"
+    """The provider is throttling this deployment. Wait; nothing is wrong."""
+
+    UNAVAILABLE = "unavailable"
+    """The provider timed out, could not be reached, or failed its own way."""
+
+    CREDENTIAL_REJECTED = "credential_rejected"
+    """The provider was reached and refused the configured credential."""
+
+
+class UpstreamUnavailableError(RuntimeError):
+    """A stage reached its provider and did not get an answer.
+
+    The sibling of `EngineNotConfiguredError`, and deliberately a separate
+    type: that one means *nothing is configured*, this one means something is
+    and the provider said no. Both are honest failures the operator can act
+    on, and neither is a bug in this codebase — which is why neither may
+    surface as a bare 500.
+
+    `failure` is a vendor-neutral reason rather than an HTTP status, because
+    this module sits under the API and must not decide what the API answers.
+    `composition.py` makes that call.
+    """
+
+    def __init__(
+        self,
+        stage: str,
+        failure: UpstreamFailure,
+        detail: str,
+        *,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(f"{stage}: {detail}")
+        self.stage = stage
+        self.failure = failure
+        self.detail = detail
+        # Only ever what the provider itself said to wait. Guessing a number
+        # here would be worse than saying nothing: a client that trusts it
+        # would retry into the same limit.
+        self.retry_after = retry_after
+
+
+# The stage names both halves use. Shared constants rather than two sets of
+# string literals, so the name in an unconfigured refusal and the name in a
+# rate-limit refusal cannot drift apart.
+STAGE_DIARIZE = "diarization (architecture §7 step 2)"
+STAGE_CLEAN = "transcript cleanup (§7 step 4)"
+STAGE_TRANSLATE = "transcript translation (§7 step 4)"
+STAGE_CLASSIFY = "section classification (§7 step 5)"
+STAGE_RUN_CHAIN = "BMAD analyst chain (§7 step 6)"
+STAGE_CONVERSE = "the debrief conversation (FR-7.3)"
+STAGE_EXTRACT = "document claim extraction (§3.10)"
+STAGE_STRUCTURE = "claim structuring (§3.10)"
+STAGE_SUBMIT_BATCH = "BMAD analyst batch submission (§3.10)"
+STAGE_FETCH_BATCH = "BMAD analyst batch collection (§3.10)"
 
 
 def inference_is_configured() -> bool:
@@ -99,12 +167,12 @@ class DebriefEngines:
     def unconfigured(cls) -> DebriefEngines:
         return cls(
             name=UNCONFIGURED,
-            diarize=_unconfigured("diarization (architecture §7 step 2)"),
-            clean=_unconfigured("transcript cleanup (§7 step 4)"),
-            translate=_unconfigured("transcript translation (§7 step 4)"),
-            classify=_unconfigured("section classification (§7 step 5)"),
-            run_chain=_unconfigured("BMAD analyst chain (§7 step 6)"),
-            converse=_unconfigured("the debrief conversation (FR-7.3)"),
+            diarize=_unconfigured(STAGE_DIARIZE),
+            clean=_unconfigured(STAGE_CLEAN),
+            translate=_unconfigured(STAGE_TRANSLATE),
+            classify=_unconfigured(STAGE_CLASSIFY),
+            run_chain=_unconfigured(STAGE_RUN_CHAIN),
+            converse=_unconfigured(STAGE_CONVERSE),
         )
 
     @property
@@ -134,10 +202,10 @@ class CompilerEngines:
     def unconfigured(cls) -> CompilerEngines:
         return cls(
             name=UNCONFIGURED,
-            extract=_unconfigured("document claim extraction (§3.10)"),
-            structure=_unconfigured("claim structuring (§3.10)"),
-            submit_batch=_unconfigured("BMAD analyst batch submission (§3.10)"),
-            fetch_batch=_unconfigured("BMAD analyst batch collection (§3.10)"),
+            extract=_unconfigured(STAGE_EXTRACT),
+            structure=_unconfigured(STAGE_STRUCTURE),
+            submit_batch=_unconfigured(STAGE_SUBMIT_BATCH),
+            fetch_batch=_unconfigured(STAGE_FETCH_BATCH),
         )
 
     @property

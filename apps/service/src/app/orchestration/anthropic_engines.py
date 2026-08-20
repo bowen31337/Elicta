@@ -28,11 +28,23 @@ supplied separately by whoever configures capture.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from anthropic import (
+    AnthropicError,
+    APIConnectionError,
+    APITimeoutError,
+    AsyncAnthropic,
+    AuthenticationError,
+    InternalServerError,
+    OverloadedError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from pydantic import BaseModel, Field
 
 from app.modules.compiler.agent.models import (
@@ -56,7 +68,22 @@ from app.modules.debrief.pipeline.models import (
     TranslationOutcome,
 )
 
-from .engines import CompilerEngines, DebriefEngines, EngineNotConfiguredError
+from .engines import (
+    STAGE_CLASSIFY,
+    STAGE_CLEAN,
+    STAGE_CONVERSE,
+    STAGE_EXTRACT,
+    STAGE_FETCH_BATCH,
+    STAGE_RUN_CHAIN,
+    STAGE_STRUCTURE,
+    STAGE_SUBMIT_BATCH,
+    STAGE_TRANSLATE,
+    CompilerEngines,
+    DebriefEngines,
+    EngineNotConfiguredError,
+    UpstreamFailure,
+    UpstreamUnavailableError,
+)
 
 # Best available model: the compiler and debrief run offline with no latency
 # constraint, and §3.10 is explicit that this is "where model spend goes and
@@ -293,6 +320,102 @@ def _numbered(lines: list[str]) -> str:
     return "\n".join(f"{index}. {line}" for index, line in enumerate(lines, start=1))
 
 
+def _retry_after(exc: Any) -> float | None:
+    """How long the provider asked us to wait, if it said.
+
+    Only what it actually sent. A guessed number is worse than none: a client
+    that trusts it retries straight back into the same limit.
+    """
+
+    header = getattr(getattr(exc, "response", None), "headers", None)
+    if header is None:
+        return None
+    try:
+        return float(header.get("retry-after"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableError | None:
+    """A vendor exception as a neutral one, or `None` when the fault is ours.
+
+    `None` is the load-bearing half. A 400 means this codebase sent the
+    provider something it could not accept — a bug here, not a condition out
+    there — and a bug that answers 503 is a bug nobody investigates. Only the
+    conditions an operator can actually respond to are translated; everything
+    else is left to become the 500 it is.
+    """
+
+    if isinstance(exc, RateLimitError):
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.RATE_LIMITED,
+            "the model provider is rate limiting this deployment. "
+            "The same request should succeed shortly — this is a limit, not a fault.",
+            retry_after=_retry_after(exc),
+        )
+    # Before `APIConnectionError`, which it subclasses.
+    if isinstance(exc, APITimeoutError):
+        return UpstreamUnavailableError(
+            stage, UpstreamFailure.UNAVAILABLE, "the model provider timed out."
+        )
+    if isinstance(exc, APIConnectionError):
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.UNAVAILABLE,
+            "the model provider could not be reached. Check the network path to it.",
+        )
+    if isinstance(exc, OverloadedError):
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.UNAVAILABLE,
+            "the model provider is overloaded and asked us to try again.",
+            retry_after=_retry_after(exc),
+        )
+    if isinstance(exc, InternalServerError):
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.UNAVAILABLE,
+            f"the model provider failed with a server error ({exc.status_code}).",
+        )
+    if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.CREDENTIAL_REJECTED,
+            "the model provider rejected the configured credential. "
+            "Re-enter it on the Settings screen.",
+        )
+    return None
+
+
+def _upstream_aware(stage: str) -> Callable[..., Any]:
+    """Translate this stage's vendor failures into the neutral ones.
+
+    Here rather than in the composition root, because this is the only module
+    that knows which SDK is underneath. Everything above it sees
+    `UpstreamUnavailableError` and can answer without importing a vendor.
+
+    The catch is `AnthropicError`, the SDK's own base class, and not
+    `Exception`: a stage that divides by zero must still crash like a stage
+    that divides by zero.
+    """
+
+    def decorate(call: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+        @functools.wraps(call)
+        async def wrapped(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await call(*args, **kwargs)
+            except AnthropicError as exc:
+                failure = _upstream_failure(stage, exc)
+                if failure is None:
+                    raise
+                raise failure from exc
+
+        return wrapped
+
+    return decorate
+
+
 def anthropic_debrief_engines(
     client: AsyncAnthropic | None = None,
     *,
@@ -317,6 +440,7 @@ def anthropic_debrief_engines(
         )
         return response.parsed_output
 
+    @_upstream_aware(STAGE_CLEAN)
     async def clean(session_id: str, utterances: list[Any]) -> list[str]:
         parsed = await _parse(
             _CLEANING_SYSTEM,
@@ -325,6 +449,7 @@ def anthropic_debrief_engines(
         )
         return _same_length(parsed.cleaned_text, utterances, "cleaning")
 
+    @_upstream_aware(STAGE_TRANSLATE)
     async def translate(
         session_id: str, utterances: list[Any], document_language: str
     ) -> list[TranslationOutcome]:
@@ -343,6 +468,7 @@ def anthropic_debrief_engines(
             for line in lines
         ]
 
+    @_upstream_aware(STAGE_CLASSIFY)
     async def classify(
         session_id: str, utterances: list[Any], sections: list[Any]
     ) -> list[str]:
@@ -355,6 +481,7 @@ def anthropic_debrief_engines(
         )
         return _same_length(parsed.section_keys, utterances, "classification")
 
+    @_upstream_aware(STAGE_RUN_CHAIN)
     async def run_chain(session_id: str, utterances: list[Any]) -> BmadAnalystChainOutput:
         transcript = "\n".join(
             f"[{u.utterance_id}] ({u.speaker_tag}, {u.section_key}) {u.cleaned_text}"
@@ -375,6 +502,7 @@ def anthropic_debrief_engines(
             follow_up_email=BmadFollowUpEmailDraft(**parsed.follow_up_email.model_dump()),
         )
 
+    @_upstream_aware(STAGE_CONVERSE)
     async def converse(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """One turn of the FR-7.3 debrief conversation.
 
@@ -442,6 +570,7 @@ def anthropic_compiler_engines(
 
     client = client or AsyncAnthropic()
 
+    @_upstream_aware(STAGE_EXTRACT)
     async def extract(engagement_id: str, documents: list[Any]) -> DocumentExtractionOutput:
         corpus = "\n\n".join(
             f"<document id=\"{d.document_id}\">\n{d.text}\n</document>" for d in documents
@@ -468,6 +597,7 @@ def anthropic_compiler_engines(
             ]
         )
 
+    @_upstream_aware(STAGE_STRUCTURE)
     async def structure(engagement_id: str, claims: list[Any]) -> ClaimStructuringOutput:
         claim_list = "\n".join(f"[{c.id}] {c.text}" for c in claims)
         response = await client.messages.parse(
@@ -484,6 +614,7 @@ def anthropic_compiler_engines(
             ]
         )
 
+    @_upstream_aware(STAGE_SUBMIT_BATCH)
     async def submit_batch(engagement_id: str, context_pack: Any) -> str:
         documents = "\n\n".join(
             f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
@@ -523,6 +654,7 @@ def anthropic_compiler_engines(
         )
         return batch.id
 
+    @_upstream_aware(STAGE_FETCH_BATCH)
     async def fetch_batch(batch_job_id: str) -> list[AnalystBatchResult]:
         """Collect a submitted analyst batch, if it has finished.
 
