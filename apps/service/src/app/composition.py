@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -469,6 +469,24 @@ def _document_name_from_url(url: str) -> str:
     return segment or url
 
 
+def _creation_order(entity_id: str) -> tuple[int, str]:
+    """Sort key putting `<prefix>-N` ids in minting order, unnumbered ones last."""
+
+    _, _, tail = entity_id.rpartition("-")
+    return (int(tail), entity_id) if tail.isdigit() else (1 << 31, entity_id)
+
+
+def _highest_ordinal(ids: Iterable[str], prefix: str) -> int:
+    """The largest `<prefix>N` suffix among `ids`, or 0 if there is none."""
+
+    suffixes = [
+        int(candidate.removeprefix(prefix))
+        for candidate in ids
+        if candidate.startswith(prefix) and candidate.removeprefix(prefix).isdigit()
+    ]
+    return max(suffixes, default=0)
+
+
 def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     """Swap `backend`'s engagement-continuity fields for durable ones.
 
@@ -496,6 +514,12 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # stays in memory. Seeding it from the meetings the store just loaded is
     # what stops a restart making every previously created meeting 404.
     backend.known_meetings.update(backend.meeting_details)
+    # The same reasoning `highest_engagement_ordinal` gives for engagements,
+    # applied to meetings: `meeting_details` is durable and the counter was
+    # not, so a restart minted `meeting-1` again and it overwrote whichever
+    # real meeting already held that id. Derived from the rows themselves so
+    # it cannot drift out of step with them.
+    backend.next_meeting_id = _highest_ordinal(backend.meeting_details, "meeting-")
     backend.requirements_states = store.requirements_state(
         lambda row: RequirementsState(**row)
     )
@@ -680,18 +704,11 @@ def build_app(
         `engagements` in arbitrary order still pages deterministically.
         """
 
-        ordered = [
-            engagement_id
-            for _, engagement_id in sorted(backend.engagement_ids.items())
-            if engagement_id in backend.engagements
-        ]
-        # A durable store can hold engagements whose ordinal was never
-        # recorded; they belong in the list, after the ones that were.
-        ordered += [
-            engagement_id
-            for engagement_id in backend.engagements
-            if engagement_id not in ordered
-        ]
+        # Ordered by the id's own ordinal rather than by `engagement_ids` or
+        # by dict insertion. `engagement_ids` only ever holds what *this*
+        # process minted, so after a restart the engagement created a minute
+        # ago sorted ahead of the six that came before it.
+        ordered = sorted(backend.engagements, key=_creation_order)
         total = len(ordered)
         window = ordered[(page - 1) * page_size : page * page_size]
         items = []
@@ -820,12 +837,8 @@ def build_app(
         if engagement_id not in backend.engagements:
             return None
 
-        def ordinal(meeting_id: str) -> tuple[int, str]:
-            _, _, tail = meeting_id.rpartition("-")
-            return (int(tail), meeting_id) if tail.isdigit() else (1 << 31, meeting_id)
-
         summaries = []
-        for meeting_id in sorted(backend.meeting_details, key=ordinal):
+        for meeting_id in sorted(backend.meeting_details, key=_creation_order):
             detail = backend.meeting_details[meeting_id]
             if detail.engagement_id != engagement_id:
                 continue

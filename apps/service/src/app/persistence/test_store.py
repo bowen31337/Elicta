@@ -177,3 +177,78 @@ def test_only_the_continuity_fields_are_made_durable() -> None:
     # a second copy of something derived.
     assert isinstance(backend.transcript_cleanings, dict)
     assert not isinstance(backend.transcript_cleanings, DurableMapping)
+
+
+def _engagement(client: TestClient, organisation: str) -> str:
+    created = client.post(
+        "/api/engagements",
+        json={
+            "client_organisation": organisation,
+            "sector": "Freight and warehousing",
+            "commercial_context": "Fleet visibility programme",
+        },
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["engagement_id"]
+
+
+def test_a_meeting_created_after_a_restart_does_not_overwrite_an_earlier_one(
+    database: str,
+) -> None:
+    """The meeting id counter has to be derived from the rows, not the process.
+
+    `meeting_details` is durable and `next_meeting_id` was not, so a restarted
+    service minted `meeting-1` again and it landed on top of whichever real
+    meeting already held that id — the exact collision
+    `highest_engagement_ordinal`'s docstring describes for engagements, with no
+    equivalent guard for meetings.
+    """
+
+    with client_for(database) as first:
+        engagement_id = _engagement(first, "Northwind Logistics")
+        created = first.post(
+            "/api/meetings",
+            json={"engagement_id": engagement_id, "capture_mode": "live"},
+        )
+        assert created.status_code == 201, created.text
+        original = created.json()["meeting_id"]
+
+    with client_for(database) as second:
+        second_meeting = second.post(
+            "/api/meetings",
+            json={"engagement_id": engagement_id, "capture_mode": "record"},
+        )
+        assert second_meeting.status_code == 201, second_meeting.text
+        assert second_meeting.json()["meeting_id"] != original
+
+        # And the first one is still itself, not the second wearing its id.
+        response = second.get(f"/api/meetings/{original}")
+        assert response.status_code == 200, response.text
+        assert response.json()["capture_mode"] == "live"
+
+        listed = second.get(f"/api/engagements/{engagement_id}/meetings")
+        assert listed.status_code == 200, listed.text
+        assert [row["meeting_id"] for row in listed.json()["meetings"]] == [
+            original,
+            second_meeting.json()["meeting_id"],
+        ]
+
+
+def test_the_engagement_list_keeps_creation_order_across_a_restart(database: str) -> None:
+    """A restart must not reorder the list an operator navigates by.
+
+    `engagement_ids` only holds what the running process minted, so ordering
+    on it put the engagement created a minute ago ahead of every engagement
+    that came before it.
+    """
+
+    with client_for(database) as first:
+        older = _engagement(first, "Northwind Logistics")
+
+    with client_for(database) as second:
+        newer = _engagement(second, "Harbourline Ferries")
+
+        response = second.get("/api/engagements")
+
+        assert response.status_code == 200, response.text
+        assert [row["engagement_id"] for row in response.json()["items"]] == [older, newer]
