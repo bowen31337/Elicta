@@ -47,6 +47,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/bank", "get"),
     ("/api/meetings/{meeting_id}/consent-confirmation", "post"),
     ("/api/meetings/{meeting_id}/consent-gate", "get"),
+    ("/api/meetings/{meeting_id}/consent-record", "get"),
     ("/api/meetings/{meeting_id}/debrief/message", "post"),
     ("/api/meetings/{meeting_id}/debrief/start", "post"),
     ("/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition", "post"),

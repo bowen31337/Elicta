@@ -547,8 +547,27 @@ def build_app(
         backend.consent_records.append(record)
         backend.confirmed_meetings.add(record.meeting_id)
 
+    async def get_consent_record(meeting_id: str) -> ConsentRecord | None:
+        """The most recent confirmation for this meeting, if there is one.
+
+        Most recent rather than first: a re-confirmation after an attendee
+        joins late is the one that describes the meeting as it was actually
+        recorded. The whole list stays in `consent_records` as the audit
+        trail; this is only what the screen shows.
+        """
+
+        for record in reversed(backend.consent_records):
+            if record.meeting_id == meeting_id:
+                return record
+        return None
+
     app.include_router(
-        build_consent_router(get_engagement_consent_model, is_confirmed_for_meeting, save_consent_record)
+        build_consent_router(
+            get_engagement_consent_model,
+            is_confirmed_for_meeting,
+            save_consent_record,
+            get_consent_record,
+        )
     )
 
     class _StubEgressLogQuery:

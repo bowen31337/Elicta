@@ -92,3 +92,33 @@ def test_consent_for_one_meeting_does_not_open_the_gate_for_another(client: Test
 
     assert client.post(f"/api/meetings/{first}/session/start").status_code == 200
     assert client.post(f"/api/meetings/{second}/session/start").status_code == 403
+
+
+def test_a_confirmation_names_who_gave_it_when_read_back(client: TestClient) -> None:
+    """Consent was write-only in the one way an audit cares about.
+
+    The gate could say capture may begin; nothing could say on whose word.
+    The confirmation was written to a durable record and served back nowhere,
+    so the consent screen could show "on record" with no name against it.
+    """
+
+    _, meeting_id = _create_meeting(client)
+    confirmed = client.post(
+        f"/api/meetings/{meeting_id}/consent-confirmation",
+        json={"confirmed_by": "Priya Raman"},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+
+    response = client.get(f"/api/meetings/{meeting_id}/consent-record")
+
+    assert response.status_code == 200, response.text
+    record = response.json()
+    assert record["meeting_id"] == meeting_id
+    assert record["confirmed_by"] == "Priya Raman"
+    assert record["confirmed_at"]
+
+
+def test_an_unconfirmed_meeting_has_no_consent_record(client: TestClient) -> None:
+    _, meeting_id = _create_meeting(client)
+
+    assert client.get(f"/api/meetings/{meeting_id}/consent-record").status_code == 404

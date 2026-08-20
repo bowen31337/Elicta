@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ScreenState } from '../../ui/ScreenState';
+import { useConsent } from './useConsent';
 
 /**
  * Journey 2 — consent, then capture.
@@ -122,14 +124,36 @@ export function ConsentScreen({
   );
 }
 
+/**
+ * The mounted screen, over the service.
+ *
+ * The placeholder it replaces was worse here than anywhere else: it hardcoded
+ * `confirmedBy={null}`, so a meeting with consent properly on record still
+ * rendered "Capture cannot start until someone confirms this on the record."
+ * A gate that lies in the safe direction still trains the operator to ignore
+ * it.
+ */
 export default function ConsentRoute() {
+  const consent = useConsent();
+
+  if (consent.status !== 'ready' && consent.status !== 'missing') {
+    return (
+      <ScreenState
+        eyebrow="Before recording"
+        status={consent.status}
+        error={consent.error}
+        idleHint="No meeting exists yet. Create one before recording anything."
+      />
+    );
+  }
+
   return (
     <ConsentScreen
-      meetingTitle="—"
-      consentModel="per meeting"
-      confirmedBy={null}
-      confirmedAt={null}
-      captureMode="Line-in"
+      meetingTitle={consent.meetingTitle}
+      consentModel={consent.consentModel}
+      confirmedBy={consent.confirmedBy}
+      confirmedAt={consent.confirmedAt}
+      captureMode={consent.captureMode}
     />
   );
 }
