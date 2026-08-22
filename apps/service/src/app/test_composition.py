@@ -15,12 +15,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.composition import (
+    DEFAULT_CONSENT_MODEL,
     Backend,
     TranscriptionStatus,
     _asr_models,
+    _consent_model_for,
     _install_audio_lifecycle,
     build_app,
 )
+from app.core.consent.models import ConsentModel
 from app.modules.debrief.pipeline.models import DiarizationStatus, SessionDiarization
 
 RecordPathTranscript = _asr_models.RecordPathTranscript
@@ -375,3 +378,33 @@ def test_the_compile_endpoint_drives_the_compiler_chain() -> None:
     # — but it *ran*, which is what distinguishes wired from unwired.
     assert run.stopped_at == "extraction"
     assert engagement_id in backend.extraction_passes, "no extraction record persisted"
+
+
+def test_an_unconfigured_engagement_takes_the_stage_default() -> None:
+    """What an engagement nobody has configured is treated as (PRD D3).
+
+    This is a deliberate stage decision, not the stricter reading of D3:
+    `DEFAULT_CONSENT_MODEL` is `ENGAGEMENT_LEVEL`, so a meeting does not stop
+    to ask for a per-meeting confirmation. It is asserted here rather than
+    left implicit because it is the one default that decides whether the
+    consent gate engages at all, and flipping it back is a one-line change
+    that this test should make loudly visible.
+
+    `_consent_model_for` is the single definition because two scopes need it
+    -- the consent router in `build_app`, and capture admission in
+    `_include_operational_routers`. Writing it twice is how the two halves of
+    the decision drifted apart before.
+    """
+
+    backend = Backend()
+
+    assert _consent_model_for(backend, "eng-never-configured") is DEFAULT_CONSENT_MODEL
+    assert _consent_model_for(backend, None) is DEFAULT_CONSENT_MODEL
+    assert DEFAULT_CONSENT_MODEL is ConsentModel.ENGAGEMENT_LEVEL
+
+
+def test_consent_model_is_read_back_when_the_engagement_has_one() -> None:
+    backend = Backend()
+    backend.consent_models["eng-1"] = ConsentModel.ENGAGEMENT_LEVEL
+
+    assert _consent_model_for(backend, "eng-1") is ConsentModel.ENGAGEMENT_LEVEL

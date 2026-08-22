@@ -15,7 +15,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app.main import create_app, default_settings_database
 
 
 def test_the_app_actually_serves_its_documented_api() -> None:
@@ -97,3 +97,72 @@ def test_startup_logs_the_prefix_of_every_module_loader_router(
         "app.modules.example" in record.message and "/api/example" in record.message
         for record in caplog.records
     )
+
+
+def test_something_actually_collects_the_analyst_batches() -> None:
+    """The bank fills only if a poller is *running*, not merely written.
+
+    The compile submits a batch and collects once, microseconds later, when no
+    batch has finished. `BankCollector` is what goes back — and a collector
+    nobody starts is the same defect as the missing collection it replaced:
+    `POST /bank/compile` answers 202, every stage succeeds, and the bank stays
+    empty for ever. So this asserts the task exists while the app is up, and
+    that it is gone once the app is down.
+    """
+
+    import asyncio
+
+    app = create_app()
+    running: list[str] = []
+
+    async def enter_and_look() -> None:
+        async with app.router.lifespan_context(app):
+            running.extend(
+                task.get_name()
+                for task in asyncio.all_tasks()
+                if task.get_name() == "bank-collector"
+            )
+
+    asyncio.run(enter_and_look())
+
+    assert running == ["bank-collector"], (
+        "nothing sweeps for finished analyst batches, so a compiled bank never "
+        "reaches the screen"
+    )
+
+
+def test_the_collector_is_stopped_when_the_app_shuts_down() -> None:
+    """A loop that outlives its app keeps polling a provider after shutdown."""
+
+    import asyncio
+
+    app = create_app()
+    survivors: list[asyncio.Task] = []
+
+    async def enter_and_leave() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+        survivors.extend(
+            task for task in asyncio.all_tasks() if task.get_name() == "bank-collector"
+        )
+
+    asyncio.run(enter_and_leave())
+
+    assert survivors == []
+
+
+def test_the_settings_database_location_can_be_overridden(monkeypatch, tmp_path) -> None:
+    # The headless deployment route: a service started from a different folder
+    # must not silently come up with an empty configuration.
+    monkeypatch.setenv("ELICTA_SETTINGS_DB", str(tmp_path / "elsewhere" / "settings.db"))
+
+    assert default_settings_database() == tmp_path / "elsewhere" / "settings.db"
+
+
+def test_the_settings_database_otherwise_lives_in_the_user_data_directory(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.delenv("ELICTA_SETTINGS_DB", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+
+    assert default_settings_database() == tmp_path / "elicta" / "settings.db"

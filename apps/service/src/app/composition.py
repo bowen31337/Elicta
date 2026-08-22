@@ -19,15 +19,19 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial, wraps
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.consent.gate import evaluate_consent_gate
 from app.core.consent.models import ConsentModel, ConsentRecord
 from app.core.consent.router import build_consent_router
 from app.core.egress.audit import audited
@@ -40,6 +44,7 @@ from app.modules.compiler.api.models import (
     BankCandidate as ApiBankCandidate,
 )
 from app.modules.compiler.api.models import (
+    BankCompileOutcome,
     CandidatePatchRequest,
 )
 from app.modules.compiler.api.router import (
@@ -82,6 +87,7 @@ from app.modules.debrief.pipeline.models import (
     AudioDestructionEvent,
     BmadArtifactSet,
     CitationRow,
+    DebriefCompletion,
     SessionBmadAnalystChain,
     SessionDiarization,
 )
@@ -92,6 +98,7 @@ from app.modules.debrief.pipeline.retention import (
 from app.modules.debrief.pipeline.router import (
     build_audio_destruction_router,
     build_citation_row_router,
+    build_debrief_completion_router,
 )
 from app.modules.debrief.session.models import (
     DebriefConversationSession,
@@ -127,9 +134,11 @@ from app.modules.engagement.documents.models import (
     ReferenceDocument,
 )
 from app.modules.engagement.documents.router import (
+    build_document_delete_router,
     build_document_status_router,
     build_engagement_documents_router,
     build_reference_document_link_router,
+    build_vocabulary_delete_router,
 )
 from app.modules.engagement.index.extraction import extract_text
 from app.modules.engagement.index.service import index_document
@@ -160,6 +169,7 @@ from app.modules.engagement.state.router import build_engagement_state_router
 from app.modules.engagement.vocabulary.language import (
     ClientContext,
     derive_and_persist_expected_languages,
+    derive_expected_languages,
 )
 from app.modules.engagement.vocabulary.router import build_vocabulary_router
 from app.modules.engagement.vocabulary.schemas import (
@@ -197,19 +207,24 @@ from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.orchestration.anthropic_engines import probe_anthropic_credential
+from app.orchestration.bank_collector import BankCollector
 from app.orchestration.compiler import (
+    DIRECT_ANALYST_STAGE,
     CompilerSinks,
     collect_engagement_compile,
     submit_engagement_compile,
 )
 from app.orchestration.debrief import DebriefSinks, run_debrief_pipeline
 from app.orchestration.engines import (
+    UNCONFIGURED_MARKER,
     CompilerEngines,
     DebriefEngines,
     EngineNotConfiguredError,
     UpstreamFailure,
     UpstreamUnavailableError,
+    upstream_failure_in,
 )
+from app.orchestration.reachability import LaneReachability
 from app.persistence import StateStore
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
@@ -218,6 +233,7 @@ _extraction_models = importlib.import_module("app.modules.compiler.citations.mod
 _agent_models = importlib.import_module("app.modules.compiler.agent.models")
 _asr_models = importlib.import_module("app.modules.asr-record.models")
 _asr_router = importlib.import_module("app.modules.asr-record.router")
+_asr_citation = importlib.import_module("app.modules.asr-record.citation")
 
 RecordPathTranscript = _asr_models.RecordPathTranscript
 RecordPathTranscriptionJob = _asr_models.RecordPathTranscriptionJob
@@ -266,6 +282,11 @@ class Backend:
     # Which processing region each engagement is pinned to (NFR-2.2). Recorded
     # on every audit row, so a call made with no pin is visible as one.
     egress_regions: EngagementRegionRegistry = field(default_factory=EngagementRegionRegistry)
+    # What the last real call across an inference seam proved about the
+    # provider (NFR-4.1). Runtime state rather than a durable record: it
+    # describes the connection this process has now, and a stale answer
+    # restored from disk would be worse than no answer.
+    lane_reachability: LaneReachability = field(default_factory=LaneReachability)
 
     engagement_ids: dict[int, str] = field(default_factory=dict)
     next_engagement_id: int = 0
@@ -340,6 +361,10 @@ class Backend:
 
     # Context compiler chain (architecture §3.10) records.
     compile_runs: dict[str, Any] = field(default_factory=dict)
+    #: Compiles that have been accepted and have not finished. A compile now
+    #: runs outside its request, and an `asyncio` task nobody holds a reference
+    #: to can be collected mid-flight — so these are held until they end.
+    compile_tasks: dict[str, Any] = field(default_factory=dict)
     extraction_passes: dict[str, Any] = field(default_factory=dict)
     structuring_passes: dict[str, Any] = field(default_factory=dict)
     batch_submissions: dict[str, Any] = field(default_factory=dict)
@@ -392,6 +417,10 @@ class Backend:
     # `context_pack_digests` (which carries counts and never text, because
     # FR-3.3 keeps the *runtime* cached prefix compact).
     document_texts: dict[str, str] = field(default_factory=dict)
+    #: Set when the backend is bound to durable storage, so a removal can mark
+    #: the row rather than only dropping it from memory. `None` in-memory,
+    #: where there is no row to mark and dropping it is the whole job.
+    state_store: Any = None
 
     reference_document_bodies: dict[str, str] = field(default_factory=dict)
     reference_documents: list[tuple[ReferenceDocument, str]] = field(default_factory=list)
@@ -402,11 +431,55 @@ class Backend:
 
 
 
-def _audit_seam(backend: Backend, engagement_id: str, engine: Any, name: str) -> Any:
-    """One inference seam, wrapped so every call across it is audited (NFR-2.7)."""
+def _observe_reachability(backend: Backend, engine: Any) -> Any:
+    """Let each call across the *debrief* seams decide what the panel says.
+
+    Wrapped at the seam rather than at each stage for the reason the audit is:
+    a stage added later is observed without anyone remembering to do it. Only
+    `UpstreamUnavailableError` counts. Every other exception is a bug or a bad
+    input on our side of the wire, and reporting one as "the model is
+    unreachable" would send the operator to the network while the real fault
+    sat in this codebase.
+
+    Deliberately *not* applied to the compiler seams, though they share this
+    audit wrapper. `_lane_status` reports on the debrief engines, so only calls
+    across those may speak for it. The compiler is a different workload on a
+    different entitlement — drafting the question bank is a batch job, and a
+    plan can permit live messages while refusing batches. Observing both into
+    one place put a live panel into degraded mode because a *pre-meeting*
+    compile had been refused for want of a batch scope, about a model that was
+    answering fine; a compile that stops reports itself through
+    `log_compile_outcome`, which is where that belongs.
+    """
+
+    @wraps(engine)
+    async def observed(*args: Any, **kwargs: Any) -> Any:
+        try:
+            result = await engine(*args, **kwargs)
+        except UpstreamUnavailableError as failed:
+            backend.lane_reachability.observe_failure(failed.failure)
+            raise
+        backend.lane_reachability.observe_success()
+        return result
+
+    return observed
+
+
+def _audit_seam(
+    backend: Backend, engagement_id: str, engine: Any, name: str, *, observe: bool = False
+) -> Any:
+    """One inference seam, wrapped so every call across it is audited (NFR-2.7).
+
+    `observe` additionally lets the call decide what the panel says about the
+    slow lane, and is off by default so a seam has to opt in rather than
+    inherit an opinion it has no standing to hold. When on, the observer sits
+    *inside* the audit wrapper, so a call that fails upstream is still recorded
+    as having left the machine — the egress log answers "what did we send",
+    which a failed answer does not undo.
+    """
 
     return audited(
-        engine,
+        _observe_reachability(backend, engine) if observe else engine,
         sink=_BackendEgressSink(backend),
         clock=SystemClock(),
         regions=backend.egress_regions,
@@ -435,6 +508,15 @@ def _audited_compiler_engines(
         structure=_audit_seam(backend, engagement_id, engines.structure, engines.name),
         submit_batch=_audit_seam(backend, engagement_id, engines.submit_batch, engines.name),
         fetch_batch=_audit_seam(backend, engagement_id, engines.fetch_batch, engines.name),
+        # Audited like the rest, and carried at all — rebuilding the dataclass
+        # field by field silently drops anything added to it, which is how the
+        # direct Analyst route arrived here as `None` and the fallback did
+        # nothing at all.
+        run_analyst=(
+            None
+            if engines.run_analyst is None
+            else _audit_seam(backend, engagement_id, engines.run_analyst, engines.name)
+        ),
     )
 
 
@@ -445,14 +527,15 @@ def _audited_debrief_engines(
 
     if not engines.is_configured:
         return engines
+    seam = partial(_audit_seam, backend, engagement_id, name=engines.name, observe=True)
     return DebriefEngines(
         name=engines.name,
-        diarize=_audit_seam(backend, engagement_id, engines.diarize, engines.name),
-        clean=_audit_seam(backend, engagement_id, engines.clean, engines.name),
-        translate=_audit_seam(backend, engagement_id, engines.translate, engines.name),
-        classify=_audit_seam(backend, engagement_id, engines.classify, engines.name),
-        run_chain=_audit_seam(backend, engagement_id, engines.run_chain, engines.name),
-        converse=_audit_seam(backend, engagement_id, engines.converse, engines.name),
+        diarize=seam(engines.diarize),
+        clean=seam(engines.clean),
+        translate=seam(engines.translate),
+        classify=seam(engines.classify),
+        run_chain=seam(engines.run_chain),
+        converse=seam(engines.converse),
     )
 
 
@@ -464,6 +547,85 @@ class _BackendEgressSink:
 
     def record(self, row: EgressLogRow) -> None:
         self._backend.egress_rows.append(row)
+
+
+# Which HTTP answer each provider failure earns. The mapping lives here and
+# nowhere lower: `orchestration/` says *what happened* in terms of the provider,
+# and this is the only layer that gets to translate that into something an HTTP
+# client reads.
+_UPSTREAM_STATUS: dict[UpstreamFailure, int] = {
+    UpstreamFailure.RATE_LIMITED: 429,
+    UpstreamFailure.UNAVAILABLE: 503,
+    UpstreamFailure.CREDENTIAL_REJECTED: 503,
+    # Reached, credential valid, request not permitted — a missing OAuth scope
+    # or a model outside the plan. Deliberately *not* 429: that status is the
+    # one instruction an operator acts on without reading, and here it would
+    # send them away to wait for something that never happens.
+    UpstreamFailure.NOT_ENTITLED: 503,
+}
+
+
+def upstream_status_for(failure: UpstreamFailure) -> int:
+    """The HTTP answer for one provider failure.
+
+    Total by construction. The lookup used to be a bare subscript inside the
+    exception handler, so a failure kind with no entry raised `KeyError` *while
+    handling the error*: the operator got "Internal Server Error" and the
+    sentence naming the real cause was thrown away. 503 is the safe default —
+    it says "not now, and not your fault" without promising a retry will work.
+    """
+
+    return _UPSTREAM_STATUS.get(failure, 503)
+
+
+def _expected_languages_for_meeting(backend: Backend, meeting_id: str) -> list[str]:
+    """The engagement's expected languages, for the meeting's panel.
+
+    Empty for a meeting nobody created, or an engagement whose derivation never
+    ran: an empty strip is honest, and a confident wrong one is not.
+    """
+
+    # `meeting_engagement_ids` is in-memory, so after a restart it knows
+    # nothing about a meeting created by the process before it. The durable
+    # record of the same fact is the meeting's own row.
+    engagement_id = backend.meeting_engagement_ids.get(meeting_id) or getattr(
+        backend.meeting_details.get(meeting_id), "engagement_id", None
+    )
+    if engagement_id is None:
+        return []
+    expected = backend.expected_languages.get(engagement_id)
+    if expected is not None:
+        # A list once it has been through storage, the deriver's model before.
+        stored = list(getattr(expected, "languages", None) or expected or [])
+        if stored:
+            return stored
+
+    # Nothing stored: an engagement created before this was persisted, whose
+    # derivation ran once into memory and is gone. Re-derived rather than left
+    # blank — it is a pure function of client context the row still holds, and
+    # the alternative is a panel that works for new clients and never for old.
+    engagement = backend.engagements.get(engagement_id)
+    if engagement is None:
+        return []
+    return derive_expected_languages(
+        ClientContext(
+            client_organisation=getattr(engagement, "client_organisation", ""),
+            sector=getattr(engagement, "sector", ""),
+            commercial_context=getattr(engagement, "commercial_context", ""),
+        )
+    )
+
+
+def _revealed(store: SettingsStore, key: SecretKey) -> str | None:
+    """A stored secret's value, or `None` when it is not set.
+
+    Read per call rather than captured once, so a credential entered in the
+    Settings screen takes effect without a restart — the same contract the
+    inference credentials keep.
+    """
+
+    secret = store.get_secret(key)
+    return None if secret is None else secret.reveal()
 
 
 def _document_name_from_url(url: str) -> str:
@@ -497,6 +659,48 @@ def _highest_ordinal(ids: Iterable[str], prefix: str) -> int:
         if candidate.startswith(prefix) and candidate.removeprefix(prefix).isdigit()
     ]
     return max(suffixes, default=0)
+
+
+DEFAULT_CONSENT_MODEL = ConsentModel.ENGAGEMENT_LEVEL
+"""How an engagement nobody has configured captures consent (PRD D3).
+
+**This is a stage decision, and it is the fail-open one.** `ENGAGEMENT_LEVEL`
+means the gate answers `not_required` for every engagement, so no meeting
+stops to ask for a per-meeting confirmation and capture is admitted straight
+away. Nothing writes `consent_models` -- that gap is declared in
+`test_composition_seams.ACCEPTED_READ_ONLY` -- so today this default is not
+merely the fallback, it is the only value any engagement has.
+
+What that costs, stated plainly so it is not rediscovered later: the consent
+screen never shows its confirmation prompt, `POST .../consent-confirmation`
+is never called by the product, and no `ConsentRecord` is written. A meeting
+recorded through this build carries no evidence that anyone was told or
+agreed. The prior default, `PER_MEETING`, is the one that asks; restoring it
+is a one-line change here, and the tests that cover the asking model still
+exist and still pass, seeded explicitly.
+"""
+
+
+def _consent_model_for(backend: Backend, engagement_id: str | None) -> ConsentModel:
+    """The engagement's consent model, or the stage default if it has none.
+
+    One definition, because two callers need it from different scopes: the
+    consent router built in `build_app`, and capture admission in
+    `_include_operational_routers`. They are two halves of a single decision,
+    and the last time those halves were written separately they disagreed --
+    admission read `confirmed_meetings` directly while the gate evaluated the
+    model, so engagement-level consent was refused capture by one and granted
+    it by the other.
+
+    An engagement that cannot be resolved at all takes the same default as one
+    that was never configured. Those two cases were deliberately distinct when
+    the default was the stricter model; under `DEFAULT_CONSENT_MODEL` they are
+    not, and pretending otherwise would only hide which one is in play.
+    """
+
+    if engagement_id is None:
+        return DEFAULT_CONSENT_MODEL
+    return backend.consent_models.get(engagement_id, DEFAULT_CONSENT_MODEL)
 
 
 def attach_state_store(backend: Backend, store: StateStore) -> Backend:
@@ -538,7 +742,21 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.engagement_open_questions = store.open_questions(
         lambda row: ApiInheritedOpenQuestion(**row)
     )
+    backend.state_store = store
     backend.compiled_candidates = store.candidates(lambda row: ApiBankCandidate(**row))
+
+    # What the operator typed before any meeting happened. These were in the
+    # "rebuilt on demand" group, which for them meant "lost on restart": a live
+    # run came back with zero documents and zero vocabulary against engagements
+    # that had both, and the screen went on offering to add more.
+    backend.expected_languages = store.expected_languages()
+    backend.engagement_documents = store.reference_documents(
+        lambda row: EngagementDocument(**row)
+    )
+    backend.document_texts = store.document_texts()
+    backend.engagement_vocabulary = store.vocabulary_terms(
+        lambda row: VocabularyTermResponse(**row)
+    )
     return backend
 
 
@@ -548,6 +766,7 @@ def build_app(
     debrief_engines: DebriefEngines | None = None,
     compiler_engines: CompilerEngines | None = None,
     settings_store: SettingsStore | None = None,
+    document_transport: HttpTransport | None = None,
 ) -> FastAPI:
     """Mount every documented router onto one app, backed by `backend`."""
 
@@ -574,15 +793,6 @@ def build_app(
 
         return JSONResponse(status_code=503, content={"detail": str(exc)})
 
-    # Which HTTP answer each provider failure earns. The mapping lives here
-    # and nowhere lower: `orchestration/` says *what happened* in terms of the
-    # provider, and this is the only layer that gets to translate that into
-    # something an HTTP client reads.
-    _UPSTREAM_STATUS = {
-        UpstreamFailure.RATE_LIMITED: 429,
-        UpstreamFailure.UNAVAILABLE: 503,
-        UpstreamFailure.CREDENTIAL_REJECTED: 503,
-    }
 
     @app.exception_handler(UpstreamUnavailableError)
     async def _upstream_unavailable(
@@ -605,13 +815,13 @@ def build_app(
             {"Retry-After": str(int(exc.retry_after))} if exc.retry_after is not None else None
         )
         return JSONResponse(
-            status_code=_UPSTREAM_STATUS[exc.failure],
+            status_code=upstream_status_for(exc.failure),
             content={"detail": str(exc)},
             headers=headers,
         )
 
     async def get_engagement_consent_model(engagement_id: str) -> ConsentModel:
-        return backend.consent_models.get(engagement_id, ConsentModel.PER_MEETING)
+        return _consent_model_for(backend, engagement_id)
 
     async def is_confirmed_for_meeting(meeting_id: str) -> bool:
         return meeting_id in backend.confirmed_meetings
@@ -769,6 +979,21 @@ def build_app(
             )
         return items, total
 
+    async def delete_engagement(engagement_id: str) -> bool:
+        """Take an engagement out of view, keeping the row (soft).
+
+        Its documents, vocabulary and meetings are left exactly where they
+        are: they are reached through the engagement, which no longer resolves,
+        so hiding it hides them — and a cascade of marks would be a second
+        record of the same decision, able to disagree with the first.
+        """
+
+        if engagement_id not in backend.engagements:
+            return False
+        del backend.engagements[engagement_id]
+        backend.engagement_updates.pop(engagement_id, None)
+        return True
+
     app.include_router(
         build_engagement_router(
             create_engagement,
@@ -776,6 +1001,7 @@ def build_app(
             get_engagement,
             count_engagement_documents,
             list_engagements,
+            delete_engagement,
         )
     )
 
@@ -795,7 +1021,13 @@ def build_app(
             name=payload.name,
             status=payload.status,
         )
-        backend.engagement_documents.setdefault(engagement_id, []).append(document)
+        # Reassigned rather than appended in place: these are durable
+        # collections now, and a mutation that never reaches `__setitem__`
+        # never reaches the database either.
+        backend.engagement_documents[engagement_id] = [
+            *backend.engagement_documents.get(engagement_id, []),
+            document,
+        ]
         backend.document_texts[document.document_id] = extract_text(payload.content)
 
         # FR-3.3: index the content as soon as it exists. The two sinks stay
@@ -1046,6 +1278,12 @@ def build_app(
         There is no fallback. With no engine configured this raises and the
         operator is told; it must never answer with text of its own, because
         the panel renders a stub in exactly the same bubble as an answer.
+
+        The engine is reached through the wrapped seam rather than directly.
+        Called raw, this was the one provider call carrying a client's whole
+        transcript that wrote no egress row and told the panel nothing when it
+        failed — the two things that wrapper exists to guarantee, missing from
+        the call that needed them most.
         """
 
         backend.sent_messages.append((conversation_ref, message))
@@ -1062,7 +1300,14 @@ def build_app(
             {"role": turn.role.value, "content": turn.content} for turn in history
         ]
         turns.append({"role": "user", "content": [{"type": "text", "text": message}]})
-        return await debrief_engines.converse(turns)
+        engagement_id = (
+            backend.meeting_engagement_ids.get(session.meeting_id, "")
+            if session is not None
+            else ""
+        )
+        return await _audited_debrief_engines(
+            backend, engagement_id, debrief_engines
+        ).converse(turns)
 
     app.include_router(
         build_debrief_session_router(
@@ -1073,6 +1318,32 @@ def build_app(
             send_debrief_message,
         )
     )
+
+    async def get_debrief_completion(meeting_id: str) -> Any:
+        """What the §7 run managed, for the one meeting.
+
+        Read straight off the run the pipeline stored. `stopped_at` and the
+        halted stage's own `error` were both already there; this is the first
+        thing that ever looks at them on the operator's behalf.
+        """
+
+        run = backend.debrief_runs.get(meeting_id)
+        if run is None:
+            return None
+
+        stopped_at = getattr(run, "stopped_at", None)
+        record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
+        reason = getattr(record, "error", None)
+        return DebriefCompletion(
+            session_id=meeting_id,
+            complete=stopped_at is None,
+            stages_completed=list(getattr(run, "stages_completed", [])),
+            stopped_at=stopped_at,
+            reason=reason,
+            cause=_stage_failure_cause(stopped_at, reason),
+        )
+
+    app.include_router(build_debrief_completion_router(get_debrief_completion))
 
     async def get_meeting_artifacts(meeting_id: str) -> list[ArtifactSummary]:
         return backend.meeting_artifacts.get(meeting_id, [])
@@ -1141,10 +1412,58 @@ def build_app(
         return f"rating-{len(backend.replay_ratings)}"
 
     async def get_base_candidates(meeting_id: str) -> list[BankCandidate]:
-        return backend.meeting_base_candidates.get(meeting_id, [])
+        """This meeting's starting bank: its engagement's compiled candidates.
+
+        Derived on read rather than written per meeting. Both of these used to
+        come off `Backend` fields nothing wrote, so every meeting of every
+        engagement served an empty bank — the recompile step was described as
+        "a step no caller runs", when in truth both inputs already existed one
+        level up and only needed joining.
+
+        A pruned candidate is left out. Pruning is the operator's judgement and
+        the reason they reviewed the bank at all; reinstating it once per
+        meeting would break that promise on a schedule.
+        """
+
+        stored = backend.meeting_base_candidates.get(meeting_id)
+        if stored:
+            return stored
+
+        engagement_id = backend.meeting_engagement_ids.get(meeting_id)
+        if engagement_id is None:
+            return []
+        return [
+            BankCandidate(
+                id=candidate.id,
+                template_section=candidate.template_section,
+                phrasing=candidate.phrasing,
+                priority=candidate.priority,
+                inherited_from_open_question=candidate.inherited_from_open_question,
+            )
+            for candidate in backend.compiled_candidates.get(engagement_id, [])
+            if not candidate.pruned
+        ]
 
     async def get_inherited_open_questions(meeting_id: str) -> list[InheritedOpenQuestion]:
-        return backend.meeting_inherited_open_questions.get(meeting_id, [])
+        """What the engagement still has open, weighted ahead of everything else.
+
+        The same join as `get_base_candidates`, from the other input. The two
+        packages model these identically and separately on purpose (each is a
+        local shape rather than an import across a feature boundary), so this
+        is a copy across that boundary rather than a conversion.
+        """
+
+        stored = backend.meeting_inherited_open_questions.get(meeting_id)
+        if stored:
+            return stored
+
+        engagement_id = backend.meeting_engagement_ids.get(meeting_id)
+        if engagement_id is None:
+            return []
+        return [
+            InheritedOpenQuestion(text=question.text, impact_rank=question.impact_rank)
+            for question in backend.engagement_open_questions.get(engagement_id, [])
+        ]
 
     app.include_router(build_meeting_bank_router(get_base_candidates, get_inherited_open_questions))
 
@@ -1203,7 +1522,14 @@ def build_app(
         build_settings_router(read_settings, apply_settings, check_connection)
     )
 
-    _include_operational_routers(app, backend, compiler_engines, debrief_engines)
+    _include_operational_routers(
+        app,
+        backend,
+        compiler_engines,
+        debrief_engines,
+        settings_store=settings_store,
+        document_transport=document_transport,
+    )
 
     return app
 
@@ -1234,6 +1560,8 @@ def _include_operational_routers(
     backend: Backend,
     compiler_engines: CompilerEngines,
     debrief_engines: DebriefEngines | None = None,
+    settings_store: SettingsStore | None = None,
+    document_transport: HttpTransport | None = None,
 ) -> None:
     """Mount every router that the integration-suite assembly left out."""
 
@@ -1257,7 +1585,11 @@ def _include_operational_routers(
     # --- live session start ---------------------------------------------
     async def start_session(meeting_id: str) -> Any:
         if meeting_id not in backend.known_meetings:
-            return None
+            # Unreachable over HTTP: `admit_capture` answers NOT_FOUND from
+            # the same set before the router calls through here. Kept as the
+            # second half of the pair so a future caller that skips admission
+            # still cannot start a session against nothing.
+            return None  # pragma: no cover
         backend.next_session_id += 1
         started = SessionStart(
             session_id=f"session-{backend.next_session_id}",
@@ -1276,14 +1608,32 @@ def _include_operational_routers(
     async def admit_capture(meeting_id: str) -> Any:
         """Whether this meeting may open a capture session (PRD L1/L2, D3).
 
-        Answered before anything is allocated. Consent is per meeting, so a
-        confirmation on one meeting says nothing about another; anything this
-        function cannot positively establish stays refused.
+        Answered before anything is allocated, and answered by **the gate** --
+        `evaluate_consent_gate`, the same function `GET /consent-gate` serves
+        from -- rather than by testing membership of `confirmed_meetings`.
+        Those are not the same question. A confirmation record exists only
+        under the per-meeting consent model, so reading it as the whole answer
+        refused every engagement that captured consent once for the engagement
+        as a whole, while the gate serving that very meeting reported
+        `not_required` and `capture_may_begin`. One decision, two halves, and
+        they disagreed.
+
+        Anything this function cannot positively establish still stays
+        refused: a meeting whose engagement cannot be resolved falls back to
+        `PER_MEETING`, the stricter of the two models (D3), so an
+        unestablished consent model asks rather than assumes. Consent remains
+        per meeting under that model -- a confirmation on one meeting says
+        nothing about another -- because that is what the gate itself encodes.
         """
 
         if meeting_id not in backend.known_meetings:
             return CaptureAdmission.NOT_FOUND
-        if meeting_id not in backend.confirmed_meetings:
+
+        gate = evaluate_consent_gate(
+            _consent_model_for(backend, backend.meeting_engagement_ids.get(meeting_id)),
+            confirmed_this_meeting=meeting_id in backend.confirmed_meetings,
+        )
+        if not gate.capture_may_begin:
             return CaptureAdmission.CONSENT_REQUIRED
         return CaptureAdmission.ALLOWED
 
@@ -1300,12 +1650,9 @@ def _include_operational_routers(
         the operator needs told, and neither can be forgotten about.
         """
 
-        if debrief_engines is not None and debrief_engines.is_configured:
-            return {"model_reachable": True, "reason": None}
-        return {
-            "model_reachable": False,
-            "reason": "No AI provider is configured in Settings.",
-        }
+        configured = debrief_engines is not None and debrief_engines.is_configured
+        status = backend.lane_reachability.status(configured=configured)
+        return {"model_reachable": status.model_reachable, "reason": status.reason}
 
     async def session_events(meeting_id: str):
         """Replay whatever this meeting has queued, then finish.
@@ -1324,6 +1671,17 @@ def _include_operational_routers(
         """
 
         yield "lane", _lane_status()
+
+        # Which languages this room is expected to use (FR-2.14). Derived when
+        # the engagement was created and written to its row, where nothing has
+        # ever read them back — so the panel's language strip said "No language
+        # detected" about a service that already knew the answer.
+        #
+        # Marked expected, never detected: nothing transcribes yet, and a frame
+        # claiming a language had been heard would put an assertion on screen
+        # that no audio supports.
+        for language in _expected_languages_for_meeting(backend, meeting_id):
+            yield "language", {"language": language, "expected": True}
 
         for name, payload in backend.session_stream_events.get(meeting_id, []):
             yield name, payload
@@ -1452,20 +1810,112 @@ def _include_operational_routers(
     app.include_router(build_engagement_bank_router(get_compiled_candidates))
 
     async def trigger_bank_compile(engagement_id: str) -> str:
+        """Accept the compile and get out of the way.
+
+        Architecture §3.10: extraction, claim structuring, then the BMAD
+        analyst pass that emits the bank. This always documented itself as
+        returning "the compile id rather than holding open for it", and it held
+        open for it — measured against a real provider, `202 Accepted` took 45
+        seconds to arrive. A status whose entire meaning is "the work is
+        happening elsewhere" was being sent from inside the work.
+
+        Worse than slow: a client that gives up at thirty seconds sees a
+        failure for a compile that is running perfectly well, and presses the
+        button again, and now two of them are writing one bank.
+        """
+
         backend.next_compile_id += 1
         compile_id = f"compile-{backend.next_compile_id}"
         backend.bank_compiles.append((engagement_id, compile_id))
 
-        # Architecture §3.10: extraction, claim structuring, then the BMAD
-        # analyst pass that emits the bank. Submitted as a batch — the pass
-        # runs in minutes, so the request returns the compile id rather than
-        # holding open for it.
-        backend.compile_runs[compile_id] = await _run_engagement_compile(
-            backend, engagement_id, compiler_engines
-        )
+        async def chain() -> None:
+            try:
+                run = await _run_engagement_compile(
+                    backend, engagement_id, compiler_engines
+                )
+                backend.compile_runs[compile_id] = run
+                log_compile_outcome(compile_id, run)
+            except Exception as exc:  # noqa: BLE001 — recorded, not handled
+                # Each pass already turns its own failure into a FAILED record;
+                # nothing wrapped the orchestration between them. While this
+                # ran inside the request such a crash surfaced as a 500 — ugly
+                # and visible. Out here it went nowhere at all, and the screen
+                # said "Not compiled yet" about a compile that had fallen over,
+                # which is the exact silence this route exists to end.
+                _logger.exception("compile %s for %s crashed", compile_id, engagement_id)
+                backend.compile_runs[compile_id] = _CrashedCompile(engagement_id, exc)
+            finally:
+                # Whatever happened, this compile is no longer in flight. Left
+                # behind, it would read as "still running" for ever, which is
+                # the one answer an operator cannot act on.
+                backend.compile_tasks.pop(compile_id, None)
+
+        backend.compile_tasks[compile_id] = asyncio.create_task(chain())
         return compile_id
 
-    app.include_router(build_engagement_bank_compile_router(trigger_bank_compile))
+    async def read_compile_outcome(engagement_id: str) -> Any:
+        """The last compile this engagement asked for, and where it stopped.
+
+        The record has always been here — `trigger_bank_compile` stores the run
+        and `log_compile_outcome` writes it to the log. The log is not where
+        the operator is: a real one compiled four times against a model their
+        credential could not use, and every attempt answered 202 and left an
+        empty bank behind with no way to learn why.
+
+        The *latest* attempt, because somebody who changed a setting and tried
+        again wants this to reflect the change rather than insist on a problem
+        they have already fixed.
+        """
+
+        latest = next(
+            (
+                compile_id
+                for engagement, compile_id in reversed(backend.bank_compiles)
+                if engagement == engagement_id
+            ),
+            None,
+        )
+        if latest is None:
+            return None
+
+        if latest in backend.compile_tasks:
+            # Accepted and still working. This state did not exist while the
+            # request did the work, and without it "no stage has stopped this"
+            # reads as "it finished" — telling an operator their empty bank is
+            # the finished article.
+            return BankCompileOutcome(
+                engagement_id=engagement_id,
+                compile_id=latest,
+                state="running",
+                complete=False,
+                stages_completed=[],
+            )
+
+        run = backend.compile_runs.get(latest)
+        if run is None:
+            return None
+
+        stopped_at = getattr(run, "stopped_at", None)
+        record = getattr(run, _STAGE_RECORD.get(stopped_at or "", ""), None)
+        if record is None and isinstance(run, _CrashedCompile):
+            record = run.orchestration
+        reason = getattr(record, "error", None)
+        if reason is None and stopped_at in _STAGE_REASON_FIELD:
+            reason = getattr(run, _STAGE_REASON_FIELD[stopped_at], None)
+        return BankCompileOutcome(
+            engagement_id=engagement_id,
+            compile_id=latest,
+            state="complete" if stopped_at is None else "stopped",
+            complete=stopped_at is None,
+            stages_completed=list(getattr(run, "stages_completed", [])),
+            stopped_at=stopped_at,
+            reason=reason,
+            cause=_stage_failure_cause(stopped_at, reason),
+        )
+
+    app.include_router(
+        build_engagement_bank_compile_router(trigger_bank_compile, read_compile_outcome)
+    )
 
     async def delete_candidate(candidate_id: str) -> None:
         for candidates in backend.compiled_candidates.values():
@@ -1512,15 +1962,27 @@ def _include_operational_routers(
     ) -> str:
         backend.next_vocabulary_term_id += 1
         term_id = f"term-{backend.next_vocabulary_term_id}"
-        backend.engagement_vocabulary.setdefault(engagement_id, []).append(
+        backend.engagement_vocabulary[engagement_id] = [
+            *backend.engagement_vocabulary.get(engagement_id, []),
             VocabularyTermResponse(
                 term_id=term_id,
                 engagement_id=engagement_id,
                 term=request.term,
                 term_type=request.term_type,
-            )
-        )
+            ),
+        ]
         return term_id
+
+    async def delete_vocabulary_term(engagement_id: str, term_id: str) -> bool:
+        terms = backend.engagement_vocabulary.get(engagement_id, [])
+        remaining = [term for term in terms if term.term_id != term_id]
+        if len(remaining) == len(terms):
+            return False
+        _mark_row_deleted(backend, "vocabulary_terms", term_id)
+        backend.engagement_vocabulary[engagement_id] = remaining
+        return True
+
+    app.include_router(build_vocabulary_delete_router(delete_vocabulary_term))
 
     async def list_vocabulary_terms(engagement_id: str) -> list[VocabularyTermResponse] | None:
         """This engagement's vocabulary, or `None` if there is no such engagement.
@@ -1661,13 +2123,29 @@ def _include_operational_routers(
         )
         backend.reference_documents.append((document, body))
         backend.document_texts[document.id] = body
-        backend.engagement_documents.setdefault(engagement_id, []).append(
+        backend.engagement_documents[engagement_id] = [
+            *backend.engagement_documents.get(engagement_id, []),
             EngagementDocument(
                 document_id=document.id,
                 name=_document_name_from_url(request.url),
                 status=request.status,
-            )
+            ),
+        ]
+
+        # The same indexing an upload gets (FR-3.3). Without it a linked
+        # document appeared in the operator's list and in no index at all, so
+        # retrieval could never surface it: one document, visible or invisible
+        # depending only on which way it came in.
+        async def index_chunks(document_id: str, chunks: list[Any]) -> None:
+            backend.document_chunks[document_id] = chunks
+
+        async def persist_digest(document_id: str, digest: Any) -> None:
+            backend.context_pack_digests[document_id] = digest
+
+        await index_document(
+            document.id, body.encode("utf-8"), index_chunks, persist_digest
         )
+
         return document
 
     app.include_router(build_reference_document_link_router(fetch_body, attach_document))
@@ -1806,7 +2284,11 @@ async def _run_debrief_when_record_path_completes(
         t.status in (TranscriptionStatus.COMPLETE, TranscriptionStatus.FAILED)
         for t in transcripts
     ):
-        return None
+        # Unreachable while `TranscriptionStatus` has only those two members —
+        # every state it can express is terminal. Kept because the day a
+        # third, non-terminal state is added, running the pipeline over a
+        # half-finished transcript is the failure this prevents.
+        return None  # pragma: no cover
     if session_id in backend.debrief_runs:
         return backend.debrief_runs[session_id]
 
@@ -2100,7 +2582,159 @@ async def _run_engagement_compile(
             )
             for document in attached
         ],
+        # Which sections a candidate may be filed under. Left unset, the pass
+        # was told to use "the sections the documents imply" and a live compile
+        # invented one called *Operations* holding two thirds of the bank —
+        # a bin rather than a section, and a bank nobody can review section by
+        # section. `backend.template_sections` is still written by nothing
+        # (an engagement names its template as free text and no taxonomy is
+        # resolved from it), so this is the stated default until that lands.
+        template_sections=[
+            str(section) for section in backend.template_sections
+        ] or list(_agent_models.DEFAULT_TEMPLATE_SECTIONS),
     )
+
+    sinks = _compiler_sinks(backend, engagement_id)
+
+    run = await submit_engagement_compile(
+        engagement_id,
+        documents=documents,
+        context_pack=context_pack,
+        engines=engines,
+        sinks=sinks,
+    )
+    if run.complete:
+        run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
+        _store_compiled_candidates(backend, engagement_id, run)
+    return run
+
+
+_logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _CrashedCompile:
+    """A compile that raised somewhere no stage record covers.
+
+    Shaped like a `CompileRun` as far as anything reads one, so the outcome
+    route needs no special case: it stopped, at a stage named for what it is,
+    with the exception as its reason. `_stage_failure_cause` classifies that as
+    `failed` rather than a provider problem, which is right — this is a bug in
+    this codebase and dressing it as an outage would send the operator to the
+    network.
+    """
+
+    engagement_id: str
+    error: BaseException
+    stopped_at: str = "the compile itself"
+    stages_completed: tuple[str, ...] = ()
+
+    @property
+    def orchestration(self) -> Any:
+        return SimpleNamespace(error=str(self.error))
+
+
+def _stage_failure_cause(stopped_at: str | None, reason: str | None) -> str | None:
+    """Which *kind* of failure stopped a run, for a screen to put into words.
+
+    A stage record persists its failure as prose written for whoever maintains
+    the pipeline. A live run rendered one of those verbatim on the debrief
+    screen — "supply `diarize` to anthropic_debrief_engines() (architecture
+    §3.3, ADR-011)" — every word true and none of it addressed to the person
+    reading it. Classifying here and composing the sentence at the screen is
+    what stops the operator reading someone else's mail.
+
+    The kinds are the remedies, not the symptoms, which is why a provider
+    failure keeps its own name rather than collapsing into "it failed". A
+    compile stopped twice for two different reasons in one afternoon — a model
+    the credential may not use, and a token without the batch scope — and
+    "waiting" fixes neither, while the two real fixes are in different places.
+
+    Anything this cannot recognise is `failed` rather than a guess: a bug in
+    this codebase is not a provider problem and must not be dressed as one.
+    """
+
+    if stopped_at is None:
+        return None
+    if reason is None:
+        return "unknown"
+    if UNCONFIGURED_MARKER in reason:
+        return "not_configured"
+    upstream = upstream_failure_in(reason)
+    return upstream.value if upstream is not None else "failed"
+
+
+#: Which stage record carries the reason the §7 debrief stopped at that stage.
+#: The names on the left are the ones `run_debrief_pipeline` writes to
+#: `stopped_at`; a stage missing here degrades to "no reason given", which is
+#: still a named stage and still actionable.
+_DEBRIEF_STAGE_RECORD = {
+    "diarization": "diarization",
+    "cleaning": "cleaning",
+    "translation": "translation",
+    "classification": "classification",
+    "analyst-chain": "analyst_chain",
+}
+
+
+#: Which stage record carries the reason a compile stopped at that stage.
+_STAGE_RECORD = {
+    "extraction": "extraction",
+    "structuring": "structuring",
+    "batch-submission": "submission",
+    "batch-collection": "submission",
+}
+
+#: Stages whose reason is a plain string on the run rather than a stage record.
+_STAGE_REASON_FIELD = {DIRECT_ANALYST_STAGE: "direct_analyst_error"}
+
+
+def log_compile_outcome(compile_id: str, run: Any) -> None:
+    """Say out loud that a compile stopped, and why.
+
+    `POST /bank/compile` answers 202 whatever happens after it, so the stage
+    record is the only account of a compile that stopped — and it was written
+    to a dictionary nothing read. An operator watching an empty question bank
+    had no way to learn that extraction had failed on a citation offset, or
+    that the batch was refused for want of a scope. The record already knew;
+    nobody was told.
+    """
+
+    stopped_at = getattr(run, "stopped_at", None)
+    if stopped_at is None:
+        return
+
+    record = getattr(run, _STAGE_RECORD.get(stopped_at, ""), None)
+    reason = getattr(record, "error", None)
+    _logger.warning(
+        "compile %s for %s stopped at %s%s",
+        compile_id,
+        getattr(run, "engagement_id", "?"),
+        stopped_at,
+        f": {reason}" if reason else "",
+    )
+
+
+def _mark_row_deleted(backend: Backend, table: str, row_id: str) -> None:
+    """Leave a deleted row on disk, marked, when there is a disk to leave it on.
+
+    A no-op for the in-memory backend the API is reachable with by default:
+    there is no row to mark there, and dropping it from the collection is the
+    whole of the removal.
+    """
+
+    store = getattr(backend, "state_store", None)
+    if store is not None:
+        store.soft_delete(table, row_id)
+
+
+def _compiler_sinks(backend: Backend, engagement_id: str) -> CompilerSinks:
+    """Where each compile stage's record goes, for one engagement.
+
+    Shared by the compile itself and by the collector that goes back for its
+    batch later — two callers that must write to the same places, or a
+    collected pass would land somewhere the bank never reads.
+    """
 
     async def save_extraction(record: Any) -> None:
         backend.extraction_passes[engagement_id] = record
@@ -2114,20 +2748,79 @@ async def _run_engagement_compile(
     async def save_analyst_pass(record: Any) -> None:
         backend.analyst_passes.append(record)
 
-    sinks = CompilerSinks(
+    return CompilerSinks(
         save_extraction=save_extraction,
         save_structuring=save_structuring,
         save_batch_submission=save_batch_submission,
         save_analyst_pass=save_analyst_pass,
     )
 
-    run = await submit_engagement_compile(
-        engagement_id,
-        documents=documents,
-        context_pack=context_pack,
-        engines=engines,
-        sinks=sinks,
+
+async def _collect_one_compile(backend: Backend, run: Any, engines: CompilerEngines) -> Any:
+    """Collect one submitted batch and put its questions in the bank.
+
+    The collector's unit of work. Deliberately the same two steps the compile
+    itself takes when a batch happens to be ready immediately, so a bank
+    collected on the third sweep is identical to one collected on the first.
+    """
+
+    engagement_id = run.engagement_id
+    audited = _audited_compiler_engines(backend, engagement_id, engines)
+    run = await collect_engagement_compile(
+        run, engines=audited, sinks=_compiler_sinks(backend, engagement_id)
     )
-    if run.complete:
-        run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
+    _store_compiled_candidates(backend, engagement_id, run)
     return run
+
+
+def build_bank_collector(backend: Backend, engines: CompilerEngines) -> BankCollector:
+    """The poller that turns a submitted compile into a bank on screen.
+
+    Built here and started by whoever owns the process lifetime (`main`), not
+    by `build_app`: a background loop inside the app factory would start under
+    every `TestClient` in the suite and poll a provider nobody asked it to.
+    """
+
+    return BankCollector(
+        runs=lambda: backend.compile_runs,
+        collect=lambda run: _collect_one_compile(backend, run, engines),
+    )
+
+
+def _store_compiled_candidates(backend: Backend, engagement_id: str, run: Any) -> None:
+    """Put the Analyst pass's questions where `GET .../bank` reads them.
+
+    The chain wrote its results to `analyst_passes` and the bank endpoint reads
+    `compiled_candidates`. Nothing joined the two, so a compile that read every
+    document, submitted its batch and collected every result still answered
+    `{"sections": []}` — the write/read split that made a linked document
+    vanish after a 201, one stage further along and much harder to see, because
+    every stage genuinely succeeded.
+
+    A failed pass carries `candidates=None` and is skipped rather than clearing
+    what an earlier compile produced: a bank that empties itself because one run
+    failed is worse than a stale one, and the run record says it failed.
+    """
+
+    compiled = [
+        candidate
+        for record in run.analyst_passes or []
+        if getattr(record, "engagement_id", None) == engagement_id
+        for candidate in (getattr(record, "candidates", None) or [])
+    ]
+    if not compiled:
+        return
+
+    backend.compiled_candidates[engagement_id] = [
+        ApiBankCandidate(
+            id=candidate.id,
+            template_section=candidate.template_section,
+            phrasing=candidate.phrasing,
+            priority=candidate.priority,
+            # Freshly compiled, not carried forward from a prior meeting's open
+            # question — that is `recompile_meeting_bank`'s flag to set.
+            inherited_from_open_question=False,
+            pruned=False,
+        )
+        for candidate in compiled
+    ]

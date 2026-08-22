@@ -108,6 +108,49 @@
         }
       }
     },
+    "/api/meetings/{meeting_id}/consent-record": {
+      "get": {
+        "tags": [
+          "consent"
+        ],
+        "summary": "Get Consent Record Endpoint",
+        "description": "Who confirmed consent for this meeting, and when.\n\nThe gate answers whether capture may begin; this answers who is\naccountable for it having been disclosed. Both matter, and only\nthe first was readable \u2014 the confirmation was written to a\ndurable record that nothing ever served back, so a screen could\nshow that consent was on record but not whose word that was.\n\nA 404 means nobody has confirmed yet, which is a real and normal\nstate before a meeting rather than a fault.",
+        "operationId": "get_consent_record_endpoint_api_meetings__meeting_id__consent_record_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/audit/egress": {
       "get": {
         "tags": [
@@ -175,6 +218,60 @@
       }
     },
     "/api/engagements": {
+      "get": {
+        "tags": [
+          "engagements"
+        ],
+        "summary": "List Engagements Endpoint",
+        "operationId": "list_engagements_endpoint_api_engagements_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "engagements"
@@ -182,14 +279,14 @@
         "summary": "Create Engagement Endpoint",
         "operationId": "create_engagement_endpoint_api_engagements_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/EngagementCreateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -216,6 +313,40 @@
       }
     },
     "/api/engagements/{engagement_id}": {
+      "delete": {
+        "tags": [
+          "engagements"
+        ],
+        "summary": "Delete Engagement Endpoint",
+        "description": "Take an engagement out of view (soft).\n\nThe row stays, marked, and so does everything hanging off it. A\nremoval here is about a list an operator has to read, not about\nerasing a client \u2014 and in a product that records client meetings,\nthose two should not be the same button.",
+        "operationId": "delete_engagement_endpoint_api_engagements__engagement_id__delete",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "engagements"
@@ -250,6 +381,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EngagementUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "engagements"
+        ],
+        "summary": "Get Engagement Endpoint",
+        "operationId": "get_engagement_endpoint_api_engagements__engagement_id__get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngagementDetailResponse"
                 }
               }
             }
@@ -475,6 +646,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeetingDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engagements/{engagement_id}/meetings": {
+      "get": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "List Engagement Meetings",
+        "operationId": "list_engagement_meetings_api_engagements__engagement_id__meetings_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingListResponse"
                 }
               }
             }
@@ -781,6 +994,48 @@
         }
       }
     },
+    "/api/sessions/{session_id}/audio-destruction": {
+      "get": {
+        "tags": [
+          "audio-lifecycle"
+        ],
+        "summary": "Get Audio Destruction",
+        "operationId": "get_audio_destruction_api_sessions__session_id__audio_destruction_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioDestructionEvent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/debrief/start": {
       "post": {
         "tags": [
@@ -858,6 +1113,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DebriefConversationSession"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/debrief/completion": {
+      "get": {
+        "tags": [
+          "debrief-pipeline"
+        ],
+        "summary": "Get Debrief Completion",
+        "operationId": "get_debrief_completion_api_meetings__meeting_id__debrief_completion_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebriefCompletion"
                 }
               }
             }
@@ -1566,6 +1863,47 @@
         }
       }
     },
+    "/api/meetings/{meeting_id}/session/stream": {
+      "get": {
+        "tags": [
+          "live-session"
+        ],
+        "summary": "Stream Session",
+        "description": "Stream coverage and nudges for one meeting.",
+        "operationId": "stream_session_api_meetings__meeting_id__session_stream_get",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/slow-lane/tick": {
       "post": {
         "tags": [
@@ -1609,6 +1947,25 @@
       }
     },
     "/api/replay/runs": {
+      "get": {
+        "tags": [
+          "replay-runs"
+        ],
+        "summary": "List Replay Runs",
+        "operationId": "list_replay_runs_api_replay_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayRunListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "replay-runs"
@@ -1773,6 +2130,46 @@
             }
           }
         }
+      },
+      "get": {
+        "tags": [
+          "compiler-bank"
+        ],
+        "summary": "Get Bank Compile Outcome",
+        "operationId": "get_bank_compile_outcome_api_engagements__engagement_id__bank_compile_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankCompileOutcome"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/bank/candidates/{candidate_id}": {
@@ -1902,6 +2299,50 @@
         }
       }
     },
+    "/api/engagements/{engagement_id}/vocabulary/{term_id}": {
+      "delete": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Remove Term",
+        "operationId": "remove_term_api_engagements__engagement_id__vocabulary__term_id__delete",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/engagements/{engagement_id}/vocabulary": {
       "post": {
         "tags": [
@@ -1937,6 +2378,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VocabularyTermResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "engagement-vocabulary"
+        ],
+        "summary": "List Vocabulary Endpoint",
+        "operationId": "list_vocabulary_endpoint_api_engagements__engagement_id__vocabulary_get",
+        "parameters": [
+          {
+            "name": "engagement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Engagement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyListResponse"
                 }
               }
             }
@@ -2100,6 +2581,41 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{document_id}": {
+      "delete": {
+        "tags": [
+          "engagement-documents"
+        ],
+        "summary": "Remove Document",
+        "operationId": "remove_document_api_documents__document_id__delete",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -2321,6 +2837,10 @@
       },
       "ArtifactSummary": {
         "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
           "artifact_type": {
             "$ref": "#/components/schemas/ArtifactType"
           },
@@ -2332,11 +2852,12 @@
         },
         "type": "object",
         "required": [
+          "artifact_id",
           "artifact_type",
           "generated_at"
         ],
         "title": "ArtifactSummary",
-        "description": "One artifact a meeting has produced, listed by kind and generation time."
+        "description": "One artifact a meeting has produced, listed by id, kind and generation time.\n\n`artifact_id` is what makes the list actionable: `ArtifactDetail` is\naddressed by its own id, and this list is the only place a caller can\nlearn one. Without it the detail route was reachable only by guessing,\nwhich is to say not at all."
       },
       "ArtifactType": {
         "type": "string",
@@ -2481,6 +3002,61 @@
         "title": "AttendeeCreateRequest",
         "description": "One attendee's structured profile, captured with no free-text assessment field (PRD FR-3.10)."
       },
+      "AudioDestructionEvent": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "audio_ref": {
+            "type": "string",
+            "title": "Audio Ref"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AudioDestructionStatus"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "audio_ref",
+          "status",
+          "requested_at",
+          "completed_at"
+        ],
+        "title": "AudioDestructionEvent",
+        "description": "Durable event marking that a session's raw retained audio was destroyed (PRD NFR-2.4).\n\nNFR-2.4 requires the service discard the raw audio the moment record-path\ntranscription and full diarization both complete, retaining it no longer.\nThis event is what makes that discard observable: persisted whether the\ndeletion succeeded or failed, mirroring `SessionDiarization` and\n`RecordPathTranscript` \u2014 a session with no destruction event at all would\nbe indistinguishable from one whose audio is still sitting there, so a\n`FAILED` attempt must stay visible rather than silently leaving the raw\naudio retained with no record of why."
+      },
+      "AudioDestructionStatus": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "failed"
+        ],
+        "title": "AudioDestructionStatus",
+        "description": "Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4)."
+      },
       "AuthMode": {
         "type": "string",
         "enum": [
@@ -2489,6 +3065,76 @@
         ],
         "title": "AuthMode",
         "description": "Which credential the service authenticates Claude calls with.\n\nBoth are \"bring your own\": an API key issued from the console, or an\nOAuth token from `claude setup-token` / `ant auth login`. Which one an\noperator has depends on how their organisation issues access, so this is\nan explicit choice rather than an inference from whichever field happens\nto be filled \u2014 an operator with both configured must be able to say which\none is live."
+      },
+      "BankCompileOutcome": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "compile_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Compile Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": "stopped"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          },
+          "stages_completed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stages Completed"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "compile_id",
+          "complete"
+        ],
+        "title": "BankCompileOutcome",
+        "description": "How far one engagement's last bank compile got, and what stopped it (PRD FR-4.8).\n\n`job_id` on the trigger is \"what a caller polls or correlates against\nlater\" \u2014 and until this existed there was nothing to poll. The compile\nanswers 202 whatever happens after it, and the bank answers an empty list\nwhatever the reason, so an operator watching an empty bank had no way to\ntell a provider that refused the request from a document set that produced\nno questions.\n\n`cause` is a kind, never the pipeline's own prose: `not_configured` when\nnothing is set up, one of the provider failure kinds when a provider\nrefused, `failed` for anything else and `unknown` when the stage recorded\nno reason at all. `reason` carries the sentence verbatim for whoever is\ndiagnosing it, and is not meant for a screen."
       },
       "BankCompileTrigger": {
         "properties": {
@@ -3039,6 +3685,66 @@
         "title": "CoverageSlotUpdate",
         "description": "One coverage matrix cell a slow-lane pass updated (architecture \u00a74: `CoverageSlot[]`).\n\n`satisfied_at` is `None` unless this pass is the one that moved the slot\nto `FILLED` -- mirroring `core/crates/coverage::CoverageStore`'s\n`satisfied_at`, which only a fill transition (not merely remaining\nfilled) sets."
       },
+      "DebriefCompletion": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          },
+          "stages_completed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stages Completed"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "complete",
+          "stages_completed"
+        ],
+        "title": "DebriefCompletion",
+        "description": "How far the write-up got, and what stopped it (PRD NFR-4.1).\n\nThe \u00a77 pipeline fails closed: a stage that cannot complete halts the chain\nrather than feeding the next one, which is right, and it means a run that\nmet an unreachable model simply produces fewer artifacts. Without this the\ndifference between \"the connection dropped during the write-up\" and \"this\nmeeting decided nothing\" was invisible on the screen where it matters, and\nan operator would have read the second where the first was true.\n\n`reason` is whatever the halted stage recorded and is often absent \u2014 a\nstage refused before it was attempted has nothing to report. The stage name\nis the part that must always be there, because it is already enough to act\non."
+      },
       "DebriefConversationSession": {
         "properties": {
           "session_id": {
@@ -3228,6 +3934,38 @@
         "title": "DocumentLinkAttachmentRequest",
         "description": "Body for attaching a reference document by link (PRD FR-3.2).\n\n`url` is validated against known SharePoint and Microsoft Teams\nhostnames rather than accepted as any URL: FR-3.2 asks specifically for\nthose two sources, so an unsupported host fails validation with a 422\nnaming the field, the same style FR-3.4 uses for a missing `status`."
       },
+      "DocumentSourceSettings": {
+        "properties": {
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id",
+            "description": "Entra ID directory (tenant) id the documents live in. Unset means the connector is off and a linked document contributes nothing."
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id",
+            "description": "Application (client) id of the registration Elicta reads as. It needs Files.Read.All, and Sites.Read.All for team sites."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DocumentSourceSettings",
+        "description": "Where a linked reference document is read from (FR-3.2).\n\nAn Entra ID app registration with application permissions, rather than a\npasted access token: a token expires within the hour, and a connector that\nstops working over lunch is one nobody trusts. The secret half lives in the\nsecret store under `microsoft_graph_client_secret`; these two are\nidentifiers, not credentials, and are shown back to the operator so they\ncan confirm which tenant is wired up."
+      },
       "DocumentStatus": {
         "type": "string",
         "enum": [
@@ -3405,6 +4143,78 @@
         ],
         "title": "EngagementCreateResponse"
       },
+      "EngagementDetailResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "client_organisation": {
+            "type": "string",
+            "title": "Client Organisation"
+          },
+          "sector": {
+            "type": "string",
+            "title": "Sector"
+          },
+          "commercial_context": {
+            "type": "string",
+            "title": "Commercial Context"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "scope_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Boundary"
+          },
+          "target_requirements_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Requirements Template"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count"
+          },
+          "context_completeness_score": {
+            "type": "number",
+            "title": "Context Completeness Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "client_organisation",
+          "sector",
+          "commercial_context",
+          "document_count",
+          "context_completeness_score"
+        ],
+        "title": "EngagementDetailResponse",
+        "description": "A single engagement with its document count and context-completeness score."
+      },
       "EngagementDocument": {
         "properties": {
           "document_id": {
@@ -3452,6 +4262,38 @@
         ],
         "title": "EngagementDocumentListResponse",
         "description": "The full document list for one engagement (GET .../documents)."
+      },
+      "EngagementListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EngagementSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "EngagementListResponse",
+        "description": "A page of engagements for the signed-in delivery team."
       },
       "EngagementQuestionBank": {
         "properties": {
@@ -3513,6 +4355,68 @@
         ],
         "title": "EngagementStateResponse",
         "description": "An engagement's inherited open questions plus its standing requirements state (PRD FR-4.8, FR-8.9).\n\n`inherited_open_questions` is ranked ascending by `impact_rank` \u2014 the\nhighest-impact question a prior meeting left open comes first, the same\nconvention `compiler/bank/recompile.py` and `debrief/artifacts/router.py`'s\n`build_open_questions_router` use. `requirements_state` is `None` for an\nengagement with no prior meetings: there is nothing yet to carry forward,\nnot a 404-worthy absence \u2014 `router.py`'s route always answers 200."
+      },
+      "EngagementSummary": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "client_organisation": {
+            "type": "string",
+            "title": "Client Organisation"
+          },
+          "sector": {
+            "type": "string",
+            "title": "Sector"
+          },
+          "commercial_context": {
+            "type": "string",
+            "title": "Commercial Context"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "scope_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Boundary"
+          },
+          "target_requirements_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Requirements Template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "client_organisation",
+          "sector",
+          "commercial_context"
+        ],
+        "title": "EngagementSummary",
+        "description": "One row of the engagement list (GET /api/engagements).\n\nCarries `EngagementRecord`'s fields plus the id, mirroring\n`EngagementDetailResponse` minus the per-engagement document count and\ncompleteness score \u2014 those require the extra lookups `GET /{id}` does for\na single engagement, which a list endpoint should not pay N times over."
       },
       "EngagementUpdateRequest": {
         "properties": {
@@ -3773,6 +4677,17 @@
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Precision At Surfaced"
+          },
+          "embarrassing_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Embarrassing Count",
+            "default": 0
+          },
+          "clears_m2_gate": {
+            "type": "boolean",
+            "title": "Clears M2 Gate",
+            "default": true
           }
         },
         "type": "object",
@@ -3783,7 +4698,7 @@
           "precision_at_surfaced"
         ],
         "title": "LanguagePrecision",
-        "description": "M1 for one language: precision@surfaced over its rated suggestions."
+        "description": "M1 and M2 for one language, over its rated suggestions."
       },
       "LlmProvider": {
         "type": "string",
@@ -4032,6 +4947,28 @@
         "title": "MeetingDetail",
         "description": "A single meeting read back with its attendees, coverage summary, and nudge count.\n\nAggregates across the `meetings` and `attendees` tables and the\ncoverage-matrix/nudge-disposition state, none of which this package\nowns, so it is assembled by a single injected lookup rather than three\nseparate reads -- the same \"no transformation, just an injected lookup\"\ncontract `ArtifactDetail`'s router uses. `coverage_summary` is `None`\nuntil the meeting's debrief pipeline has run a section classification;\n`nudge_count` is the number of live-mode nudges that fired during the\nmeeting's capture (PRD FR-7.4), `0` for a meeting with no live-mode\ncapture yet."
       },
+      "MeetingListResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "meetings": {
+            "items": {
+              "$ref": "#/components/schemas/MeetingSummary"
+            },
+            "type": "array",
+            "title": "Meetings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "meetings"
+        ],
+        "title": "MeetingListResponse",
+        "description": "Every meeting belonging to one engagement, oldest first.\n\nOrdered by creation rather than by `scheduled_at`, since a meeting can be\ncreated before a time is settled (`MeetingCreateRequest.scheduled_at` is\noptional) and an unscheduled meeting must still have a stable place in\nthe list rather than sorting to an arbitrary end of it."
+      },
       "MeetingQuestionBank": {
         "properties": {
           "meeting_id": {
@@ -4059,6 +4996,82 @@
         ],
         "title": "MeetingQuestionBank",
         "description": "The fresh, per-meeting recompiled question bank (PRD FR-4.8).\n\nRecomputed by `recompile_meeting_bank` for every meeting rather than\nreused across an engagement's meetings \u2014 \"the bank\" a live meeting reads\nfrom is always this meeting's own recompile, not the engagement's\noriginal compile from `POST /api/engagements/{id}/bank/compile`."
+      },
+      "MeetingSummary": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "capture_mode": {
+            "type": "string",
+            "title": "Capture Mode"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "session_purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Purpose"
+          },
+          "sections_filled": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sections Filled"
+          },
+          "sections_total": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sections Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "engagement_id",
+          "state",
+          "capture_mode"
+        ],
+        "title": "MeetingSummary",
+        "description": "One row of an engagement's meeting list (GET /api/engagements/{id}/meetings).\n\nAn engagement is a sequence of meetings, and until this list existed the\nonly way to learn a meeting's id was to have been the caller that created\nit \u2014 which is why the desktop's debrief screen shipped with a hard-coded\none. The row carries what a chooser needs to tell two meetings apart\n(when it was scheduled, what it was for, how far it got) and nothing that\nwould cost a per-row lookup; attendees and nudge counts stay on\n`GET /api/meetings/{id}`.\n\n`sections_filled`/`sections_total` mirror the coverage summary that route\nreturns, as two optional scalars rather than an import of\n`debrief/api`'s `MeetingCoverageSummary`: this package does not own that\ntype, and the same cross-module boundary is why `EngagementContext` is a\nlocal mirror. Both are `None` until the meeting's debrief pipeline has\nclassified sections \u2014 a meeting that has not happened yet has no coverage,\nwhich is not the same as coverage of zero."
       },
       "MeetingUpdateRequest": {
         "properties": {
@@ -4457,6 +5470,23 @@
         "title": "ReferenceDocument",
         "description": "One reference document row as persisted from a link attachment\n(mirrors the `reference_documents` table: PRD FR-3.2)."
       },
+      "ReplayRunListResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayRunSummary"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs"
+        ],
+        "title": "ReplayRunListResponse",
+        "description": "Every replay run known to the service, oldest first."
+      },
       "ReplayRunMetricsResponse": {
         "properties": {
           "run_id": {
@@ -4478,7 +5508,7 @@
           "languages"
         ],
         "title": "ReplayRunMetricsResponse",
-        "description": "M1, broken out per language, for one replay run (T13: never blended)."
+        "description": "M1 and M2, broken out per language, for one replay run (T13: never blended)."
       },
       "ReplayRunStatus": {
         "type": "string",
@@ -4522,6 +5552,50 @@
         ],
         "title": "ReplayRunStatusResponse",
         "description": "Progress snapshot for one replay run."
+      },
+      "ReplayRunSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Run Id"
+          },
+          "recording_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Recording Id"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Language"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReplayRunStatus"
+          },
+          "progress": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Progress"
+          },
+          "suggestion_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Suggestion Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "recording_id",
+          "language",
+          "status",
+          "progress",
+          "suggestion_count"
+        ],
+        "title": "ReplayRunSummary",
+        "description": "One row of the replay run list (GET /api/replay/runs).\n\nCarries what a chooser needs to tell two runs apart -- which recording\nwas replayed and in which language the figures were scored -- plus the\nlifecycle fields `ReplayRunStatusResponse` reports, so picking a run out\nof the list needs no second call to find out whether it finished.\n\n`language` matters more here than it looks: M1 and M2 are partitioned by\nit (architecture T13), so two runs over the same recording in different\nlanguages are two different results, not one result listed twice."
       },
       "RequirementsContradiction": {
         "properties": {
@@ -4595,7 +5669,9 @@
           "anthropic_api_key",
           "anthropic_oauth_token",
           "asr_vendor_api_key",
-          "capture_vendor_api_key"
+          "capture_vendor_api_key",
+          "microsoft_graph_client_secret",
+          "state_database_url"
         ],
         "title": "SecretKey",
         "description": "The secrets an operator can configure.\n\nAn enum rather than free-form strings: a typo'd key name would otherwise\nsilently create a second, never-read secret while the real one stayed\nunset."
@@ -4672,6 +5748,12 @@
           },
           "connectors": {
             "$ref": "#/components/schemas/ConnectorSettings"
+          },
+          "documents": {
+            "$ref": "#/components/schemas/DocumentSourceSettings"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/StorageSettings"
           },
           "secrets": {
             "items": {
@@ -4799,6 +5881,16 @@
               }
             ]
           },
+          "documents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentSourceSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretUpdate"
@@ -4894,6 +5986,12 @@
             "type": "string",
             "minLength": 1,
             "title": "Recording Id"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Language",
+            "default": "en"
           }
         },
         "type": "object",
@@ -4901,7 +5999,7 @@
           "recording_id"
         ],
         "title": "StartReplayRunRequest",
-        "description": "A request to start a replay run against an already-uploaded recording."
+        "description": "A request to start a replay run against an already-uploaded recording.\n\n`language` is the language the run is conducted in, and it is carried\nhere because M1 (precision@surfaced) and M2 (embarrassment rate) are\npartitioned by it (architecture T13) -- a rating has no language of its\nown, it inherits the run's. It defaults rather than being required so\nthat existing callers keep working, but a run in another language must\nsay so: scoring a Portuguese run under `en` does not make the figure\nwrong by a little, it files it under the wrong gate entirely."
       },
       "StartReplayRunResponse": {
         "properties": {
@@ -4917,6 +6015,26 @@
         ],
         "title": "StartReplayRunResponse",
         "description": "Acknowledgement that a replay run has been queued."
+      },
+      "StorageSettings": {
+        "properties": {
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "The database this deployment reads and writes, with any password removed. Read-only: set it by saving the `state_database_url` secret.",
+            "default": ""
+          },
+          "applies_on_restart": {
+            "type": "boolean",
+            "title": "Applies On Restart",
+            "description": "Whether a change here takes effect only after a restart. It does: the collections are opened once at startup and bound into the backend, so a save that claimed to move a live deployment would be describing something that did not happen.",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StorageSettings",
+        "description": "Where an engagement's memory is kept (PRD G4).\n\nSQLite by default, because the desktop product ships to people with no\ndatabase server and should not need one. A deployment that wants PostgreSQL\nopts in by saving a URL, which is a secret \u2014 it carries a password \u2014 so what\nis shown back has the password removed and everything identifying the server\nleft in."
       },
       "SuggestionRatingRequest": {
         "properties": {
@@ -5086,6 +6204,28 @@
         "type": "object",
         "title": "VendorSettings",
         "description": "Non-secret endpoints for the speech vendors (ADR-004, ADR-011)."
+      },
+      "VocabularyListResponse": {
+        "properties": {
+          "engagement_id": {
+            "type": "string",
+            "title": "Engagement Id"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyTermResponse"
+            },
+            "type": "array",
+            "title": "Terms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engagement_id",
+          "terms"
+        ],
+        "title": "VocabularyListResponse",
+        "description": "An engagement's vocabulary list, in the order terms were added (PRD FR-3.6).\n\nThe terms are what the ASR keyterm handshake is primed with, and the prep\nscreen shows them for exactly that reason: a client or product name the\ntranscriber has never heard is the word most often misheard, and a\nmisheard product name fires a trigger about nothing. A reviewer can only\ncheck that list if something serves it back."
       },
       "VocabularyTermCreateRequest": {
         "properties": {

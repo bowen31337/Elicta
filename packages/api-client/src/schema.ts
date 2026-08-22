@@ -38,6 +38,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/meetings/{meeting_id}/consent-record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Consent Record Endpoint
+         * @description Who confirmed consent for this meeting, and when.
+         *
+         *     The gate answers whether capture may begin; this answers who is
+         *     accountable for it having been disclosed. Both matter, and only
+         *     the first was readable — the confirmation was written to a
+         *     durable record that nothing ever served back, so a screen could
+         *     show that consent was on record but not whose word that was.
+         *
+         *     A 404 means nobody has confirmed yet, which is a real and normal
+         *     state before a meeting rather than a fault.
+         */
+        get: operations["get_consent_record_endpoint_api_meetings__meeting_id__consent_record_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/audit/egress": {
         parameters: {
             query?: never;
@@ -62,7 +91,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Engagements Endpoint */
+        get: operations["list_engagements_endpoint_api_engagements_get"];
         put?: never;
         /** Create Engagement Endpoint */
         post: operations["create_engagement_endpoint_api_engagements_post"];
@@ -79,10 +109,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Engagement Endpoint */
+        get: operations["get_engagement_endpoint_api_engagements__engagement_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Engagement Endpoint
+         * @description Take an engagement out of view (soft).
+         *
+         *     The row stays, marked, and so does everything hanging off it. A
+         *     removal here is about a list an operator has to read, not about
+         *     erasing a client — and in a product that records client meetings,
+         *     those two should not be the same button.
+         */
+        delete: operations["delete_engagement_endpoint_api_engagements__engagement_id__delete"];
         options?: never;
         head?: never;
         /** Update Engagement Endpoint */
@@ -140,6 +180,23 @@ export interface paths {
         head?: never;
         /** Update Meeting Endpoint */
         patch: operations["update_meeting_endpoint_api_meetings__meeting_id__patch"];
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Engagement Meetings */
+        get: operations["list_engagement_meetings_api_engagements__engagement_id__meetings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/sessions/{session_id}/record-path-transcript": {
@@ -239,6 +296,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/audio-destruction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Audio Destruction */
+        get: operations["get_audio_destruction_api_sessions__session_id__audio_destruction_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/debrief/start": {
         parameters: {
             query?: never;
@@ -267,6 +341,23 @@ export interface paths {
         put?: never;
         /** Send Message To Debrief Session */
         post: operations["send_message_to_debrief_session_api_meetings__meeting_id__debrief_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/debrief/completion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Debrief Completion */
+        get: operations["get_debrief_completion_api_meetings__meeting_id__debrief_completion_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -547,6 +638,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/meetings/{meeting_id}/session/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Session
+         * @description Stream coverage and nudges for one meeting.
+         */
+        get: operations["stream_session_api_meetings__meeting_id__session_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/slow-lane/tick": {
         parameters: {
             query?: never;
@@ -571,7 +682,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Replay Runs */
+        get: operations["list_replay_runs_api_replay_runs_get"];
         put?: never;
         /** Start Replay Run */
         post: operations["start_replay_run_api_replay_runs_post"];
@@ -622,7 +734,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Bank Compile Outcome */
+        get: operations["get_bank_compile_outcome_api_engagements__engagement_id__bank_compile_get"];
         put?: never;
         /** Compile Engagement Bank */
         post: operations["compile_engagement_bank_api_engagements__engagement_id__bank_compile_post"];
@@ -667,7 +780,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/engagements/{engagement_id}/vocabulary": {
+    "/api/engagements/{engagement_id}/vocabulary/{term_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -675,6 +788,24 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Term */
+        delete: operations["remove_term_api_engagements__engagement_id__vocabulary__term_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engagements/{engagement_id}/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Vocabulary Endpoint */
+        get: operations["list_vocabulary_endpoint_api_engagements__engagement_id__vocabulary_get"];
         put?: never;
         /** Add Vocabulary Term Endpoint */
         post: operations["add_vocabulary_term_endpoint_api_engagements__engagement_id__vocabulary_post"];
@@ -733,6 +864,23 @@ export interface paths {
         head?: never;
         /** Patch Document Status */
         patch: operations["patch_document_status_api_documents__document_id__status_patch"];
+        trace?: never;
+    };
+    "/api/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Document */
+        delete: operations["remove_document_api_documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/engagements/{engagement_id}/documents/link": {
@@ -863,9 +1011,16 @@ export interface components {
         };
         /**
          * ArtifactSummary
-         * @description One artifact a meeting has produced, listed by kind and generation time.
+         * @description One artifact a meeting has produced, listed by id, kind and generation time.
+         *
+         *     `artifact_id` is what makes the list actionable: `ArtifactDetail` is
+         *     addressed by its own id, and this list is the only place a caller can
+         *     learn one. Without it the detail route was reachable only by guessing,
+         *     which is to say not at all.
          */
         ArtifactSummary: {
+            /** Artifact Id */
+            artifact_id: string;
             artifact_type: components["schemas"]["ArtifactType"];
             /**
              * Generated At
@@ -916,6 +1071,44 @@ export interface components {
             domain_expertise?: string[];
         };
         /**
+         * AudioDestructionEvent
+         * @description Durable event marking that a session's raw retained audio was destroyed (PRD NFR-2.4).
+         *
+         *     NFR-2.4 requires the service discard the raw audio the moment record-path
+         *     transcription and full diarization both complete, retaining it no longer.
+         *     This event is what makes that discard observable: persisted whether the
+         *     deletion succeeded or failed, mirroring `SessionDiarization` and
+         *     `RecordPathTranscript` — a session with no destruction event at all would
+         *     be indistinguishable from one whose audio is still sitting there, so a
+         *     `FAILED` attempt must stay visible rather than silently leaving the raw
+         *     audio retained with no record of why.
+         */
+        AudioDestructionEvent: {
+            /** Session Id */
+            session_id: string;
+            /** Audio Ref */
+            audio_ref: string;
+            status: components["schemas"]["AudioDestructionStatus"];
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * AudioDestructionStatus
+         * @description Terminal state of one attempt to destroy a session's raw retained audio (PRD NFR-2.4).
+         * @enum {string}
+         */
+        AudioDestructionStatus: "complete" | "failed";
+        /**
          * AuthMode
          * @description Which credential the service authenticates Claude calls with.
          *
@@ -928,6 +1121,44 @@ export interface components {
          * @enum {string}
          */
         AuthMode: "api_key" | "oauth_token";
+        /**
+         * BankCompileOutcome
+         * @description How far one engagement's last bank compile got, and what stopped it (PRD FR-4.8).
+         *
+         *     `job_id` on the trigger is "what a caller polls or correlates against
+         *     later" — and until this existed there was nothing to poll. The compile
+         *     answers 202 whatever happens after it, and the bank answers an empty list
+         *     whatever the reason, so an operator watching an empty bank had no way to
+         *     tell a provider that refused the request from a document set that produced
+         *     no questions.
+         *
+         *     `cause` is a kind, never the pipeline's own prose: `not_configured` when
+         *     nothing is set up, one of the provider failure kinds when a provider
+         *     refused, `failed` for anything else and `unknown` when the stage recorded
+         *     no reason at all. `reason` carries the sentence verbatim for whoever is
+         *     diagnosing it, and is not meant for a screen.
+         */
+        BankCompileOutcome: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Compile Id */
+            compile_id: string;
+            /**
+             * State
+             * @default stopped
+             */
+            state: string;
+            /** Complete */
+            complete: boolean;
+            /** Stages Completed */
+            stages_completed?: string[];
+            /** Stopped At */
+            stopped_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Cause */
+            cause?: string | null;
+        };
         /**
          * BankCompileTrigger
          * @description Handle for one engagement's bank compile job, returned immediately on trigger (PRD FR-4.8).
@@ -1262,6 +1493,36 @@ export interface components {
             satisfied_at?: string | null;
         };
         /**
+         * DebriefCompletion
+         * @description How far the write-up got, and what stopped it (PRD NFR-4.1).
+         *
+         *     The §7 pipeline fails closed: a stage that cannot complete halts the chain
+         *     rather than feeding the next one, which is right, and it means a run that
+         *     met an unreachable model simply produces fewer artifacts. Without this the
+         *     difference between "the connection dropped during the write-up" and "this
+         *     meeting decided nothing" was invisible on the screen where it matters, and
+         *     an operator would have read the second where the first was true.
+         *
+         *     `reason` is whatever the halted stage recorded and is often absent — a
+         *     stage refused before it was attempted has nothing to report. The stage name
+         *     is the part that must always be there, because it is already enough to act
+         *     on.
+         */
+        DebriefCompletion: {
+            /** Session Id */
+            session_id: string;
+            /** Complete */
+            complete: boolean;
+            /** Stages Completed */
+            stages_completed: string[];
+            /** Stopped At */
+            stopped_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Cause */
+            cause?: string | null;
+        };
+        /**
          * DebriefConversationSession
          * @description One meeting's open debrief conversation (PRD FR-7.1, FR-7.4).
          *
@@ -1380,6 +1641,29 @@ export interface components {
             status: components["schemas"]["DocumentStatus"];
         };
         /**
+         * DocumentSourceSettings
+         * @description Where a linked reference document is read from (FR-3.2).
+         *
+         *     An Entra ID app registration with application permissions, rather than a
+         *     pasted access token: a token expires within the hour, and a connector that
+         *     stops working over lunch is one nobody trusts. The secret half lives in the
+         *     secret store under `microsoft_graph_client_secret`; these two are
+         *     identifiers, not credentials, and are shown back to the operator so they
+         *     can confirm which tenant is wired up.
+         */
+        DocumentSourceSettings: {
+            /**
+             * Tenant Id
+             * @description Entra ID directory (tenant) id the documents live in. Unset means the connector is off and a linked document contributes nothing.
+             */
+            tenant_id?: string | null;
+            /**
+             * Client Id
+             * @description Application (client) id of the registration Elicta reads as. It needs Files.Read.All, and Sites.Read.All for team sites.
+             */
+            client_id?: string | null;
+        };
+        /**
          * DocumentStatus
          * @description Status tag required on every reference document (PRD FR-3.4).
          * @enum {string}
@@ -1472,6 +1756,30 @@ export interface components {
             engagement_id: string;
         };
         /**
+         * EngagementDetailResponse
+         * @description A single engagement with its document count and context-completeness score.
+         */
+        EngagementDetailResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Client Organisation */
+            client_organisation: string;
+            /** Sector */
+            sector: string;
+            /** Commercial Context */
+            commercial_context: string;
+            /** Purpose */
+            purpose?: string | null;
+            /** Scope Boundary */
+            scope_boundary?: string | null;
+            /** Target Requirements Template */
+            target_requirements_template?: string | null;
+            /** Document Count */
+            document_count: number;
+            /** Context Completeness Score */
+            context_completeness_score: number;
+        };
+        /**
          * EngagementDocument
          * @description One reference document attached to an engagement, with its status tag.
          */
@@ -1491,6 +1799,20 @@ export interface components {
             engagement_id: string;
             /** Documents */
             documents: components["schemas"]["EngagementDocument"][];
+        };
+        /**
+         * EngagementListResponse
+         * @description A page of engagements for the signed-in delivery team.
+         */
+        EngagementListResponse: {
+            /** Items */
+            items: components["schemas"]["EngagementSummary"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * EngagementQuestionBank
@@ -1531,6 +1853,31 @@ export interface components {
             /** Inherited Open Questions */
             inherited_open_questions: components["schemas"]["InheritedOpenQuestion"][];
             requirements_state?: components["schemas"]["RequirementsState"] | null;
+        };
+        /**
+         * EngagementSummary
+         * @description One row of the engagement list (GET /api/engagements).
+         *
+         *     Carries `EngagementRecord`'s fields plus the id, mirroring
+         *     `EngagementDetailResponse` minus the per-engagement document count and
+         *     completeness score — those require the extra lookups `GET /{id}` does for
+         *     a single engagement, which a list endpoint should not pay N times over.
+         */
+        EngagementSummary: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Client Organisation */
+            client_organisation: string;
+            /** Sector */
+            sector: string;
+            /** Commercial Context */
+            commercial_context: string;
+            /** Purpose */
+            purpose?: string | null;
+            /** Scope Boundary */
+            scope_boundary?: string | null;
+            /** Target Requirements Template */
+            target_requirements_template?: string | null;
         };
         /**
          * EngagementUpdateRequest
@@ -1642,7 +1989,7 @@ export interface components {
         };
         /**
          * LanguagePrecision
-         * @description M1 for one language: precision@surfaced over its rated suggestions.
+         * @description M1 and M2 for one language, over its rated suggestions.
          */
         LanguagePrecision: {
             /** Language */
@@ -1653,6 +2000,16 @@ export interface components {
             useful_count: number;
             /** Precision At Surfaced */
             precision_at_surfaced: number;
+            /**
+             * Embarrassing Count
+             * @default 0
+             */
+            embarrassing_count: number;
+            /**
+             * Clears M2 Gate
+             * @default true
+             */
+            clears_m2_gate: boolean;
         };
         /**
          * LlmProvider
@@ -1782,6 +2139,21 @@ export interface components {
             nudge_count: number;
         };
         /**
+         * MeetingListResponse
+         * @description Every meeting belonging to one engagement, oldest first.
+         *
+         *     Ordered by creation rather than by `scheduled_at`, since a meeting can be
+         *     created before a time is settled (`MeetingCreateRequest.scheduled_at` is
+         *     optional) and an unscheduled meeting must still have a stable place in
+         *     the list rather than sorting to an arbitrary end of it.
+         */
+        MeetingListResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Meetings */
+            meetings: components["schemas"]["MeetingSummary"][];
+        };
+        /**
          * MeetingQuestionBank
          * @description The fresh, per-meeting recompiled question bank (PRD FR-4.8).
          *
@@ -1800,6 +2172,44 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+        };
+        /**
+         * MeetingSummary
+         * @description One row of an engagement's meeting list (GET /api/engagements/{id}/meetings).
+         *
+         *     An engagement is a sequence of meetings, and until this list existed the
+         *     only way to learn a meeting's id was to have been the caller that created
+         *     it — which is why the desktop's debrief screen shipped with a hard-coded
+         *     one. The row carries what a chooser needs to tell two meetings apart
+         *     (when it was scheduled, what it was for, how far it got) and nothing that
+         *     would cost a per-row lookup; attendees and nudge counts stay on
+         *     `GET /api/meetings/{id}`.
+         *
+         *     `sections_filled`/`sections_total` mirror the coverage summary that route
+         *     returns, as two optional scalars rather than an import of
+         *     `debrief/api`'s `MeetingCoverageSummary`: this package does not own that
+         *     type, and the same cross-module boundary is why `EngagementContext` is a
+         *     local mirror. Both are `None` until the meeting's debrief pipeline has
+         *     classified sections — a meeting that has not happened yet has no coverage,
+         *     which is not the same as coverage of zero.
+         */
+        MeetingSummary: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Engagement Id */
+            engagement_id: string;
+            /** State */
+            state: string;
+            /** Capture Mode */
+            capture_mode: string;
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            /** Session Purpose */
+            session_purpose?: string | null;
+            /** Sections Filled */
+            sections_filled?: number | null;
+            /** Sections Total */
+            sections_total?: number | null;
         };
         /**
          * MeetingUpdateRequest
@@ -2027,8 +2437,16 @@ export interface components {
             source_uri: string;
         };
         /**
+         * ReplayRunListResponse
+         * @description Every replay run known to the service, oldest first.
+         */
+        ReplayRunListResponse: {
+            /** Runs */
+            runs: components["schemas"]["ReplayRunSummary"][];
+        };
+        /**
          * ReplayRunMetricsResponse
-         * @description M1, broken out per language, for one replay run (T13: never blended).
+         * @description M1 and M2, broken out per language, for one replay run (T13: never blended).
          */
         ReplayRunMetricsResponse: {
             /** Run Id */
@@ -2049,6 +2467,32 @@ export interface components {
         ReplayRunStatusResponse: {
             /** Run Id */
             run_id: string;
+            status: components["schemas"]["ReplayRunStatus"];
+            /** Progress */
+            progress: number;
+            /** Suggestion Count */
+            suggestion_count: number;
+        };
+        /**
+         * ReplayRunSummary
+         * @description One row of the replay run list (GET /api/replay/runs).
+         *
+         *     Carries what a chooser needs to tell two runs apart -- which recording
+         *     was replayed and in which language the figures were scored -- plus the
+         *     lifecycle fields `ReplayRunStatusResponse` reports, so picking a run out
+         *     of the list needs no second call to find out whether it finished.
+         *
+         *     `language` matters more here than it looks: M1 and M2 are partitioned by
+         *     it (architecture T13), so two runs over the same recording in different
+         *     languages are two different results, not one result listed twice.
+         */
+        ReplayRunSummary: {
+            /** Run Id */
+            run_id: string;
+            /** Recording Id */
+            recording_id: string;
+            /** Language */
+            language: string;
             status: components["schemas"]["ReplayRunStatus"];
             /** Progress */
             progress: number;
@@ -2105,7 +2549,7 @@ export interface components {
          *     unset.
          * @enum {string}
          */
-        SecretKey: "anthropic_api_key" | "anthropic_oauth_token" | "asr_vendor_api_key" | "capture_vendor_api_key";
+        SecretKey: "anthropic_api_key" | "anthropic_oauth_token" | "asr_vendor_api_key" | "capture_vendor_api_key" | "microsoft_graph_client_secret" | "state_database_url";
         /**
          * SecretStatus
          * @description What a read of a secret returns: presence, not value.
@@ -2146,6 +2590,8 @@ export interface components {
             inference?: components["schemas"]["InferenceSettings"];
             vendors?: components["schemas"]["VendorSettings"];
             connectors?: components["schemas"]["ConnectorSettings"];
+            documents?: components["schemas"]["DocumentSourceSettings"];
+            storage?: components["schemas"]["StorageSettings"];
             /** Secrets */
             secrets?: components["schemas"]["SecretStatus"][];
             /**
@@ -2208,6 +2654,7 @@ export interface components {
             inference?: components["schemas"]["InferenceSettings"] | null;
             vendors?: components["schemas"]["VendorSettings"] | null;
             connectors?: components["schemas"]["ConnectorSettings"] | null;
+            documents?: components["schemas"]["DocumentSourceSettings"] | null;
             /** Secrets */
             secrets?: components["schemas"]["SecretUpdate"][];
         };
@@ -2265,10 +2712,23 @@ export interface components {
         /**
          * StartReplayRunRequest
          * @description A request to start a replay run against an already-uploaded recording.
+         *
+         *     `language` is the language the run is conducted in, and it is carried
+         *     here because M1 (precision@surfaced) and M2 (embarrassment rate) are
+         *     partitioned by it (architecture T13) -- a rating has no language of its
+         *     own, it inherits the run's. It defaults rather than being required so
+         *     that existing callers keep working, but a run in another language must
+         *     say so: scoring a Portuguese run under `en` does not make the figure
+         *     wrong by a little, it files it under the wrong gate entirely.
          */
         StartReplayRunRequest: {
             /** Recording Id */
             recording_id: string;
+            /**
+             * Language
+             * @default en
+             */
+            language: string;
         };
         /**
          * StartReplayRunResponse
@@ -2277,6 +2737,30 @@ export interface components {
         StartReplayRunResponse: {
             /** Run Id */
             run_id: string;
+        };
+        /**
+         * StorageSettings
+         * @description Where an engagement's memory is kept (PRD G4).
+         *
+         *     SQLite by default, because the desktop product ships to people with no
+         *     database server and should not need one. A deployment that wants PostgreSQL
+         *     opts in by saving a URL, which is a secret — it carries a password — so what
+         *     is shown back has the password removed and everything identifying the server
+         *     left in.
+         */
+        StorageSettings: {
+            /**
+             * Database
+             * @description The database this deployment reads and writes, with any password removed. Read-only: set it by saving the `state_database_url` secret.
+             * @default
+             */
+            database: string;
+            /**
+             * Applies On Restart
+             * @description Whether a change here takes effect only after a restart. It does: the collections are opened once at startup and bound into the backend, so a save that claimed to move a live deployment would be describing something that did not happen.
+             * @default true
+             */
+            applies_on_restart: boolean;
         };
         /**
          * SuggestionRatingRequest
@@ -2350,6 +2834,22 @@ export interface components {
             asr_base_url?: string | null;
             /** Capture Base Url */
             capture_base_url?: string | null;
+        };
+        /**
+         * VocabularyListResponse
+         * @description An engagement's vocabulary list, in the order terms were added (PRD FR-3.6).
+         *
+         *     The terms are what the ASR keyterm handshake is primed with, and the prep
+         *     screen shows them for exactly that reason: a client or product name the
+         *     transcriber has never heard is the word most often misheard, and a
+         *     misheard product name fires a trigger about nothing. A reviewer can only
+         *     check that list if something serves it back.
+         */
+        VocabularyListResponse: {
+            /** Engagement Id */
+            engagement_id: string;
+            /** Terms */
+            terms: components["schemas"]["VocabularyTermResponse"][];
         };
         /** VocabularyTermCreateRequest */
         VocabularyTermCreateRequest: {
@@ -2515,6 +3015,37 @@ export interface operations {
             };
         };
     };
+    get_consent_record_endpoint_api_meetings__meeting_id__consent_record_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_egress_audit_log_api_audit_egress_get: {
         parameters: {
             query: {
@@ -2535,6 +3066,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EgressLogRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_engagements_endpoint_api_engagements_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2569,6 +3132,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EngagementCreateResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_endpoint_api_engagements__engagement_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_engagement_endpoint_api_engagements__engagement_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2781,6 +3404,37 @@ export interface operations {
             };
         };
     };
+    list_engagement_meetings_api_engagements__engagement_id__meetings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_record_path_transcript_api_sessions__session_id__record_path_transcript_get: {
         parameters: {
             query?: never;
@@ -2979,6 +3633,37 @@ export interface operations {
             };
         };
     };
+    get_audio_destruction_api_sessions__session_id__audio_destruction_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioDestructionEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     start_debrief_session_api_meetings__meeting_id__debrief_start_post: {
         parameters: {
             query?: never;
@@ -3032,6 +3717,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DebriefConversationSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_debrief_completion_api_meetings__meeting_id__debrief_completion_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebriefCompletion"];
                 };
             };
             /** @description Validation Error */
@@ -3541,6 +4257,37 @@ export interface operations {
             };
         };
     };
+    stream_session_api_meetings__meeting_id__session_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     accept_slow_lane_tick_api_meetings__meeting_id__slow_lane_tick_post: {
         parameters: {
             query?: never;
@@ -3568,6 +4315,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_replay_runs_api_replay_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayRunListResponse"];
                 };
             };
         };
@@ -3654,6 +4421,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EngagementQuestionBank"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_bank_compile_outcome_api_engagements__engagement_id__bank_compile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankCompileOutcome"];
                 };
             };
             /** @description Validation Error */
@@ -3780,6 +4578,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EngagementStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_term_api_engagements__engagement_id__vocabulary__term_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                term_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vocabulary_endpoint_api_engagements__engagement_id__vocabulary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VocabularyListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3921,6 +4780,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EngagementDocument"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_document_api_documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

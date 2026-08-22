@@ -38,9 +38,13 @@ COMPOSITION = pathlib.Path(__file__).with_name("composition.py")
 # rather than becoming a place to hide new breakage.
 ACCEPTED_READ_ONLY: dict[str, str] = {
     "consent_models": (
-        "No API surface sets an engagement's consent model; it defaults to "
-        "PER_MEETING, which is the stricter of the two (D3), so an unwritten "
-        "field asks for confirmation rather than skipping it."
+        "No API surface sets an engagement's consent model; it takes "
+        "DEFAULT_CONSENT_MODEL, which at this stage is ENGAGEMENT_LEVEL (D3). "
+        "That is the fail-open of the two: an unwritten field skips the "
+        "confirmation rather than asking for it, so no engagement asks and no "
+        "consent record is ever written. This entry is the reason that is a "
+        "deliberate stage decision and not an oversight; see the note on "
+        "DEFAULT_CONSENT_MODEL in composition.py for what it costs."
     ),
     "nudge_signals": (
         "A recorded disposition says how a nudge was resolved, not what it "
@@ -59,15 +63,15 @@ ACCEPTED_READ_ONLY: dict[str, str] = {
         "recorded; its text is empty until something can fetch it."
     ),
     "meeting_base_candidates": (
-        "The per-meeting bank is recompiled from the engagement's compiled "
-        "candidates, and the two packages model a candidate differently "
-        "(`compiler/api` vs `compiler/bank`). Joining them is the recompile "
-        "step, which no caller runs yet."
+        "A per-meeting override, and nothing overrides yet. The bank a meeting "
+        "actually serves is derived from its engagement's compiled candidates "
+        "on read, so this being empty is the ordinary case rather than the "
+        "broken one — which is the opposite of what it meant when the read had "
+        "no fallback and every meeting's bank came back empty."
     ),
     "meeting_inherited_open_questions": (
-        "Same recompile step as `meeting_base_candidates`: open questions "
-        "inherited into a meeting's bank come from the engagement's carried "
-        "state, which nothing recompiles per meeting yet."
+        "The same override as `meeting_base_candidates`, from the other input: "
+        "unset, a meeting inherits whatever its engagement still has open."
     ),
     "candidate_authority_requirements": (
         "FR-4.7 scores a candidate against the roster using requirements the "
@@ -76,11 +80,16 @@ ACCEPTED_READ_ONLY: dict[str, str] = {
         "wrong one."
     ),
     "template_sections": (
-        "The BMAD taxonomy the debrief classifies against. An engagement "
-        "names its target template as free text "
-        "(`target_requirements_template`); nothing turns that name into the "
-        "section list, so classification runs with none rather than with a "
-        "taxonomy nobody chose."
+        "The BMAD taxonomy the debrief classifies against, and the sections "
+        "the compiler files a bank under. An engagement names its target "
+        "template as free text (`target_requirements_template`) and nothing "
+        "turns that name into a section list. The debrief still classifies "
+        "against none rather than against a taxonomy nobody chose; the "
+        "compiler no longer does, because being given no sections is what had "
+        "it inventing a catch-all and filing two thirds of a bank in it — it "
+        "falls back to `DEFAULT_TEMPLATE_SECTIONS`, which is a stated default "
+        "rather than the engagement's own template. Resolving that name is "
+        "what would let this field be written."
     ),
 }
 
@@ -93,6 +102,11 @@ ACCEPTED_READ_ONLY: dict[str, str] = {
 # places, written in none, and `.pop(...)` alone was enough to look like a
 # writer — so NFR-2.4's audio destruction could never fire and this test said
 # nothing. Removal is not provenance.
+#
+# `observe_success` is absent for the same reason. It clears a recorded
+# failure, and "reachable" is already the default — so a lane observer that
+# only ever saw successes has been told nothing it did not start out
+# believing. `observe_failure` is the call that puts state there.
 WRITE_METHODS = (
     "append",
     "add",
@@ -100,6 +114,7 @@ WRITE_METHODS = (
     "setdefault",
     "extend",
     "pin",
+    "observe_failure",
 )
 
 
@@ -205,7 +220,9 @@ SEAM_TESTS = sorted(
 # One test per write/read pair in the live run's findings table.
 COVERED_SEAMS = {
     "test_meeting_visibility.py": "POST /api/meetings -> GET /api/meetings/{id}",
-    "test_consent_gate_seam.py": "POST .../consent-confirmation -> GET .../consent-gate",
+    "test_consent_gate_seam.py": "POST .../consent-confirmation -> GET .../consent-record; "
+    "the confirmation -> gate half needs a seeded consent model and lives in "
+    "test_consent_and_egress.py",
     "test_document_intake_seam.py": "POST .../documents/link -> GET .../documents",
     "test_replay_seam.py": "POST /api/replay/runs -> GET /api/replay/runs/{id}, ratings -> metrics",
     "test_record_path_seam.py": "POST .../record/transcribe -> GET .../record/divergences",
