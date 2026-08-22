@@ -239,3 +239,69 @@ async def test_delete_is_issued_even_when_the_run_fails() -> None:
         await engine("session_123", "audio_ref_unused", [])
 
     assert delete_calls[0] == 1, "the vendor-side copy must be deleted even on failure"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delete_surfaces_even_though_transcription_succeeded() -> None:
+    """The transcription itself succeeded, but the vendor refused to delete
+    its copy. That must still fail the run, and name the transcript id so an
+    operator can find and remove the copy that was left behind."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(404)
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    with pytest.raises(AssemblyAIUnavailable, match="abc123"):
+        await engine("session_123", "audio_ref_unused", [])
+
+
+@pytest.mark.asyncio
+async def test_a_delete_transport_error_is_chained() -> None:
+    """A network failure during delete must not be swallowed either — it
+    surfaces as `AssemblyAIUnavailable` with the original exception chained,
+    so the cause is still visible."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            raise httpx.ConnectError("connection reset")
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    with pytest.raises(AssemblyAIUnavailable, match="abc123") as excinfo:
+        await engine("session_123", "audio_ref_unused", [])
+
+    assert isinstance(excinfo.value.__cause__, httpx.HTTPError)
+
+
+def test_a_response_missing_utterances_entirely_is_a_failure() -> None:
+    """`payload.get("utterances") or []` treats a missing key the same as an
+    empty list — this pins that the missing-key case is also refused."""
+
+    with pytest.raises(ValueError, match="no utterances"):
+        to_batch_transcription({"status": "completed"}, "assemblyai")
