@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import io
+import logging
 import time
 import wave
 from collections.abc import Awaitable, Callable
@@ -34,7 +35,16 @@ _models = importlib.import_module("app.modules.asr-record.models")
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 TranscriptSegment = _models.TranscriptSegment
 
+logger = logging.getLogger(__name__)
+
 BASE_URL = "https://api.assemblyai.com"
+
+#: A 90-minute meeting is uploaded before any of it is transcribed, and the
+#: upload is the request that holds the connection longest. httpx's default
+#: would abort one that was proceeding perfectly well. Named and configurable
+#: for the same reason Deepgram's is — there is no vendor-driven reason for
+#: the two to differ, and an inline literal is the one nothing can override.
+DEFAULT_TIMEOUT_SECONDS = 600.0
 
 # The capture pipeline's fixed format (architecture §7): linear PCM, 16 kHz,
 # mono, 16-bit little-endian samples. This is the same format Deepgram is
@@ -105,6 +115,7 @@ def assemblyai_record_engine(
     store: Any,
     *,
     name: str = "assemblyai",
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
     poll_seconds: float = 3.0,
     poll_ceiling_seconds: float = 1800.0,
     transport: Any = None,
@@ -132,35 +143,42 @@ def assemblyai_record_engine(
             raise AssemblyAIUnavailable("no AssemblyAI credential is configured")
 
         headers = {"authorization": secret.reveal()}
-        transcript_id: str | None = None
 
-        async with httpx.AsyncClient(timeout=600.0, transport=transport) as client:
-            try:
-                uploaded = await client.post(
-                    f"{BASE_URL}/v2/upload",
-                    headers=headers,
-                    content=_wrap_pcm_as_wav(bytes(audio)),
+        async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+            uploaded = await client.post(
+                f"{BASE_URL}/v2/upload",
+                headers=headers,
+                content=_wrap_pcm_as_wav(bytes(audio)),
+            )
+            if uploaded.status_code != 200:
+                raise AssemblyAIUnavailable(
+                    f"AssemblyAI upload answered {uploaded.status_code}: "
+                    f"{_body_excerpt(uploaded)}"
                 )
-                if uploaded.status_code != 200:
-                    raise AssemblyAIUnavailable(
-                        f"AssemblyAI upload answered {uploaded.status_code}"
-                    )
+            upload_url = _decoded(uploaded, "the upload response")["upload_url"]
 
+            # From here the vendor is holding a copy of a client's meeting, and
+            # everything below either removes it or says where it was left.
+            try:
                 submitted = await client.post(
                     f"{BASE_URL}/v2/transcript",
                     headers=headers,
                     json={
-                        "audio_url": uploaded.json()["upload_url"],
+                        "audio_url": upload_url,
                         "speaker_labels": True,
                         "word_boost": keyterms,
                     },
                 )
                 if submitted.status_code != 200:
                     raise AssemblyAIUnavailable(
-                        f"AssemblyAI submit answered {submitted.status_code}"
+                        f"AssemblyAI submit answered {submitted.status_code}: "
+                        f"{_body_excerpt(submitted)}"
                     )
+                transcript_id = _decoded(submitted, "the submit response")["id"]
+            except Exception as exc:
+                raise _orphaned_upload(session_id, upload_url, exc) from exc
 
-                transcript_id = submitted.json()["id"]
+            try:
                 payload = await _poll(
                     client, headers, transcript_id, poll_seconds, poll_ceiling_seconds
                 )
@@ -168,10 +186,77 @@ def assemblyai_record_engine(
             finally:
                 # The vendor is holding a copy of a client's meeting. Removing
                 # it is the point, so it runs even when the run failed.
-                if transcript_id is not None:
-                    await _delete(client, headers, transcript_id)
+                await _delete(client, headers, transcript_id)
 
     return transcribe
+
+
+def _orphaned_upload(
+    session_id: str, upload_url: str, cause: Exception
+) -> AssemblyAIUnavailable:
+    """The upload landed, no transcript exists, and nothing can remove it.
+
+    `DELETE /v2/transcript/{id}` is the only deletion this API exposes, and it
+    deletes the audio *through* the transcript — an upload that never became
+    one has no handle to delete it by. AssemblyAI's own retention is what
+    removes it: their published policy is that deletion of asynchronous
+    production audio begins at 24 hours and completes within 48.
+
+    So spec 5.4b's "the delete is mandatory" cannot be honoured on this one
+    path, and the remaining obligation is that nobody has to discover the copy
+    by accident. It is logged at ERROR and named in the exception, which
+    `run_record_path_transcription` persists as this engine's `FAILED`
+    transcript — so the copy is discoverable from the recording screen and
+    from the log, with the URL that identifies it. That URL is not a
+    credential: it is the handle an operator needs to raise it with the
+    vendor.
+    """
+
+    logger.error(
+        "AssemblyAI holds an uploaded copy of session %s that could not be "
+        "removed: no transcript was created for %s, and this API deletes "
+        "uploaded audio only through its transcript. The vendor's own "
+        "retention removes it within 48 hours. Cause: %s",
+        session_id,
+        upload_url,
+        cause,
+    )
+    return AssemblyAIUnavailable(
+        f"AssemblyAI kept an uploaded copy of this recording: {upload_url} was "
+        f"uploaded but no transcript was created ({cause}), and this API can "
+        "only delete uploaded audio through a transcript. The vendor deletes "
+        "it within 48 hours; nothing here can remove it sooner"
+    )
+
+
+def _body_excerpt(response: httpx.Response, limit: int = 200) -> str:
+    """What the vendor actually said, short enough to live in an error message.
+
+    A status code alone sends an operator to the wrong place often enough to
+    matter: 401 and 404 both read as "broken" and mean different fixes, and
+    the body is usually the sentence that separates them.
+    """
+
+    body = " ".join(response.text.split())
+    return body[:limit] if body else "<empty body>"
+
+
+def _decoded(response: httpx.Response, what: str) -> Any:
+    """`response.json()`, refused rather than raised through.
+
+    An error page, a proxy's HTML, or a truncated body all reach `.json()` as
+    a `JSONDecodeError` — a decode traceback naming a byte offset, in a place
+    where the useful information is that the vendor did not answer with JSON
+    and what it said instead.
+    """
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise AssemblyAIUnavailable(
+            f"AssemblyAI answered {what} with {response.status_code} and a body "
+            f"that is not JSON: {_body_excerpt(response)}"
+        ) from exc
 
 
 async def _poll(
@@ -192,7 +277,17 @@ async def _poll(
         response = await client.get(
             f"{BASE_URL}/v2/transcript/{transcript_id}", headers=headers
         )
-        payload = response.json()
+        # A refusal is not "no status yet". Reading one as a poll that has not
+        # come back yet spent the whole ceiling — 600 requests over half an
+        # hour, with the debrief blocked behind them — and then reported
+        # "still processing", which is the wrong diagnosis for a rejected
+        # credential or a transcript that does not exist.
+        if response.status_code != 200:
+            raise AssemblyAIUnavailable(
+                f"AssemblyAI answered {response.status_code} polling "
+                f"{transcript_id}: {_body_excerpt(response)}"
+            )
+        payload = _decoded(response, f"a poll for {transcript_id}")
         status = payload.get("status")
         if status == "completed":
             return payload

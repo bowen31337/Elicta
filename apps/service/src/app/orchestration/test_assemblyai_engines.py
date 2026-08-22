@@ -15,6 +15,7 @@ No test here makes a live call; every engine test drives an
 from __future__ import annotations
 
 import io
+import json
 import wave
 
 import httpx
@@ -389,3 +390,151 @@ async def test_the_wav_header_adds_exactly_44_bytes() -> None:
 
     assert len(uploaded_bodies[0]) == 44 + len(pcm)
 
+
+@pytest.mark.asyncio
+async def test_the_submitted_request_carries_the_engagement_vocabulary() -> None:
+    """FR-2.9 / spec 7: `word_boost` is AssemblyAI's counterpart to Deepgram's
+    `keyterm`, and it is the path the engagement's own vocabulary travels —
+    the single most effective accuracy control an operator has. Sending the
+    request without it still returns a transcript, just a wronger one, which
+    is exactly the kind of silent loss no live run would report."""
+
+    submitted_bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            submitted_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    await engine("session_123", "audio_ref_unused", ["FROSTLINE", "cross dock"])
+
+    assert submitted_bodies[0]["word_boost"] == ["FROSTLINE", "cross dock"]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_poll_fails_fast_instead_of_spending_the_ceiling() -> None:
+    """A 401 mid-poll is not "no status yet".
+
+    Reading a refusal as a poll that has not come back yet ran the full
+    1800-second ceiling — 600 requests — and then reported "still processing
+    after 1800s", which is the wrong diagnosis with the debrief blocked behind
+    it. The credential is what is wrong, and the message has to say so.
+    """
+
+    polls = [0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            polls[0] += 1
+            return httpx.Response(401, json={"error": "Authentication error, API token missing/invalid"})
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+        # Generous on purpose: a fix that only fails when the ceiling runs out
+        # would still pass a test that set the ceiling low.
+        poll_ceiling_seconds=1800.0,
+    )
+
+    with pytest.raises(AssemblyAIUnavailable, match="401") as excinfo:
+        await engine("session_123", "audio_ref_unused", [])
+
+    assert "still processing" not in str(excinfo.value)
+    assert polls[0] == 1, "the poll loop kept asking after a refusal"
+
+
+@pytest.mark.asyncio
+async def test_a_poll_body_that_is_not_json_says_what_came_back() -> None:
+    """A gateway's HTML error page reaches `.json()` as a decode traceback
+    naming a byte offset. What matters is that the vendor did not answer with
+    JSON, and what it said instead."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, text="<html><body>502 Bad Gateway</body></html>")
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    with pytest.raises(AssemblyAIUnavailable, match="not JSON") as excinfo:
+        await engine("session_123", "audio_ref_unused", [])
+
+    assert "502 Bad Gateway" in str(excinfo.value)
+    assert not isinstance(excinfo.value, json.JSONDecodeError)
+
+
+@pytest.mark.asyncio
+async def test_an_upload_that_never_became_a_transcript_is_reported_not_hidden() -> None:
+    """Upload succeeded, submit failed: the client's meeting is on the vendor
+    and there is nothing here that can remove it.
+
+    `DELETE /v2/transcript/{id}` is the only deletion this API has, and it
+    deletes the audio through the transcript — an upload with no transcript
+    has no handle. That copy must therefore be discoverable rather than
+    silent: the failure names the upload it left behind, and
+    `run_record_path_transcription` persists that sentence as this engine's
+    FAILED transcript.
+    """
+
+    deletes = [0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(500, text="internal error")
+        if request.method == "DELETE":
+            deletes[0] += 1
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    with pytest.raises(AssemblyAIUnavailable) as excinfo:
+        await engine("session_123", "audio_ref_unused", [])
+
+    message = str(excinfo.value)
+    assert "https://cdn.assemblyai.com/upload/xyz" in message, (
+        "the copy left on the vendor must be identified, not merely implied"
+    )
+    assert "500" in message, "the reason the submit failed is part of the record"
+    assert deletes[0] == 0, "there is no transcript to delete, and no other handle"
