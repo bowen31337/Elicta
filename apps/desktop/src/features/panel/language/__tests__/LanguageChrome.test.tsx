@@ -4,7 +4,9 @@ import { LanguageChrome } from '../LanguageChrome';
 import type { DetectedLanguage } from '../types';
 
 function lang(language: string, tier: DetectedLanguage['tier'] = 'tier-1'): DetectedLanguage {
-  return { language, tier, confidence: 0.9 };
+  // These fixtures are all languages that were heard: the expected-but-unheard
+  // case has its own file, because it is a different claim.
+  return { language, tier, heard: true, confidence: 0.9 };
 }
 
 describe('LanguageChrome', () => {

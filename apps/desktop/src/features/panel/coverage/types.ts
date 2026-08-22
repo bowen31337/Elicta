@@ -45,7 +45,11 @@ export interface SessionStreamNudge {
 export type SessionStreamEvent =
   | { readonly type: 'lane'; readonly lane: SessionStreamLane }
   | { readonly type: 'coverage'; readonly coverage: CoverageSummary }
-  | { readonly type: 'nudge'; readonly nudge: SessionStreamNudge };
+  | { readonly type: 'nudge'; readonly nudge: SessionStreamNudge }
+  // The languages this room is expected to use (FR-2.14), sent before
+  // anything is transcribed. `expected` is what keeps the strip from
+  // reporting a derivation as a detection.
+  | { readonly type: 'language'; readonly language: string; readonly expected: boolean };
 
 /**
  * Confirmation that `POST /api/meetings/{id}/session/stop` closed the

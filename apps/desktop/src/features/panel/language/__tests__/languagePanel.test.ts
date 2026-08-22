@@ -6,10 +6,13 @@ function observation(overrides: Partial<LanguageObservation> = {}): LanguageObse
   return { language: 'en', tier: 'tier-1', confidence: 0.9, ...overrides };
 }
 
+// Entries now record whether a language was actually *heard* or is only
+// expected in the room: the strip carries both, and only one of them is a
+// claim about audio. See `expectedLanguages.test.ts`.
 describe('observeLanguage', () => {
   it('adds a confident observation to the panel', () => {
     const state = observeLanguage(createLanguagePanelState(), observation());
-    expect(state.languages).toEqual([{ language: 'en', tier: 'tier-1', confidence: 0.9 }]);
+    expect(state.languages).toEqual([{ language: 'en', tier: 'tier-1', heard: true, confidence: 0.9 }]);
     expect(state.activeTier).toBe('tier-1');
   });
 
@@ -43,7 +46,7 @@ describe('observeLanguage', () => {
     state = observeLanguage(state, observation({ language: 'en', confidence: 0.9 }));
     state = observeLanguage(state, observation({ language: 'en', confidence: 0.1, tier: 'tier-3' }));
 
-    expect(state.languages).toEqual([{ language: 'en', tier: 'tier-1', confidence: 0.9 }]);
+    expect(state.languages).toEqual([{ language: 'en', tier: 'tier-1', heard: true, confidence: 0.9 }]);
   });
 
   it('observing one language never removes another', () => {
@@ -59,7 +62,7 @@ describe('observeLanguage', () => {
     state = observeLanguage(state, observation({ language: 'vi', tier: 'tier-2', confidence: 0.7 }));
     state = observeLanguage(state, observation({ language: 'vi', tier: 'tier-3', confidence: 0.95 }));
 
-    expect(state.languages).toEqual([{ language: 'vi', tier: 'tier-3', confidence: 0.95 }]);
+    expect(state.languages).toEqual([{ language: 'vi', tier: 'tier-3', heard: true, confidence: 0.95 }]);
   });
 
   it('collapses BCP-47 region and script subtags and case to one entry', () => {

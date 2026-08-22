@@ -44,3 +44,18 @@
 .language-chrome__tier--tier-1 { color: var(--green-ink); }
 .language-chrome__tier--tier-2 { color: var(--orange-ink); }
 .language-chrome__tier--tier-3 { color: var(--red-ink); }
+
+/* An expected language is a weaker claim than a heard one, and looks it:
+   outlined rather than filled, so the strip reads as "listening for" until
+   something is actually transcribed. */
+.language-chrome__language--expected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--separator);
+  color: var(--label-supporting);
+}
+.language-chrome__awaiting {
+  font-size: var(--text-caption-2);
+  letter-spacing: var(--tracking-wide);
+  color: var(--label-supporting);
+  margin-inline-start: var(--space-2);
+}

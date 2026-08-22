@@ -39,9 +39,22 @@ export function parseSessionStreamEvent(eventName: string, rawData: string): Ses
       return { type: 'nudge', nudge: parseSessionStreamNudge(rawData) };
     case 'lane':
       return { type: 'lane', lane: parseSessionStreamLane(rawData) };
+    case 'language':
+      return parseLanguage(rawData);
     default:
       return null;
   }
+}
+
+function parseLanguage(rawData: string): SessionStreamEvent {
+  const payload = JSON.parse(rawData) as { language: string; expected?: boolean };
+  return {
+    type: 'language',
+    language: payload.language,
+    // Absent means not expected, which is the cautious reading: a frame that
+    // does not say must not be promoted into a claim the room was heard.
+    expected: payload.expected === true,
+  };
 }
 
 function parseCoverageSummary(rawData: string): CoverageSummary {

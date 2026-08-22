@@ -51,6 +51,7 @@ export function observeLanguage(
   const entry: DetectedLanguage = {
     language: subtag,
     tier: observation.tier,
+    heard: true,
     confidence: observation.confidence,
   };
 
@@ -61,4 +62,32 @@ export function observeLanguage(
       : state.languages.map((l, index) => (index === existingIndex ? entry : l));
 
   return { languages, activeTier: observation.tier };
+}
+
+
+/**
+ * Puts a language on the strip because the engagement expects it in the room
+ * (PRD FR-2.14), not because anything has heard it.
+ *
+ * Deliberately weaker than `observeLanguage`: no tier, no confidence, and no
+ * effect on the active tier badge. It says "this is what I am listening for",
+ * which is what the service knows before a meeting starts — and never "this is
+ * what I heard", which it does not.
+ *
+ * A language already heard is left alone: expecting something after observing
+ * it must not walk the strip backwards.
+ */
+export function expectLanguage(
+  state: LanguagePanelState,
+  language: string,
+): LanguagePanelState {
+  const subtag = primarySubtag(language);
+  if (state.languages.some((entry) => entry.language === subtag)) {
+    return state;
+  }
+
+  return {
+    ...state,
+    languages: [...state.languages, { language: subtag, tier: null, heard: false }],
+  };
 }

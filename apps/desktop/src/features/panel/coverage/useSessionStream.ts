@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseSessionStreamEvent } from './sessionStreamEvents';
+import type { DetectedLanguage } from '../language/types';
 import type { CoverageSummary, SessionStreamNudge } from './types';
 
 /**
@@ -26,6 +27,8 @@ export interface UseSessionStreamOptions {
 }
 
 export interface UseSessionStreamResult {
+  /** Languages on the panel strip: expected until something is heard. */
+  readonly languages: readonly DetectedLanguage[];
   /** The most recent coverage summary the stream has delivered. */
   coverage: CoverageSummary | null;
   /**
@@ -58,6 +61,10 @@ export function useSessionStream(
 ): UseSessionStreamResult {
   const { onNudge, createSource = defaultCreateSource } = options;
   const [coverage, setCoverage] = useState<CoverageSummary | null>(null);
+  // Which languages this room is expected to use (FR-2.14). The stream sends
+  // them before anything is transcribed; nothing was listening for them, so
+  // the panel's language strip stayed empty for every meeting.
+  const [languages, setLanguages] = useState<readonly DetectedLanguage[]>([]);
   const [lane, setLane] = useState<{ reachable: boolean; reason: string | null }>({
     reachable: true,
     reason: null,
@@ -95,17 +102,29 @@ export function useSessionStream(
       }
     };
 
+    const handleLanguage = (event: MessageEvent<string>) => {
+      const parsed = parseSessionStreamEvent('language', event.data);
+      if (parsed?.type !== 'language') return;
+      setLanguages((current) =>
+        current.some((entry) => entry.language === parsed.language)
+          ? current
+          : [...current, { language: parsed.language, tier: null, heard: false }],
+      );
+    };
+
     source.addEventListener('coverage', handleCoverage);
+    source.addEventListener('language', handleLanguage);
     source.addEventListener('nudge', handleNudge);
     source.addEventListener('lane', handleLane);
 
     return () => {
       source.removeEventListener('coverage', handleCoverage);
+      source.removeEventListener('language', handleLanguage);
       source.removeEventListener('nudge', handleNudge);
       source.removeEventListener('lane', handleLane);
       source.close();
     };
   }, [meetingId, createSource]);
 
-  return { coverage, modelReachable: lane.reachable, degradedReason: lane.reason };
+  return { coverage, languages, modelReachable: lane.reachable, degradedReason: lane.reason };
 }
