@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * One GET against the service, in the shape every full screen needs.
@@ -63,19 +63,32 @@ export function useResource<T>(path: string | null): Resource<T> {
   const [status, setStatus] = useState<ResourceStatus>(path === null ? 'idle' : 'loading');
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /**
+   * The path `data` was answered for, or `null` when there is no answer to
+   * stand on. This is what tells a refetch from a change of subject.
+   */
+  const answered = useRef<string | null>(null);
 
   useEffect(() => {
     if (path === null) {
       setData(null);
       setStatus('idle');
       setError(null);
+      answered.current = null;
       return;
     }
 
     // A screen can be switched away from mid-request, and a late answer must
     // not overwrite what replaced it.
     let live = true;
-    setStatus('loading');
+    // Re-asking the same question keeps the answer on screen until a new one
+    // arrives. Screens reload every read after every write, and blanking them
+    // meanwhile cost the operator their scroll position mid-review. A
+    // *different* path still blanks: holding the last answer there would show
+    // one engagement's documents under another engagement's name.
+    if (answered.current !== path) {
+      setStatus('loading');
+    }
     setError(null);
 
     void (async () => {
@@ -83,10 +96,14 @@ export function useResource<T>(path: string | null): Resource<T> {
         const body = await fetchJson<T>(path);
         if (!live) return;
         setData(body);
+        answered.current = path;
         setStatus(body === null ? 'missing' : 'ready');
       } catch (cause) {
         if (!live) return;
         setData(null);
+        // Staleness may not outlive the connection: the next attempt starts
+        // from nothing rather than from an answer this one just disproved.
+        answered.current = null;
         setStatus('error');
         setError(cause instanceof Error ? cause.message : 'The service could not be reached.');
       }

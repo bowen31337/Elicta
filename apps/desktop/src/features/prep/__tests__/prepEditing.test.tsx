@@ -122,6 +122,64 @@ async function ready() {
   expect(await screen.findByRole('heading', { name: 'Northwind Freight' })).toBeInTheDocument();
 }
 
+/** Answers the first GET of each path, then leaves the refetch hanging. */
+function stubWithHangingRefetch() {
+  const seen = new Map<string, number>();
+  const written: Written[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method !== 'GET') {
+        written.push({ path, method, body: undefined });
+        return { ok: true, status: 200, json: async () => ({}) } as Response;
+      }
+      const count = (seen.get(path) ?? 0) + 1;
+      seen.set(path, count);
+      if (count > 1) return new Promise<Response>(() => {});
+      const body = READS[path];
+      if (body === undefined) return { ok: false, status: 404, json: async () => null } as Response;
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }),
+  );
+  return written;
+}
+
+describe('keeping the operator\'s place through a write', () => {
+  /**
+   * Reviewing a bank means promoting and pruning dozens of times. Each write
+   * reloads the screen's reads, and while they were in flight the screen
+   * rendered `ScreenState` instead of itself — so the list unmounted, came
+   * back, and landed scrolled to the top. Measured against the running app: a
+   * `Move up` on a sixty-question bank took the scroll container from 887 back
+   * to 0, every time.
+   */
+  it('does not replace the screen with the loading state while a write refreshes it', async () => {
+    const written = stubWithHangingRefetch();
+    await ready();
+
+    await userEvent.click(screen.getByRole('button', { name: /Prune .*What counts as fast/i }));
+    await waitFor(() => expect(written).toHaveLength(1));
+
+    expect(screen.queryByRole('heading', { name: 'Loading…' })).not.toBeInTheDocument();
+    expect(screen.getByText('At median load or at peak?')).toBeInTheDocument();
+  });
+
+  it('never unmounts the screen, which is what loses the scroll position', async () => {
+    // The scroll container is the pane this screen sits in, and jsdom has no
+    // layout to measure. What can be asserted is the cause: the same element
+    // is still on the page, so nothing was torn down and rebuilt.
+    const written = stubWithHangingRefetch();
+    await ready();
+    const before = screen.getByRole('main');
+
+    await userEvent.click(screen.getByRole('button', { name: /Prune .*What counts as fast/i }));
+    await waitFor(() => expect(written).toHaveLength(1));
+
+    expect(screen.getByRole('main')).toBe(before);
+  });
+});
+
 describe('pruning the question bank', () => {
   it('marks the candidate pruned on the service, not only on screen', async () => {
     const written = stubService();
