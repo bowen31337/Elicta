@@ -68,6 +68,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/replay/runs/{run_id}", "get"),
     ("/api/replay/runs/{run_id}/metrics", "get"),
     ("/api/replay/runs/{run_id}/ratings", "post"),
+    ("/api/sessions/{session_id}/audio-chunk", "post"),
     ("/api/sessions/{session_id}/audio-destruction", "get"),
     ("/api/sessions/{session_id}/citations", "post"),
     ("/api/sessions/{session_id}/decision-log", "get"),

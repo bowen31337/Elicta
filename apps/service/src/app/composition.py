@@ -234,6 +234,7 @@ _agent_models = importlib.import_module("app.modules.compiler.agent.models")
 _asr_models = importlib.import_module("app.modules.asr-record.models")
 _asr_router = importlib.import_module("app.modules.asr-record.router")
 _asr_citation = importlib.import_module("app.modules.asr-record.citation")
+_audio_hold = importlib.import_module("app.modules.asr-record.audio_hold")
 
 RecordPathTranscript = _asr_models.RecordPathTranscript
 RecordPathTranscriptionJob = _asr_models.RecordPathTranscriptionJob
@@ -378,6 +379,10 @@ class Backend:
     context_pack_digests: dict[str, Any] = field(default_factory=dict)
 
     retained_audio: dict[str, str] = field(default_factory=dict)
+    #: The session's audio, in memory only (FR-1.7, NFR-2.4). Deliberately a
+    #: plain dict: `attach_state_store` must never make this durable, and
+    #: `test_session_audio_is_never_made_durable` is what keeps it that way.
+    session_audio: dict[str, Any] = field(default_factory=dict)  # str -> SessionAudio
     session_diarizations: dict[str, SessionDiarization] = field(default_factory=dict)
     audio_destruction_events: list[AudioDestructionEvent] = field(default_factory=list)
     record_path_engine_count: int = 2
@@ -2281,6 +2286,22 @@ def _include_operational_routers(
 
     app.include_router(build_reference_document_link_router(fetch_body, attach_document))
 
+    # --- record-path audio chunk upload (spec §5.3, NFR-2.4) ------------
+    async def on_audio_retained(session_id: str, audio_ref: str) -> None:
+        """Record that the service now holds this session's raw audio.
+
+        Same obligation `on_audio_retained` in `build_app` records for the
+        engine-driven record-path routers: accepting audio for a session is
+        the moment custody begins, so it is the moment NFR-2.4's destruction
+        gate first has something to discard.
+        """
+
+        backend.retained_audio[session_id] = audio_ref
+
+    app.include_router(
+        _audio_hold.build_audio_chunk_router(backend.session_audio, on_audio_retained)
+    )
+
 
 # --------------------------------------------------------------------------
 # Session audio lifecycle (PRD NFR-2.4, ADR-008).
@@ -2305,6 +2326,7 @@ def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:
 
     async def delete_audio(session_id: str, audio_ref: str) -> None:
         backend.retained_audio.pop(session_id, None)
+        _audio_hold.discard(backend.session_audio, session_id)
 
     async def emit(event: AudioDestructionEvent) -> None:
         backend.audio_destruction_events.append(event)
