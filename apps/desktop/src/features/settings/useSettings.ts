@@ -85,12 +85,27 @@ export interface StorageSettings {
   readonly applies_on_restart: boolean;
 }
 
+/**
+ * Whether a meeting stops to confirm consent before capture.
+ *
+ * `engagement_level` is the default and the permissive one: the gate answers
+ * "not required", no meeting shows the prompt, and no consent record is
+ * written. It says the organisation holds consent for the engagement as a
+ * whole — it does not establish that, and nothing here can check it.
+ */
+export type ConsentModelSetting = 'per_meeting' | 'engagement_level';
+
+export interface ConsentSettings {
+  readonly model: ConsentModelSetting;
+}
+
 export interface ServiceSettings {
   readonly inference: InferenceSettings;
   readonly vendors: { asr_base_url: string | null; capture_base_url: string | null };
   readonly connectors: ConnectorSettings;
   readonly documents?: DocumentSourceSettings;
   readonly storage?: StorageSettings;
+  readonly consent?: ConsentSettings;
   readonly secrets: readonly SecretStatus[];
   readonly durable: boolean;
 }
@@ -106,6 +121,7 @@ export interface SettingsDraft {
    */
   readonly connectors?: ConnectorSettings;
   readonly documents?: DocumentSourceSettings;
+  readonly consent?: ConsentSettings;
   readonly secrets?: readonly { key: SecretKey; value: string }[];
 }
 

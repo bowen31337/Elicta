@@ -1419,6 +1419,20 @@ export interface components {
          */
         ConsentGateStatus: "not_required" | "awaiting_confirmation" | "confirmed";
         /**
+         * ConsentModelSetting
+         * @description How this deployment captures all-party consent.
+         *
+         *     Its own enum rather than the domain `ConsentModel` because this module
+         *     imports nothing from `app.*` and that isolation is worth keeping — the
+         *     settings surface should not drag the consent domain in behind it. The
+         *     values are identical on purpose, so `composition.py` maps one onto the
+         *     other by value; a test pins the two member sets together so a member added
+         *     to one and not the other fails at import rather than on the consent path
+         *     in front of a client.
+         * @enum {string}
+         */
+        ConsentModelSetting: "per_meeting" | "engagement_level";
+        /**
          * ConsentPrompt
          * @description Operator-facing copy shown before capture begins (PRD L2).
          */
@@ -1448,6 +1462,28 @@ export interface components {
              * Format: date-time
              */
             confirmed_at: string;
+        };
+        /**
+         * ConsentSettings
+         * @description Whether a meeting stops to confirm consent before capture (PRD D3).
+         *
+         *     `ENGAGEMENT_LEVEL` is the default, and it is the permissive one: the gate
+         *     answers `not_required`, no meeting shows the confirmation prompt, and no
+         *     consent record is written. It says the organisation holds consent for the
+         *     engagement as a whole — it does not remove the duty to have obtained it,
+         *     and nothing here can tell whether that is true.
+         *
+         *     This was a constant in `composition.py` whose own docstring called it
+         *     "the fail-open one". Moving it here does not change the default; it makes
+         *     it visible to the person accountable for the choice, and reversible
+         *     without editing Python.
+         */
+        ConsentSettings: {
+            /**
+             * @description `engagement_level` captures consent once for the engagement and never prompts per meeting. `per_meeting` makes every meeting stop for an operator confirmation, which is recorded.
+             * @default engagement_level
+             */
+            model: components["schemas"]["ConsentModelSetting"];
         };
         /**
          * CoverageCitation
@@ -2592,6 +2628,7 @@ export interface components {
             connectors?: components["schemas"]["ConnectorSettings"];
             documents?: components["schemas"]["DocumentSourceSettings"];
             storage?: components["schemas"]["StorageSettings"];
+            consent?: components["schemas"]["ConsentSettings"];
             /** Secrets */
             secrets?: components["schemas"]["SecretStatus"][];
             /**
@@ -2655,6 +2692,7 @@ export interface components {
             vendors?: components["schemas"]["VendorSettings"] | null;
             connectors?: components["schemas"]["ConnectorSettings"] | null;
             documents?: components["schemas"]["DocumentSourceSettings"] | null;
+            consent?: components["schemas"]["ConsentSettings"] | null;
             /** Secrets */
             secrets?: components["schemas"]["SecretUpdate"][];
         };

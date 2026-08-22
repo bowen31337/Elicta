@@ -662,22 +662,24 @@ def _highest_ordinal(ids: Iterable[str], prefix: str) -> int:
 
 
 DEFAULT_CONSENT_MODEL = ConsentModel.ENGAGEMENT_LEVEL
-"""How an engagement nobody has configured captures consent (PRD D3).
+"""The consent model for a deployment that has no settings store bound.
 
-**This is a stage decision, and it is the fail-open one.** `ENGAGEMENT_LEVEL`
-means the gate answers `not_required` for every engagement, so no meeting
-stops to ask for a per-meeting confirmation and capture is admitted straight
-away. Nothing writes `consent_models` -- that gap is declared in
-`test_composition_seams.ACCEPTED_READ_ONLY` -- so today this default is not
-merely the fallback, it is the only value any engagement has.
+**This is the fail-open one, and it is now the second-last word rather than
+the only one.** `ENGAGEMENT_LEVEL` means the gate answers `not_required`, so
+no meeting stops to ask for a per-meeting confirmation and capture is
+admitted straight away.
 
 What that costs, stated plainly so it is not rediscovered later: the consent
 screen never shows its confirmation prompt, `POST .../consent-confirmation`
 is never called by the product, and no `ConsentRecord` is written. A meeting
-recorded through this build carries no evidence that anyone was told or
-agreed. The prior default, `PER_MEETING`, is the one that asks; restoring it
-is a one-line change here, and the tests that cover the asking model still
-exist and still pass, seeded explicitly.
+recorded that way carries no evidence that anyone was told or agreed.
+
+What changed is who decides. The same value is now the default of the
+administered `consent.model` setting, which an operator can switch to
+`per_meeting` from the Settings screen without editing Python and without a
+restart. This constant remains for the case that has no settings store at all
+-- a bare `Backend()`, which a great many tests construct -- so the answer
+never depends on wiring a test did not do.
 """
 
 
@@ -694,13 +696,50 @@ def _consent_model_for(backend: Backend, engagement_id: str | None) -> ConsentMo
 
     An engagement that cannot be resolved at all takes the same default as one
     that was never configured. Those two cases were deliberately distinct when
-    the default was the stricter model; under `DEFAULT_CONSENT_MODEL` they are
-    not, and pretending otherwise would only hide which one is in play.
+    the default was the stricter model; under the permissive one they are not,
+    and pretending otherwise would only hide which one is in play.
+
+    The administered setting is the default and the engagement's own entry is
+    the override, not the other way round. Nothing writes `consent_models`
+    today, but reading the setting as the fallback is what keeps that override
+    available without a screen for it. Read per call, so a save takes effect
+    without a restart -- the same contract the vendor credentials have.
     """
 
+    default = _configured_consent_model(backend)
     if engagement_id is None:
+        return default
+    return backend.consent_models.get(engagement_id, default)
+
+
+def _configured_consent_model(backend: Backend) -> ConsentModel:
+    """The administered consent model, or the constant when nothing is bound.
+
+    The settings enum is deliberately a different type from the domain one --
+    `modules/settings` imports nothing from `app.*` -- so this maps by value,
+    which `test_the_settings_enum_and_the_domain_enum_stay_in_step` pins.
+
+    A store that cannot answer must not take the consent path down with it,
+    and it must not silently become the *stricter* model either: a deployment
+    would start refusing capture for a reason no screen could explain. It
+    falls back to the documented constant, which is what a deployment with no
+    store gets anyway.
+    """
+
+    store = getattr(backend, "settings_store", None)
+    if store is None:
         return DEFAULT_CONSENT_MODEL
-    return backend.consent_models.get(engagement_id, DEFAULT_CONSENT_MODEL)
+    try:
+        return ConsentModel(store.read().consent.model.value)
+    except (AttributeError, ValueError):  # pragma: no cover - defensive
+        # `_logger` is defined at the foot of this module; the lookup happens
+        # when this runs, by which time it is bound.
+        _logger.warning(
+            "consent: settings store gave no usable consent model; "
+            "falling back to %s",
+            DEFAULT_CONSENT_MODEL.value,
+        )
+        return DEFAULT_CONSENT_MODEL
 
 
 def attach_state_store(backend: Backend, store: StateStore) -> Backend:

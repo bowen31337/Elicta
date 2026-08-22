@@ -235,3 +235,25 @@ def test_the_document_source_survives_a_restart(tmp_path):
     secret = reopened.get_secret(SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET)
     assert secret is not None
     assert secret.reveal() == "shhh"
+
+
+def test_the_consent_model_survives_a_restart(db: Path) -> None:
+    """A setting that governs whether anyone is asked has to be durable.
+
+    Held only in memory it would revert to the default on every restart, and
+    an operator who deliberately turned per-meeting asking back on would find
+    it silently off again — the failure being that nobody is asked, which
+    nothing on screen would report.
+    """
+
+    from .models import ConsentModelSetting, ConsentSettings
+
+    _store(db).write_consent(ConsentSettings(model=ConsentModelSetting.PER_MEETING))
+
+    assert _store(db).read().consent.model is ConsentModelSetting.PER_MEETING
+
+
+def test_consent_reads_as_standing_before_anyone_saves_one(db: Path) -> None:
+    from .models import ConsentModelSetting
+
+    assert _store(db).read().consent.model is ConsentModelSetting.ENGAGEMENT_LEVEL

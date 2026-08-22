@@ -23,6 +23,7 @@ const CONFIGURED: ServiceSettings = {
     disable_vendor_retention: true,
     region: null,
   },
+  consent: { model: 'engagement_level' },
   secrets: [
     { key: 'anthropic_api_key', configured: true, hint: 'abcd' },
     { key: 'anthropic_oauth_token', configured: false, hint: null },
@@ -629,5 +630,52 @@ describe('the storage badge', () => {
     render(<SettingsPanel controller={withStorage(undefined)} />);
 
     expect(screen.getByText(/a file on this machine/i)).toBeInTheDocument();
+  });
+});
+
+describe('the consent model', () => {
+  /**
+   * This was a constant in the service whose own docstring called it "the
+   * fail-open one": every engagement took engagement-level consent, no
+   * meeting ever stopped to ask, and the only way to change it was to edit
+   * Python. The default is unchanged — what this screen adds is that the
+   * person accountable for the choice can see it and reverse it.
+   */
+  it('shows which consent model is in force', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    const chosen = screen.getByRole('radio', { name: /standing for the engagement/i });
+    expect(chosen).toBeChecked();
+  });
+
+  it('says plainly that nobody is prompted under the standing model', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    // A screen that offered this as two unexplained words would be asking an
+    // operator to pick a legal posture from a label.
+    expect(screen.getByText(/no consent record is written/i)).toBeInTheDocument();
+  });
+
+  it('saves a switch to asking before every meeting', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.click(screen.getByRole('radio', { name: /ask before every meeting/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].consent.model).toBe('per_meeting');
+  });
+
+  it('follows the stored model when the service already asks per meeting', () => {
+    render(
+      <SettingsPanel
+        controller={controller({
+          settings: { ...CONFIGURED, consent: { model: 'per_meeting' } },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('radio', { name: /ask before every meeting/i })).toBeChecked();
   });
 });

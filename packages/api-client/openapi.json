@@ -3564,6 +3564,15 @@
         "title": "ConsentGateStatus",
         "description": "Where a given meeting sits relative to the consent gate."
       },
+      "ConsentModelSetting": {
+        "type": "string",
+        "enum": [
+          "per_meeting",
+          "engagement_level"
+        ],
+        "title": "ConsentModelSetting",
+        "description": "How this deployment captures all-party consent.\n\nIts own enum rather than the domain `ConsentModel` because this module\nimports nothing from `app.*` and that isolation is worth keeping \u2014 the\nsettings surface should not drag the consent domain in behind it. The\nvalues are identical on purpose, so `composition.py` maps one onto the\nother by value; a test pins the two member sets together so a member added\nto one and not the other fails at import rather than on the consent path\nin front of a client."
+      },
       "ConsentPrompt": {
         "properties": {
           "title": {
@@ -3612,6 +3621,19 @@
         ],
         "title": "ConsentRecord",
         "description": "Durable proof that consent was confirmed for one meeting (PRD feature 246).\n\n``confirmed_by`` identifies the operator who confirmed the prompt, not\nthe meeting participants \u2014 this records accountability for having\ndisclosed and confirmed consent, which is what a later audit needs."
+      },
+      "ConsentSettings": {
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/ConsentModelSetting",
+            "description": "`engagement_level` captures consent once for the engagement and never prompts per meeting. `per_meeting` makes every meeting stop for an operator confirmation, which is recorded.",
+            "default": "engagement_level"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConsentSettings",
+        "description": "Whether a meeting stops to confirm consent before capture (PRD D3).\n\n`ENGAGEMENT_LEVEL` is the default, and it is the permissive one: the gate\nanswers `not_required`, no meeting shows the confirmation prompt, and no\nconsent record is written. It says the organisation holds consent for the\nengagement as a whole \u2014 it does not remove the duty to have obtained it,\nand nothing here can tell whether that is true.\n\nThis was a constant in `composition.py` whose own docstring called it\n\"the fail-open one\". Moving it here does not change the default; it makes\nit visible to the person accountable for the choice, and reversible\nwithout editing Python."
       },
       "CoverageCitation": {
         "properties": {
@@ -5755,6 +5777,9 @@
           "storage": {
             "$ref": "#/components/schemas/StorageSettings"
           },
+          "consent": {
+            "$ref": "#/components/schemas/ConsentSettings"
+          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretStatus"
@@ -5885,6 +5910,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DocumentSourceSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsentSettings"
               },
               {
                 "type": "null"

@@ -35,6 +35,8 @@ async def apply_settings_update(
         store.write_connectors(payload.connectors)
     if payload.documents is not None:
         store.write_documents(payload.documents)
+    if payload.consent is not None:
+        store.write_consent(payload.consent)
     for update in payload.secrets:
         store.set_secret(update.key, update.value)
 

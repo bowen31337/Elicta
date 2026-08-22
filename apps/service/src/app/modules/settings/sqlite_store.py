@@ -41,6 +41,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .models import (
     ConnectorSettings,
+    ConsentSettings,
     DocumentSourceSettings,
     InferenceSettings,
     SecretKey,
@@ -218,6 +219,9 @@ class SqliteSettingsStore:
     def write_documents(self, documents: DocumentSourceSettings) -> None:
         self._write_json("documents", documents.model_dump(mode="json"))
 
+    def write_consent(self, consent: ConsentSettings) -> None:
+        self._write_json("consent", consent.model_dump(mode="json"))
+
     # -- secrets -----------------------------------------------------------
 
     def set_secret(self, key: SecretKey, value: str) -> None:
@@ -280,6 +284,7 @@ class SqliteSettingsStore:
         vendors = self._read_json("vendors")
         connectors = self._read_json("connectors")
         documents = self._read_json("documents")
+        consent = self._read_json("consent")
 
         with self._connect() as connection:
             updated = connection.execute(
@@ -319,6 +324,7 @@ class SqliteSettingsStore:
                 DocumentSourceSettings(**documents) if documents else DocumentSourceSettings(),
                 self._read_environment,
             ),
+            consent=ConsentSettings(**consent) if consent else ConsentSettings(),
             secrets=statuses,
             durable=True,
             updated_at=datetime.fromisoformat(updated) if updated else None,

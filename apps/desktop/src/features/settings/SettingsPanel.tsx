@@ -8,6 +8,8 @@ import {
   type AuthMode,
   type ConnectorSettings,
   type DocumentSourceSettings,
+  type ConsentModelSetting,
+  type ConsentSettings,
   type StorageSettings,
   type InferenceSettings,
   type LlmProvider,
@@ -255,6 +257,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [connectors, setConnectors] = useState<ConnectorSettings | null>(null);
   const [documents, setDocuments] = useState<DocumentSourceSettings | null>(null);
+  const [consent, setConsent] = useState<ConsentSettings | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<SecretKey, string>>>({});
   const [saved, setSaved] = useState(false);
 
@@ -280,6 +283,11 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
     documents ?? settings.documents ?? { tenant_id: null, client_id: null };
   const storage: StorageSettings =
     settings.storage ?? { database: '', applies_on_restart: true };
+  // A service too old to report the group is the permissive model, because
+  // that is what such a service is actually doing — showing "asks every
+  // meeting" would describe a prompt no one will ever see.
+  const currentConsent: ConsentSettings =
+    consent ?? settings.consent ?? { model: 'engagement_level' };
   const databaseStatus = settings.secrets.find(
     (secret) => secret.key === 'state_database_url',
   );
@@ -337,6 +345,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
       },
       connectors: currentConnectors,
       documents: currentDocuments,
+      consent: currentConsent,
       ...(secrets.length > 0 ? { secrets } : {}),
     });
 
@@ -351,6 +360,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
       setAuthMode(null);
       setConnectors(null);
       setDocuments(null);
+      setConsent(null);
       setSaved(true);
     }
   };
@@ -662,6 +672,49 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
             help="The registration's own secret. Until all three are set, attaching a link is refused with a message saying so — rather than recording a document nothing can read."
           />
         ) : null}
+      </Section>
+
+      <Section
+        id="consent"
+        title="Recording consent"
+        summary="Whether a meeting stops to confirm consent before it starts recording."
+        // Deliberately not a warning tone on the permissive setting. It is a
+        // legitimate posture — consent captured once for the engagement — and
+        // a screen that scolded the operator for the default it ships with
+        // would train them to ignore the badge.
+        status={
+          currentConsent.model === 'per_meeting'
+            ? { tone: 'ok', text: 'Asks every meeting' }
+            : { tone: 'idle', text: 'Standing' }
+        }
+      >
+        <fieldset className="settings-field">
+          <legend>Consent model</legend>
+          <p className="settings-help">
+            Under the standing model no meeting shows the confirmation prompt and{' '}
+            <strong>no consent record is written</strong>, so a recording carries no
+            evidence that anyone was told. That is a claim about how your engagements
+            are contracted, not something Elicta can check.
+          </p>
+          <div className="settings-segmented">
+            {(['engagement_level', 'per_meeting'] as const).map((option) => (
+              <label key={option} className="settings-radio">
+                <input
+                  type="radio"
+                  name="consent-model"
+                  value={option}
+                  checked={currentConsent.model === option}
+                  onChange={() => setConsent({ model: option as ConsentModelSetting })}
+                />
+                <span>
+                  {option === 'engagement_level'
+                    ? 'Standing for the engagement'
+                    : 'Ask before every meeting'}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
       </Section>
 
       <Section

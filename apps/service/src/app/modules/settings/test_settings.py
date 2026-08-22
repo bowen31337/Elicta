@@ -759,3 +759,64 @@ class TestWhereTheDataIsKept:
         from app.modules.settings.models import StorageSettings
 
         assert StorageSettings.model_fields["applies_on_restart"].default is True
+
+
+# -- consent -------------------------------------------------------------
+
+
+def test_consent_defaults_to_standing_for_the_engagement() -> None:
+    """The stage default, now said out loud in a place an operator can change.
+
+    It was a constant in `composition.py` whose docstring called it "the
+    fail-open one": every engagement took `ENGAGEMENT_LEVEL`, no meeting ever
+    stopped to ask, and the only way to change that was to edit Python. The
+    default is unchanged — what changes is that it is now administered rather
+    than compiled in.
+    """
+
+    from .models import ConsentModelSetting, ServiceSettings
+
+    assert ServiceSettings().consent.model is ConsentModelSetting.ENGAGEMENT_LEVEL
+
+
+async def test_saving_the_consent_model_keeps_it() -> None:
+    from .models import ConsentModelSetting, ConsentSettings, SettingsUpdateRequest
+    from .service import apply_settings_update
+    from .store import InMemorySettingsStore
+
+    store = InMemorySettingsStore(read_environment=False)
+
+    settings = await apply_settings_update(
+        store,
+        SettingsUpdateRequest(
+            consent=ConsentSettings(model=ConsentModelSetting.PER_MEETING)
+        ),
+    )
+
+    assert settings.consent.model is ConsentModelSetting.PER_MEETING
+    assert store.read().consent.model is ConsentModelSetting.PER_MEETING
+
+
+async def test_a_settings_save_that_omits_consent_leaves_it_alone() -> None:
+    """The admin UI saves one panel at a time; an omitted section is untouched."""
+
+    from .models import (
+        ConsentModelSetting,
+        ConsentSettings,
+        SettingsUpdateRequest,
+        VendorSettings,
+    )
+    from .service import apply_settings_update
+    from .store import InMemorySettingsStore
+
+    store = InMemorySettingsStore(read_environment=False)
+    await apply_settings_update(
+        store,
+        SettingsUpdateRequest(
+            consent=ConsentSettings(model=ConsentModelSetting.PER_MEETING)
+        ),
+    )
+
+    await apply_settings_update(store, SettingsUpdateRequest(vendors=VendorSettings()))
+
+    assert store.read().consent.model is ConsentModelSetting.PER_MEETING

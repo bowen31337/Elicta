@@ -27,6 +27,7 @@ from typing import Protocol
 from .models import (
     AuthMode,
     ConnectorSettings,
+    ConsentSettings,
     DocumentSourceSettings,
     InferenceSettings,
     SecretKey,
@@ -140,6 +141,8 @@ class SettingsStore(Protocol):
 
     def write_documents(self, documents: DocumentSourceSettings) -> None: ...
 
+    def write_consent(self, consent: ConsentSettings) -> None: ...
+
     def set_secret(self, key: SecretKey, value: str) -> None:
         """Store a secret. An empty value clears it."""
 
@@ -156,6 +159,7 @@ class InMemorySettingsStore:
         self._vendors = VendorSettings()
         self._connectors = ConnectorSettings()
         self._documents = DocumentSourceSettings()
+        self._consent = ConsentSettings()
         self._secrets: dict[SecretKey, SecretValue] = {}
         self._secret_updated: dict[SecretKey, datetime] = {}
         self._updated_at: datetime | None = None
@@ -174,6 +178,7 @@ class InMemorySettingsStore:
             connectors=self._connectors,
             documents=_documents_with_environment(self._documents, self._read_environment),
             storage=_storage_view(self.get_secret(SecretKey.STATE_DATABASE_URL)),
+            consent=self._consent,
             secrets=[self._status(key) for key in SecretKey],
             durable=self.durable,
             updated_at=self._updated_at,
@@ -203,6 +208,10 @@ class InMemorySettingsStore:
 
     def write_documents(self, documents: DocumentSourceSettings) -> None:
         self._documents = documents
+        self._touch()
+
+    def write_consent(self, consent: ConsentSettings) -> None:
+        self._consent = consent
         self._touch()
 
     def set_secret(self, key: SecretKey, value: str) -> None:

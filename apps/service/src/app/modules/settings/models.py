@@ -410,6 +410,49 @@ class StorageSettings(BaseModel):
     )
 
 
+class ConsentModelSetting(str, Enum):
+    """How this deployment captures all-party consent.
+
+    Its own enum rather than the domain `ConsentModel` because this module
+    imports nothing from `app.*` and that isolation is worth keeping — the
+    settings surface should not drag the consent domain in behind it. The
+    values are identical on purpose, so `composition.py` maps one onto the
+    other by value; a test pins the two member sets together so a member added
+    to one and not the other fails at import rather than on the consent path
+    in front of a client.
+    """
+
+    PER_MEETING = "per_meeting"
+    ENGAGEMENT_LEVEL = "engagement_level"
+
+
+class ConsentSettings(BaseModel):
+    """Whether a meeting stops to confirm consent before capture (PRD D3).
+
+    `ENGAGEMENT_LEVEL` is the default, and it is the permissive one: the gate
+    answers `not_required`, no meeting shows the confirmation prompt, and no
+    consent record is written. It says the organisation holds consent for the
+    engagement as a whole — it does not remove the duty to have obtained it,
+    and nothing here can tell whether that is true.
+
+    This was a constant in `composition.py` whose own docstring called it
+    "the fail-open one". Moving it here does not change the default; it makes
+    it visible to the person accountable for the choice, and reversible
+    without editing Python.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: ConsentModelSetting = Field(
+        default=ConsentModelSetting.ENGAGEMENT_LEVEL,
+        description=(
+            "`engagement_level` captures consent once for the engagement and "
+            "never prompts per meeting. `per_meeting` makes every meeting "
+            "stop for an operator confirmation, which is recorded."
+        ),
+    )
+
+
 class ServiceSettings(BaseModel):
     """Everything an operator can administer, with no secret values in it."""
 
@@ -420,6 +463,7 @@ class ServiceSettings(BaseModel):
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
     documents: DocumentSourceSettings = Field(default_factory=DocumentSourceSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    consent: ConsentSettings = Field(default_factory=ConsentSettings)
     secrets: list[SecretStatus] = Field(default_factory=list)
     durable: bool = Field(
         default=False,
@@ -460,6 +504,7 @@ class SettingsUpdateRequest(BaseModel):
     vendors: VendorSettings | None = None
     connectors: ConnectorSettings | None = None
     documents: DocumentSourceSettings | None = None
+    consent: ConsentSettings | None = None
     secrets: list[SecretUpdate] = Field(default_factory=list)
 
 

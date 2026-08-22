@@ -408,3 +408,77 @@ def test_consent_model_is_read_back_when_the_engagement_has_one() -> None:
     backend.consent_models["eng-1"] = ConsentModel.ENGAGEMENT_LEVEL
 
     assert _consent_model_for(backend, "eng-1") is ConsentModel.ENGAGEMENT_LEVEL
+
+
+# --------------------------------------------------------------------------
+# The consent model as an administered setting, not a compiled-in constant.
+# --------------------------------------------------------------------------
+
+
+def test_the_admin_setting_decides_the_consent_model() -> None:
+    """An operator turning per-meeting asking back on must actually reach the gate.
+
+    This is the whole point of moving the decision out of `composition.py`:
+    the constant said `ENGAGEMENT_LEVEL` and there was no way to say otherwise
+    without editing Python. Read per call, so a save takes effect without a
+    restart — the same contract the vendor credentials have.
+    """
+
+    from app.modules.settings.models import ConsentModelSetting, ConsentSettings
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore(read_environment=False)
+    backend = Backend()
+    backend.settings_store = store
+
+    assert _consent_model_for(backend, "eng-1") is ConsentModel.ENGAGEMENT_LEVEL
+
+    store.write_consent(ConsentSettings(model=ConsentModelSetting.PER_MEETING))
+
+    assert _consent_model_for(backend, "eng-1") is ConsentModel.PER_MEETING
+
+
+def test_an_engagements_own_model_still_beats_the_setting() -> None:
+    """The per-engagement dict is an override, and the setting is the fallback.
+
+    Nothing writes `consent_models` today, but reading the setting as the
+    default rather than replacing this lookup is what keeps that override
+    available without building a screen for it now.
+    """
+
+    from app.modules.settings.models import ConsentModelSetting, ConsentSettings
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore(read_environment=False)
+    store.write_consent(ConsentSettings(model=ConsentModelSetting.PER_MEETING))
+    backend = Backend()
+    backend.settings_store = store
+    backend.consent_models["eng-1"] = ConsentModel.ENGAGEMENT_LEVEL
+
+    assert _consent_model_for(backend, "eng-1") is ConsentModel.ENGAGEMENT_LEVEL
+
+
+def test_a_backend_with_no_settings_store_falls_back_to_the_constant() -> None:
+    """`Backend()` is constructed bare in a great many tests, and in the
+    in-memory default path. It must not need a settings store to answer."""
+
+    assert _consent_model_for(Backend(), "eng-1") is DEFAULT_CONSENT_MODEL
+
+
+def test_the_settings_enum_and_the_domain_enum_stay_in_step() -> None:
+    """Two enums for one concept, kept honest by a test rather than by hope.
+
+    `modules/settings` imports nothing from `app.*` — that isolation is worth
+    keeping — so the administered value is its own enum whose members must map
+    onto `ConsentModel` exactly. A member added to one and not the other would
+    otherwise surface as a `ValueError` at request time, on the consent path,
+    in front of a client.
+    """
+
+    from app.modules.settings.models import ConsentModelSetting
+
+    assert {member.value for member in ConsentModelSetting} == {
+        member.value for member in ConsentModel
+    }
+    for member in ConsentModelSetting:
+        assert ConsentModel(member.value) is not None
