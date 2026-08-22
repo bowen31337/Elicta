@@ -1890,7 +1890,19 @@ def _include_operational_routers(
 
     # --- compiler: the bank an operator reviews before the meeting -------
     async def get_compiled_candidates(engagement_id: str) -> list[ApiBankCandidate]:
-        return backend.compiled_candidates.get(engagement_id, [])
+        """The bank in the order the operator put it in.
+
+        `build_question_bank_tree` takes its input as already ordered and says
+        so, and the store preserves compile order on purpose -- so the
+        priority a `Move up` writes had to be applied here or nowhere, and it
+        was nowhere: the number changed and the row did not move. Stable, so
+        the questions sharing a priority (most of a fresh bank) keep the order
+        they were compiled in rather than reshuffling around the one that was
+        promoted.
+        """
+
+        stored = backend.compiled_candidates.get(engagement_id, [])
+        return sorted(stored, key=lambda candidate: candidate.priority)
 
     app.include_router(build_engagement_bank_router(get_compiled_candidates))
 
@@ -2002,26 +2014,41 @@ def _include_operational_routers(
         build_engagement_bank_compile_router(trigger_bank_compile, read_compile_outcome)
     )
 
-    async def delete_candidate(candidate_id: str) -> None:
-        for candidates in backend.compiled_candidates.values():
+    def _rewrite_bank(candidate_id: str, revise: Any) -> Any:
+        """Apply `revise` to the candidate with this id, whole list at a time.
+
+        `compiled_candidates` is a `DurableMapping`, which writes through on
+        `__setitem__` and on nothing else. Both editors used to reach inside
+        the stored list -- `candidates[index] = updated`, `del candidates[i]`
+        -- so the change landed in memory and never in the table. Every write
+        answered 200, the screen redrew, and the operator's whole review was
+        gone at the next restart. Reassigning the list is what persists it.
+        """
+
+        for engagement_id, candidates in backend.compiled_candidates.items():
             for index, candidate in enumerate(candidates):
                 if candidate.id == candidate_id:
-                    del candidates[index]
-                    return
+                    revised = list(candidates)
+                    outcome = revise(revised, index, candidate)
+                    backend.compiled_candidates[engagement_id] = revised
+                    return outcome
         raise CandidateNotFoundError(f"no candidate: {candidate_id}")
+
+    async def delete_candidate(candidate_id: str) -> None:
+        def remove(revised: list[Any], index: int, _: Any) -> None:
+            del revised[index]
+
+        _rewrite_bank(candidate_id, remove)
 
     async def update_candidate(
         candidate_id: str, patch: CandidatePatchRequest
     ) -> ApiBankCandidate:
-        for candidates in backend.compiled_candidates.values():
-            for index, candidate in enumerate(candidates):
-                if candidate.id == candidate_id:
-                    updated = candidate.model_copy(
-                        update=patch.model_dump(exclude_none=True)
-                    )
-                    candidates[index] = updated
-                    return updated
-        raise CandidateNotFoundError(f"no candidate: {candidate_id}")
+        def apply(revised: list[Any], index: int, candidate: Any) -> ApiBankCandidate:
+            updated = candidate.model_copy(update=patch.model_dump(exclude_none=True))
+            revised[index] = updated
+            return updated
+
+        return _rewrite_bank(candidate_id, apply)
 
     app.include_router(build_bank_candidates_router(delete_candidate, update_candidate))
 

@@ -152,6 +152,12 @@ class Candidate(Base):
     inherited_from_open_question: Mapped[bool] = mapped_column(
         sa.Boolean(), nullable=False, default=False
     )
+    # The operator's judgement about the question, and the reason they read
+    # the bank at all. Held only in memory it came back undone on every
+    # restart, and it is promised to hold for every later meeting too.
+    pruned: Mapped[bool] = mapped_column(
+        sa.Boolean(), nullable=False, default=False, server_default=sa.false()
+    )
     # Position within the engagement's bank, so the list reads back in the
     # order it was compiled in rather than in whatever order the rows return.
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)

@@ -482,3 +482,57 @@ def test_the_settings_enum_and_the_domain_enum_stay_in_step() -> None:
     }
     for member in ConsentModelSetting:
         assert ConsentModel(member.value) is not None
+
+
+def _bank_client(*candidates: object) -> TestClient:
+    backend = Backend()
+    backend.compiled_candidates["eng-1"] = list(candidates)
+    return TestClient(build_app(backend))
+
+
+def _served_order(client: TestClient) -> list[str]:
+    response = client.get("/api/engagements/eng-1/bank")
+    assert response.status_code == 200, response.text
+    sections = response.json()["sections"]
+    assert len(sections) == 1, "this fixture is one section on purpose"
+    return [candidate["id"] for candidate in sections[0]["candidates"]]
+
+
+def test_the_bank_is_served_in_priority_order() -> None:
+    """Nothing owned the ordering invariant the tree builder relies on.
+
+    `build_question_bank_tree` documents that its input is "expected
+    pre-sorted ascending by priority" and deliberately does not sort; the
+    store deliberately preserves compile order; and no step between them
+    sorted either. So `Move up` rewrote the number and the row stayed exactly
+    where it was, which reads as a control that does nothing.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    client = _bank_client(
+        BankCandidate(id="c-1", template_section="Performance", phrasing="third", priority=3),
+        BankCandidate(id="c-2", template_section="Performance", phrasing="first", priority=1),
+        BankCandidate(id="c-3", template_section="Performance", phrasing="second", priority=2),
+    )
+
+    assert _served_order(client) == ["c-2", "c-3", "c-1"]
+
+
+def test_candidates_of_equal_priority_keep_the_order_they_were_compiled_in() -> None:
+    """The sort has to be stable, or promoting one question reshuffles its peers.
+
+    Most of a compiled bank shares a priority, so an unstable sort would move
+    rows the operator never touched — and they would have no way to tell that
+    from the promotion they did ask for.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    client = _bank_client(
+        BankCandidate(id="c-1", template_section="Performance", phrasing="one", priority=2),
+        BankCandidate(id="c-2", template_section="Performance", phrasing="two", priority=2),
+        BankCandidate(id="c-3", template_section="Performance", phrasing="three", priority=2),
+    )
+
+    assert _served_order(client) == ["c-1", "c-2", "c-3"]

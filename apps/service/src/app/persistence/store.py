@@ -145,9 +145,9 @@ def _add_missing_columns(engine: Engine) -> None:
     Alembic covers the PostgreSQL deployment; the file the desktop product
     makes for itself has no migration step to run, so it catches up here.
 
-    Deliberately additive only, and only for nullable columns: this exists to
-    stop an upgrade losing data, and a schema fixer that can drop or retype a
-    column is a much more dangerous thing than the problem it solves.
+    Deliberately additive only: this exists to stop an upgrade losing data,
+    and a schema fixer that can drop or retype a column is a much more
+    dangerous thing than the problem it solves.
     """
 
     inspector = sa.inspect(engine)
@@ -156,13 +156,44 @@ def _add_missing_columns(engine: Engine) -> None:
             continue
         present = {column["name"] for column in inspector.get_columns(table.name)}
         for column in table.columns:
-            if column.name in present or not column.nullable:
+            if column.name in present:
+                continue
+            filling = _backfill_clause(column, engine.dialect)
+            if filling is None:
                 continue
             kind = column.type.compile(engine.dialect)
             with engine.begin() as connection:
                 connection.execute(
-                    sa.text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {kind}')
+                    sa.text(
+                        f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {kind}{filling}'
+                    )
                 )
+
+
+def _backfill_clause(column: sa.Column, dialect: Any) -> str | None:
+    """What to fill this column with for the rows that predate it, or `None` to skip it.
+
+    A nullable column needs nothing: the rows already there read as `NULL`,
+    which the column allows. A `NOT NULL` column needs a default or the
+    `ALTER` is refused outright -- every existing row would violate the
+    constraint the moment it arrived -- and this used to skip those entirely,
+    which meant the one kind of column that could brick an existing file was
+    the one kind the repair would not touch.
+
+    Compiled against the dialect rather than written out, because the same
+    `sa.false()` is `0` on SQLite and `false` on PostgreSQL. A `NOT NULL`
+    column with no default is still skipped: there is no answer for the
+    existing rows, and inventing one is exactly the dangerous repair above.
+    """
+
+    if column.nullable:
+        return ""
+    if column.server_default is None:
+        return None
+    literal = column.server_default.arg
+    if not isinstance(literal, str):
+        literal = literal.compile(dialect=dialect).string
+    return f" NOT NULL DEFAULT {literal}"
 
 
 class DurableMapping(MutableMapping[K, V]):
@@ -717,6 +748,7 @@ class StateStore:
                         "phrasing": row.phrasing,
                         "priority": row.priority,
                         "inherited_from_open_question": row.inherited_from_open_question,
+                        "pruned": row.pruned,
                     }
                 )
             )
@@ -732,6 +764,7 @@ class StateStore:
                     "inherited_from_open_question": item.get(
                         "inherited_from_open_question", False
                     ),
+                    "pruned": item.get("pruned", False),
                     "ordinal": ordinal,
                 }
                 for ordinal, item in enumerate(dump(entry) for entry in value)

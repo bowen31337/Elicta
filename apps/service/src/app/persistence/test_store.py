@@ -680,3 +680,146 @@ def test_the_expected_languages_survive_a_restart(database: str) -> None:
     assert '"language": "zh"' in body or '"language":"zh"' in body, (
         f"the second process lost the derived languages: {body!r}"
     )
+
+
+def _bank_on_disk(database: str, *candidates: object) -> str:
+    """An engagement with a compiled bank already stored against it.
+
+    The Analyst pass that would normally produce one is not what these two
+    tests are about — the edit that follows it is, and that goes over HTTP
+    like everything else here. Seeding through the durable mapping is the
+    storage API, not a shortcut around it.
+    """
+
+    with client_for(database) as client:
+        engagement_id = _engagement(client, "Northgate Chilled Logistics")
+
+    store = open_state_store(database)
+    attach_state_store(Backend(), store).compiled_candidates[engagement_id] = list(candidates)
+    store.close()
+    return engagement_id
+
+
+def _served_bank(client: TestClient, engagement_id: str) -> dict[str, dict]:
+    response = client.get(f"/api/engagements/{engagement_id}/bank")
+    assert response.status_code == 200, response.text
+    return {
+        candidate["id"]: candidate
+        for section in response.json()["sections"]
+        for candidate in section["candidates"]
+    }
+
+
+def test_a_pruned_candidate_stays_pruned_across_a_restart(database: str) -> None:
+    """Pruning is the operator's judgement, and it was being kept in RAM.
+
+    `candidates` had no `pruned` column, so the flag had nowhere to go: the
+    PATCH answered 200, the screen redrew, and the next restart handed back a
+    bank with the whole review undone. A pruned question is also promised to
+    stay pruned in every later meeting, which a flag that does not survive the
+    process cannot do.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    engagement_id = _bank_on_disk(
+        database,
+        BankCandidate(id="c-1", template_section="Performance", phrasing="How fast?", priority=1),
+        BankCandidate(
+            id="c-2", template_section="Performance", phrasing="Which systems?", priority=1
+        ),
+    )
+
+    with client_for(database) as first:
+        pruned = first.patch("/api/bank/candidates/c-1", json={"pruned": True})
+        assert pruned.status_code == 200, pruned.text
+
+    with client_for(database) as second:
+        served = _served_bank(second, engagement_id)
+        assert served["c-1"]["pruned"] is True
+        assert served["c-2"]["pruned"] is False
+
+
+def test_a_reordered_candidate_keeps_its_new_priority_across_a_restart(database: str) -> None:
+    """`update_candidate` wrote into the list, never through the mapping.
+
+    `DurableMapping` persists on `__setitem__` alone, and the edit was
+    `candidates[index] = updated` — a mutation of the list *inside* the
+    mapping. Memory and the database diverged silently, every write returning
+    200, and the loss only showed up on the next restart.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    engagement_id = _bank_on_disk(
+        database,
+        BankCandidate(id="c-1", template_section="Performance", phrasing="How fast?", priority=1),
+        BankCandidate(
+            id="c-2", template_section="Performance", phrasing="Which systems?", priority=3
+        ),
+    )
+
+    with client_for(database) as first:
+        moved = first.patch("/api/bank/candidates/c-2", json={"priority": 1})
+        assert moved.status_code == 200, moved.text
+
+    with client_for(database) as second:
+        assert _served_bank(second, engagement_id)["c-2"]["priority"] == 1
+
+
+def test_a_deleted_candidate_does_not_come_back_after_a_restart(database: str) -> None:
+    """`delete_candidate` had `update_candidate`'s bug, one line differently.
+
+    `del candidates[index]` mutates the list inside the mapping, so the
+    deletion never reached the table either. A question removed from the bank
+    reappeared at the next restart, which is worse than the prune case: the
+    operator has no reason to look for it again.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    engagement_id = _bank_on_disk(
+        database,
+        BankCandidate(id="c-1", template_section="Performance", phrasing="How fast?", priority=1),
+        BankCandidate(
+            id="c-2", template_section="Performance", phrasing="Which systems?", priority=1
+        ),
+    )
+
+    with client_for(database) as first:
+        removed = first.delete("/api/bank/candidates/c-1")
+        assert removed.status_code == 204, removed.text
+
+    with client_for(database) as second:
+        assert set(_served_bank(second, engagement_id)) == {"c-2"}
+
+
+def test_a_database_written_before_a_not_null_column_existed_still_opens(tmp_path) -> None:
+    """The catch-up skipped exactly the kind of column that needed it.
+
+    `_add_missing_columns` refused any column declared `NOT NULL`, reasoning
+    that a schema fixer able to retype or drop is more dangerous than the
+    problem it solves. That is true of retyping and dropping, and not of
+    adding a `NOT NULL` column that carries a default: it cannot lose a row
+    and cannot change one. `candidates.pruned` is the first such column, and
+    without this every existing `state.db` fails on "no such column:
+    candidates.pruned" with the operator's whole bank sitting in the file,
+    unreadable.
+    """
+
+    import sqlite3
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    database = f"sqlite:///{tmp_path / 'state.db'}"
+    engagement_id = _bank_on_disk(
+        database,
+        BankCandidate(id="c-1", template_section="Performance", phrasing="How fast?", priority=1),
+    )
+
+    # Wind the file back to before the column was added.
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        connection.execute("ALTER TABLE candidates DROP COLUMN pruned")
+
+    with client_for(database) as second:
+        assert set(_served_bank(second, engagement_id)) == {"c-1"}
