@@ -95,13 +95,18 @@ def deepgram_record_engine(
     model: str = "nova-3",
     name: str = "deepgram",
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    transport: Any = None,
 ) -> Callable[[str, str, list[str]], Awaitable[BatchTranscriptionOutput]]:
-    """One record-path batch engine, backed by Deepgram."""
+    """One record-path batch engine, backed by Deepgram.
+
+    `transport` is for testing failure paths without a live network.
+    """
 
     async def transcribe(
         session_id: str, audio_ref: str, keyterms: list[str]
     ) -> BatchTranscriptionOutput:
-        payload = await _listen(read_audio, store, session_id, model, keyterms, timeout)
+        # audio_ref is part of the seam's fixed signature; the hold is keyed by session_id.
+        payload = await _listen(read_audio, store, session_id, model, keyterms, timeout, transport)
         return to_batch_transcription(payload, name)
 
     return transcribe
@@ -114,11 +119,12 @@ async def _listen(
     model: str,
     keyterms: list[str],
     timeout: float,
+    transport: Any = None,
 ) -> Any:
     """One `/v1/listen` call. Shared by both seams so there is one request shape.
 
     A second copy would be a second place for the retention opt-out to be
-    forgotten.
+    forgotten. `transport` is for testing failure paths without a live network.
     """
 
     audio = read_audio(session_id)
@@ -131,7 +137,7 @@ async def _listen(
     if secret is None:
         raise DeepgramUnavailable("no Deepgram credential is configured")
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
         response = await client.post(
             deepgram_listen_url(model, keyterms),
             headers={
