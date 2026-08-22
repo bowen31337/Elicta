@@ -234,6 +234,46 @@ def test_a_meeting_created_after_a_restart_does_not_overwrite_an_earlier_one(
         ]
 
 
+def test_a_document_uploaded_after_a_restart_does_not_collide_with_an_earlier_one(
+    database: str,
+) -> None:
+    """The document id counter has the same hole meetings had, and it 500s.
+
+    `reference_documents` is durable and `next_document_id` was not, so a
+    restarted service minted `doc-1` again — and unlike a meeting, which was
+    quietly overwritten, the table's primary key refuses it. The upload fails
+    with a `UNIQUE constraint` 500, which is the first thing a returning
+    operator does on the screen the guide sends them to.
+    """
+
+    with client_for(database) as first:
+        engagement_id = _engagement(first, "Northwind Logistics")
+        uploaded = first.post(
+            f"/api/engagements/{engagement_id}/documents",
+            files={"file": ("Scoping deck.pdf", b"%PDF-1.4 fake body", "application/pdf")},
+            data={"status": "ground truth"},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        original = uploaded.json()["document_id"]
+
+    with client_for(database) as second:
+        again = second.post(
+            f"/api/engagements/{engagement_id}/documents",
+            files={"file": ("Throughput study.pdf", b"%PDF-1.4 second body", "application/pdf")},
+            data={"status": "hypothesis"},
+        )
+        assert again.status_code == 201, again.text
+        assert again.json()["document_id"] != original
+
+        # And the first one is still itself, not the second wearing its id.
+        listed = second.get(f"/api/engagements/{engagement_id}/documents")
+        assert listed.status_code == 200, listed.text
+        assert [(row["document_id"], row["name"]) for row in listed.json()["documents"]] == [
+            (original, "Scoping deck.pdf"),
+            (again.json()["document_id"], "Throughput study.pdf"),
+        ]
+
+
 def test_the_engagement_list_keeps_creation_order_across_a_restart(database: str) -> None:
     """A restart must not reorder the list an operator navigates by.
 

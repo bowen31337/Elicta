@@ -441,6 +441,29 @@ class StateStore:
         ]
         return max(ordinals, default=0)
 
+    def highest_document_ordinal(self) -> int:
+        """The largest `doc-N` suffix on record, or 0 for an empty database.
+
+        Derived the same way, and for a sharper reason than engagements.
+        `reference_documents.id` is a primary key, so a re-minted id is not a
+        quiet overwrite — it is a `UNIQUE constraint` failure that reaches the
+        operator as "The service answered 500" on the first document they
+        attach after a restart.
+
+        Every row counts, including the soft-deleted ones and the text-first
+        writes with no engagement yet. `reference_documents` skips both when it
+        loads, so a counter derived from what loaded would hand back an id the
+        table is still holding.
+        """
+
+        table = metadata.tables["reference_documents"]
+        ordinals = [
+            int(row.id.removeprefix("doc-"))
+            for row in self._rows(table)
+            if row.id.startswith("doc-") and row.id.removeprefix("doc-").isdigit()
+        ]
+        return max(ordinals, default=0)
+
     def meeting_details(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
         """The assembled meeting read-model, keyed by meeting id."""
 

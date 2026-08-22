@@ -753,6 +753,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.engagement_documents = store.reference_documents(
         lambda row: EngagementDocument(**row)
     )
+    # The third counter with the same hole, and the only one the database
+    # refuses outright: `reference_documents.id` is a primary key, so a
+    # re-minted `doc-1` is a 500 on the screen rather than a silent overwrite.
+    backend.next_document_id = store.highest_document_ordinal()
     backend.document_texts = store.document_texts()
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
