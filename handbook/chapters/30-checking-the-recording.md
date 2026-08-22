@@ -21,6 +21,14 @@ becomes a memory exercise.
 Disagreements are always flagged and never quietly resolved by picking a winner.
 The whole value is in surfacing the doubt.
 
+Always means any difference at all, down to a single word — and that is the
+case worth being explicit about. A service that hears *fifty* where the client
+said *fifteen* agrees with the other one about every other word in the
+sentence, so a comparison that scored the sentence as a whole would call that
+agreement and say nothing. It is the numbers and the names that decide what
+gets built, and they are exactly what two services disagree about, so those
+are the ones put in front of you.
+
 ## Then the audio is destroyed
 
 The moment both transcriptions and the speaker identification have finished —
