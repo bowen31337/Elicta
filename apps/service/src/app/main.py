@@ -39,7 +39,7 @@ from app.modules.settings.store import SettingsStore
 from app.orchestration.anthropic_engines import engines_from_settings
 from app.orchestration.bank_collector import DEFAULT_INTERVAL_SECONDS
 from app.orchestration.deepgram_engines import deepgram_diarizer
-from app.orchestration.record_engines import build_record_engines
+from app.orchestration.record_engines import build_record_engines, describe_record_engines
 from app.persistence import open_state_store
 from app.persistence.store import redact_database_url, resolve_database_url
 
@@ -106,12 +106,18 @@ def create_app(
         store, diarize=deepgram_diarizer(read_audio, store)
     )
 
-    # A selected vendor that cannot run is a refusal at startup, not a silent
-    # omission that shows up as a missing transcript hours later.
+    # A selected vendor with no batch client at all (`UnconfiguredVendor`) is
+    # a configuration error nothing can recover from while running, so that
+    # still stops startup. A selected vendor missing only its credential does
+    # not: like an unconfigured inference key elsewhere in this function, it
+    # still gets an engine — one that fails closed, by name, the moment it is
+    # called — so the service still starts and serves its full API. The
+    # startup log says which is which, so the gap is visible immediately
+    # rather than discovered from a `FAILED` transcript hours later.
     record_engines = build_record_engines(store, read_audio)
     logger.info(
         "startup: record path engines: %s",
-        ", ".join(name for name, _ in record_engines),
+        ", ".join(describe_record_engines(store)),
     )
 
     app = build_app(

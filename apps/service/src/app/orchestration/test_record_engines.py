@@ -6,7 +6,12 @@ import pytest
 
 from app.modules.settings.models import SecretKey, SpeechVendor
 from app.modules.settings.store import InMemorySettingsStore
-from app.orchestration.record_engines import UnconfiguredVendor, build_record_engines
+from app.orchestration.engines import EngineNotConfiguredError
+from app.orchestration.record_engines import (
+    UnconfiguredVendor,
+    build_record_engines,
+    describe_record_engines,
+)
 
 
 def _store(*vendors: SpeechVendor) -> InMemorySettingsStore:
@@ -34,15 +39,53 @@ def test_one_engine_is_built_per_selected_vendor() -> None:
     assert [name for name, _ in engines] == ["deepgram", "assemblyai"]
 
 
-def test_a_selected_vendor_with_no_credential_is_refused_by_name() -> None:
-    """Never skipped silently: the setting would then claim an engine that is
-    not running, and the operator would read one transcript as two."""
+async def test_an_uncredentialed_vendor_still_builds_an_engine_that_fails_closed() -> None:
+    """Never skipped silently — but never a startup refusal either.
+
+    An unconfigured Anthropic key does not stop this service from starting;
+    an unconfigured speech key must not either (main.py's own precedent).
+    What the original refusal protected is still true: the setting claims
+    two engines, so the operator must see two transcripts, one of them a
+    named, actionable failure rather than a missing entry.
+    """
 
     store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
     store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg")
 
-    with pytest.raises(UnconfiguredVendor, match="assemblyai"):
-        build_record_engines(store, lambda _session: b"pcm")
+    engines = build_record_engines(store, lambda _session: b"pcm")
+
+    assert [name for name, _ in engines] == ["deepgram", "assemblyai"]
+
+    _name, transcribe = engines[1]
+    with pytest.raises(EngineNotConfiguredError, match="assemblyai_api_key"):
+        await transcribe("session-1", "fixture://audio", [])
+
+
+def test_describe_record_engines_distinguishes_configured_from_fails_closed() -> None:
+    """The startup log line names which engine will actually run."""
+
+    store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg")
+
+    labels = describe_record_engines(store)
+
+    assert labels == ["deepgram (configured)", "assemblyai (NO CREDENTIAL, fails closed)"]
+
+
+def test_no_speech_credentials_at_all_still_builds_two_engines() -> None:
+    """The CI / fresh-checkout case: nothing configured, nothing raised.
+
+    A settings store with neither vendor's credential set is exactly what a
+    brand-new deployment or a CI runner starts with. Building the engine list
+    must not raise here, or the service — and every test that imports it —
+    could not start at all without a speech credential on day one.
+    """
+
+    store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
+
+    engines = build_record_engines(store, lambda _session: b"pcm")
+
+    assert [name for name, _ in engines] == ["deepgram", "assemblyai"]
 
 
 def test_a_vendor_with_no_client_is_refused_by_name() -> None:

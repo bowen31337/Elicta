@@ -166,3 +166,22 @@ def test_the_settings_database_otherwise_lives_in_the_user_data_directory(
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
 
     assert default_settings_database() == tmp_path / "elicta" / "settings.db"
+
+
+def test_the_app_starts_with_no_speech_credentials_configured() -> None:
+    """The CI / fresh-checkout case: this must not regress.
+
+    `ConnectorSettings.record_vendors` defaults to Deepgram and AssemblyAI,
+    and a brand-new settings store — exactly what a fresh checkout or a CI
+    runner starts with — has neither credential set. An unconfigured speech
+    vendor must fail closed per call, the same way an unconfigured Anthropic
+    key does, not stop the service from starting: this is the regression
+    `UnconfiguredVendor` propagating out of `create_app` would be.
+    """
+
+    from app.modules.settings.store import InMemorySettingsStore
+
+    app = create_app(settings_store=InMemorySettingsStore())
+
+    api_paths = [path for path in app.openapi()["paths"] if path.startswith("/api")]
+    assert api_paths, "an unconfigured speech vendor must not stop the app assembling"
