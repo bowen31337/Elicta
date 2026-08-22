@@ -36,6 +36,7 @@ const SCENES = [
   // it. Audited at 820px the sidebar is docked; at 420px it is a closed
   // drawer, which is the state it ships in at that width.
   'shell',
+  'engagements',
   'before-meeting',
   'nudge-surfaced',
   'code-switched',
@@ -43,6 +44,7 @@ const SCENES = [
   'prep',
   'consent-pending',
   'consent-confirmed',
+  'consent-not-required',
   'recording',
   'debrief',
   'debrief-chat',

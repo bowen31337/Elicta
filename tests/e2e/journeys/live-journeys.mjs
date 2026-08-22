@@ -12,6 +12,56 @@
  * measures one thing and hides the rest.
  */
 
+/**
+ * A real `.docx` — a ZIP of OOXML parts — so the upload check exercises the
+ * extractor rather than a `.txt` that would pass by decoding. Built here rather
+ * than checked in as a binary: what it is testing is the format.
+ */
+const DOCX_WITH_TEXT = (() => {
+  const parts = [];
+  const encoder = new TextEncoder();
+  const name = 'word/document.xml';
+  const xml =
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:body><w:p><w:r><w:t>Northwind moves 350 consignments a day through cross-dock.' +
+    '</w:t></w:r></w:p></w:body></w:document>';
+  const data = encoder.encode(xml);
+  const nameBytes = encoder.encode(name);
+
+  // Stored (uncompressed) entries keep this to a CRC and two headers.
+  let crc = ~0;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  crc = (~crc) >>> 0;
+
+  const u16 = (value) => [value & 0xff, (value >>> 8) & 0xff];
+  const u32 = (value) => [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+
+  const local = [
+    0x50, 0x4b, 0x03, 0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+    ...u32(crc), ...u32(data.length), ...u32(data.length),
+    ...u16(nameBytes.length), ...u16(0), ...nameBytes,
+  ];
+  parts.push(...local, ...data);
+
+  const central = [
+    0x50, 0x4b, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+    ...u32(crc), ...u32(data.length), ...u32(data.length),
+    ...u16(nameBytes.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(0),
+    ...nameBytes,
+  ];
+  const centralStart = parts.length;
+  parts.push(...central);
+
+  parts.push(
+    0x50, 0x4b, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(1), ...u16(1),
+    ...u32(central.length), ...u32(centralStart), ...u16(0),
+  );
+  return new Uint8Array(parts);
+})();
+
 export const JOURNEYS = [
   {
     id: '01',
@@ -49,22 +99,62 @@ export const JOURNEYS = [
       ctx.check('an unknown term type is rejected rather than stored', rejected.status === 422,
         `status ${rejected.status}`);
 
-      await ctx.narrate('Attaching a reference document');
+      await ctx.narrate('Attaching a reference document by link');
       const offSite = await ctx.api('POST', `/api/engagements/${engagementId}/documents/link`,
         { url: 'https://northwind.example/rfp.pdf', status: 'ground truth' });
-      ctx.check('a non-SharePoint link is refused', offSite.status === 422, `status ${offSite.status}`);
+      ctx.check('a link that is not a Microsoft 365 one is refused', offSite.status === 422,
+        `status ${offSite.status}`);
 
+      // A link is only worth attaching if its contents can be read. Until the
+      // Microsoft 365 connector is configured, attaching one recorded a URL and
+      // an empty body — which is what made `bank/compile` answer with an empty
+      // bank and look like a missing model. Refusing, and naming the setting,
+      // is the behaviour under test here; against a tenant-configured service
+      // the same call attaches and carries text.
       const linked = await ctx.api('POST', `/api/engagements/${engagementId}/documents/link`, {
         url: 'https://northwind.sharepoint.com/sites/discovery/Shared%20Documents/RFP.pdf',
         status: 'ground truth',
       });
-      ctx.check('a SharePoint link is attached', linked.status < 300 && Boolean(linked.json?.id),
-        `status ${linked.status}, id ${linked.json?.id}`);
+      const linkDetail = String(linked.json?.detail ?? '');
+      ctx.check('a link is either read or refused, never attached unread',
+        (linked.status < 300 && Boolean(linked.json?.id)) ||
+          (linked.status === 502 && /not configured|Microsoft 365/i.test(linkDetail)),
+        `status ${linked.status}, body ${JSON.stringify(linked.json).slice(0, 200)}`);
+
+      await ctx.narrate('Uploading a document from the drop zone');
+      const uploaded = await ctx.upload(`/api/engagements/${engagementId}/documents`, {
+        filename: 'Warehouse throughput study 2025.docx',
+        content: DOCX_WITH_TEXT,
+        fields: { status: 'ground truth' },
+      });
+      ctx.check('an uploaded document is accepted',
+        uploaded.status === 201 && Boolean(uploaded.json?.document_id),
+        `status ${uploaded.status}, body ${JSON.stringify(uploaded.json).slice(0, 200)}`);
 
       const listed = await ctx.api('GET', `/api/engagements/${engagementId}/documents`);
-      ctx.check('the attached document appears in the document list',
+      ctx.check('the uploaded document appears in the document list',
         (listed.json?.documents ?? []).length > 0,
-        `list returned ${JSON.stringify(listed.json)} after attaching ${linked.json?.id}`);
+        `list returned ${JSON.stringify(listed.json)}`);
+
+      await ctx.narrate('Taking a mistyped word back out');
+      const mistyped = await ctx.api('POST', `/api/engagements/${engagementId}/vocabulary`,
+        { term: 'Freightlnk', term_type: 'internal_system' });
+      const mistypedId = mistyped.json?.term_id;
+      const removed = await ctx.api(
+        'DELETE', `/api/engagements/${engagementId}/vocabulary/${mistypedId}`);
+      ctx.check('a vocabulary term can be removed', removed.status === 204,
+        `status ${removed.status}`);
+
+      const afterRemoval = await ctx.api('GET', `/api/engagements/${engagementId}/vocabulary`);
+      const termsNow = (afterRemoval.json?.terms ?? []).map((t) => t.term);
+      ctx.check('the removed word is gone and the others are not',
+        !termsNow.includes('Freightlnk') && termsNow.includes('Northwind'),
+        `vocabulary reads ${JSON.stringify(termsNow)}`);
+
+      ctx.check('removing something that is not there is not reported as success',
+        (await ctx.api('DELETE', `/api/engagements/${engagementId}/vocabulary/term-nope`))
+          .status === 404,
+        'a 204 for an id nobody has would make a typo look like a removal');
 
       await ctx.narrate('Compiling the question bank — the pre-reasoning step');
       const compile = await ctx.api('POST', `/api/engagements/${engagementId}/bank/compile`);
@@ -116,63 +206,60 @@ export const JOURNEYS = [
         Boolean(meeting.json?.engagement_context?.client_organisation),
         JSON.stringify(meeting.json?.engagement_context));
 
-      await ctx.narrate('Reading the consent gate before anyone has confirmed');
-      const before = await ctx.api('GET', `/api/meetings/${meetingId}/consent-gate?engagement_id=${engagementId}`);
-      ctx.check('the gate reports consent is still awaited',
-        before.json?.status === 'awaiting_confirmation', JSON.stringify(before.json?.status));
-      ctx.check('the gate states its legal basis',
-        typeof before.json?.prompt?.legal_basis === 'string',
-        String(before.json?.prompt?.legal_basis));
+      // What this journey can and cannot drive from outside. The gate has two
+      // consent models and only one of them is reachable here: nothing sets an
+      // engagement's consent model over the API, so every engagement created
+      // through it takes DEFAULT_CONSENT_MODEL, which is engagement-level. The
+      // asking model — prompt, refusal, confirmation, record — is covered by
+      // tests/e2e/api_integration/test_consent_and_egress.py, which can seed
+      // the model. What this run demonstrates is what an operator of this
+      // build actually meets.
+      ctx.note('the asking consent model is not reachable over the API',
+        'no endpoint sets an engagement consent model, so this run exercises the '
+        + 'engagement-level default only; the per-meeting gate is covered in the API suite');
 
-      await ctx.narrate('Trying to start the session before consent — this must be refused');
-      const early = await ctx.api('POST', `/api/meetings/${meetingId}/session/start`);
-      ctx.check('starting a session before consent is refused', early.status >= 400,
-        `status ${early.status}, ${JSON.stringify(early.json)}`);
-      // Refused is not enough — it has to be refused *for the right reason*.
-      // A service that cannot find the meeting at all also returns 4xx, and
-      // would let a missing consent gate pass as a working one.
-      const consentReason = JSON.stringify(early.json ?? '');
-      ctx.check('the refusal is about consent, not a meeting the service cannot find',
-        /consent/i.test(consentReason),
-        `refused with ${consentReason} — 4xx here does not demonstrate a consent gate`);
+      await ctx.narrate('Reading the consent gate on a meeting nobody has confirmed');
+      const gate = await ctx.api('GET', `/api/meetings/${meetingId}/consent-gate?engagement_id=${engagementId}`);
+      ctx.check('the gate reports that consent is not being asked for',
+        gate.json?.status === 'not_required', JSON.stringify(gate.json?.status));
+      ctx.check('a gate that is not asking carries no prompt',
+        gate.json?.prompt === null || gate.json?.prompt === undefined,
+        JSON.stringify(gate.json?.prompt));
 
-      await ctx.narrate('The Consent screen before anyone has confirmed');
-      await ctx.reloadTo('consent');
-      await ctx.selectInPicker(engagementId, meetingId);
-      await ctx.shot('consent-before');
-      const beforeDisabled = await ctx.eval(
-        `const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Start');
-         return b ? b.disabled : null`);
-      ctx.check('capture cannot be started until consent is confirmed', beforeDisabled === true,
-        `the Start button's disabled state is ${JSON.stringify(beforeDisabled)} while consent is unconfirmed`);
-
-      await ctx.narrate('Confirming consent on the record');
-      const confirm = await ctx.api('POST', `/api/meetings/${meetingId}/consent-confirmation`,
-        { confirmed_by: 'Dana Whitfield, COO' });
-      ctx.check('consent is recorded against a named person',
-        confirm.json?.confirmed_by === 'Dana Whitfield, COO', JSON.stringify(confirm.json));
-      ctx.check('consent is timestamped', Boolean(confirm.json?.confirmed_at),
-        String(confirm.json?.confirmed_at));
-
-      const after = await ctx.api('GET', `/api/meetings/${meetingId}/consent-gate?engagement_id=${engagementId}`);
-      ctx.check('the gate opens once consent is confirmed',
-        after.json?.status !== 'awaiting_confirmation',
-        `gate still reads ${JSON.stringify(after.json?.status)} after a confirmation was accepted`);
-
-      await ctx.narrate('Starting the session now that consent is on the record');
-      const started = await ctx.api('POST', `/api/meetings/${meetingId}/session/start`);
-      ctx.check('the session starts once consent is confirmed', started.status < 300,
-        `status ${started.status}, ${JSON.stringify(started.json)}`);
-      ctx.state.sessionId = started.json?.session_id ?? null;
-
-      await ctx.narrate('The Consent screen in the running app');
+      await ctx.narrate('The Consent screen as an operator of this build meets it');
       await ctx.reloadTo('consent');
       await ctx.selectInPicker(engagementId, meetingId);
       await ctx.shot('consent-screen');
+
+      const rowText = await ctx.eval(
+        `const el=[...document.querySelectorAll('.row')].find(r=>/Not required|Not confirmed|Confirmed/.test(r.textContent));
+         return el ? el.textContent.trim() : null`);
+      ctx.check('the screen says consent is not required for this meeting',
+        typeof rowText === 'string' && /Not required for this meeting/.test(rowText),
+        JSON.stringify(rowText));
+      // The screen must not dress an unasked question up as an answered one.
+      ctx.check('the screen does not claim anything is on record',
+        typeof rowText === 'string' && !/On record/.test(rowText) && /nothing is recorded/i.test(rowText),
+        JSON.stringify(rowText));
+
       const startDisabled = await ctx.eval(
-        `const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Start'); return b? b.disabled : null`);
-      ctx.check('capture becomes available once consent is on the record', startDisabled === false,
-        `the Start button's disabled state is ${JSON.stringify(startDisabled)} after consent was confirmed`);
+        `const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='Start');
+         return b ? b.disabled : null`);
+      ctx.check('capture can be started with nothing confirmed — the stage default',
+        startDisabled === false,
+        `the Start button's disabled state is ${JSON.stringify(startDisabled)} with no confirmation recorded`);
+
+      await ctx.narrate('Starting the session, which this build admits without a confirmation');
+      const started = await ctx.api('POST', `/api/meetings/${meetingId}/session/start`);
+      ctx.check('the session starts without a consent confirmation', started.status < 300,
+        `status ${started.status}, ${JSON.stringify(started.json)}`);
+      ctx.state.sessionId = started.json?.session_id ?? null;
+
+      // The other half of "not asked": nothing may exist that suggests it was.
+      const record = await ctx.api('GET', `/api/meetings/${meetingId}/consent-record`);
+      ctx.check('no consent record is written when consent was never asked for',
+        record.status === 404, `status ${record.status}, ${JSON.stringify(record.json)}`);
+
       const meetingTitle = await ctx.text('#consent-title');
       ctx.check('the consent screen names the meeting it gates',
         meetingTitle !== null && meetingTitle.trim() !== '—',
@@ -199,10 +286,24 @@ export const JOURNEYS = [
         `status ${tick.status}, ${JSON.stringify(tick.json)}`);
 
       await ctx.narrate('The live panel in the running app');
-      await ctx.go('panel');
+      await ctx.reloadTo('panel');
+      await ctx.selectInPicker(ctx.state.engagementId, meetingId);
       await ctx.shot('panel-screen');
       const panelPresent = await ctx.count('main.panel');
       ctx.check('the panel renders', panelPresent === 1, `${panelPresent} panels found`);
+
+      // The distinction that was invisible before, and that mattered most:
+      // the panel used to render `<OperatorPanel />` with no props, so it
+      // opened no stream for any meeting and every reading below was a
+      // placeholder. "Connected, with nothing to send" and "not connected at
+      // all" look identical on screen; this separates them by asking the page
+      // whether it actually opened the connection.
+      const streamOpened = await ctx.eval(
+        `return performance.getEntriesByType('resource')
+           .some(e => e.name.includes('/session/stream'))`);
+      ctx.check('the panel opens the meeting’s live session stream',
+        streamOpened === true,
+        `the page ${streamOpened ? 'opened' : 'never opened'} a request to .../session/stream`);
       const coverage = await ctx.eval(
         `const m=document.querySelector('.meter'); return m? m.textContent.trim() : null`);
       // "not empty" is not a reading: the placeholder chrome renders "— / —",
@@ -210,12 +311,14 @@ export const JOURNEYS = [
       // proving nothing arrived.
       ctx.check('the panel shows live coverage from the session',
         typeof coverage === 'string' && /\d/.test(coverage),
-        `coverage chrome reads ${JSON.stringify(coverage)}`);
+        `coverage chrome reads ${JSON.stringify(coverage)} — the stream is open, `
+        + `but nothing writes session_stream_events, so the session carries no coverage`);
       const nudge = await ctx.eval(
         `const n=document.querySelector('.nudge'); return n? n.textContent.trim().slice(0,200) : null`);
       ctx.check('a follow-up question is surfaced to the operator',
         typeof nudge === 'string' && !/no active nudge/i.test(nudge) && nudge.length > 0,
-        `nudge area reads ${JSON.stringify(nudge)}`);
+        `nudge area reads ${JSON.stringify(nudge)} — no utterance exists to trigger on, `
+        + `because every transcription backend in asr-live is a test double`);
     },
   },
 
@@ -285,6 +388,44 @@ export const JOURNEYS = [
       ctx.check('the audit records what left the machine',
         Array.isArray(egress.json?.rows ?? egress.json) && (egress.json?.rows ?? egress.json).length > 0,
         `audit returned ${JSON.stringify(egress.json).slice(0, 240)} after a live model call was made`);
+
+      await ctx.narrate('The mode the panel reads is carried on the live session stream');
+      const stream = await ctx.api('GET', `/api/meetings/${ctx.state.meetingId}/session/stream`);
+      const laneFrame = String(stream.text ?? '')
+        .split('\n\n')
+        .map((block) => block.split('\n'))
+        .filter((lines) => lines[0] === 'event: lane')
+        .map((lines) => JSON.parse((lines[1] ?? '').replace('data: ', '')))[0] ?? null;
+      ctx.check('the stream tells the panel which mode it is in, before anything else',
+        laneFrame !== null && typeof laneFrame.model_reachable === 'boolean',
+        `first lane frame: ${JSON.stringify(laneFrame)}`);
+      ctx.check('a reachable provider is reported as reachable, from a real call rather than from setup',
+        laneFrame?.model_reachable === true,
+        `lane says ${JSON.stringify(laneFrame)} while the credential test above reported reachable`);
+
+      await ctx.narrate('A provider that refuses must be named, not left as a silent gap');
+      // The credential here cannot submit a batch — the Analyst pass is refused
+      // for want of a scope. That is a real upstream failure across a real seam,
+      // so it is the one honest way to prove the degraded path live. It must
+      // *not* move the panel: the compiler is a different workload on a
+      // different entitlement from the slow lane the badge speaks for.
+      await ctx.api('POST', `/api/engagements/${ctx.state.engagementId}/bank/compile`);
+      await ctx.sleep(3000);
+      const afterCompile = await ctx.api('GET', `/api/meetings/${ctx.state.meetingId}/session/stream`);
+      const laneAfter = String(afterCompile.text ?? '')
+        .split('\n\n')
+        .map((block) => block.split('\n'))
+        .filter((lines) => lines[0] === 'event: lane')
+        .map((lines) => JSON.parse((lines[1] ?? '').replace('data: ', '')))[0] ?? null;
+      ctx.check('a refused batch does not put the live panel into degraded mode',
+        laneAfter?.model_reachable === true,
+        `lane after a batch refused for scope: ${JSON.stringify(laneAfter)}`);
+
+      await ctx.narrate('A write-up that stopped early has to say so, not just come back shorter');
+      const completion = await ctx.api('GET', `/api/meetings/${ctx.state.meetingId}/debrief/completion`);
+      ctx.check('a meeting with no debrief run is not reported as a failed one',
+        completion.status === 404,
+        `status ${completion.status}, ${JSON.stringify(completion.json).slice(0, 200)}`);
     },
   },
 
@@ -313,10 +454,30 @@ export const JOURNEYS = [
       const engines = await ctx.count('#engines-title ~ .group .row');
       ctx.check('the screen names the engines that transcribed the meeting', engines > 0,
         `${engines} engine rows rendered`);
+      // Two readings are acceptable and one is not. A figure is fine, and so
+      // is saying nothing was compared — this meeting has no pair of
+      // transcripts, because no speech vendor is wired. A bare "0%" is the one
+      // answer that is wrong, and it is what a live run photographed, sitting
+      // beside a count of nought disagreements.
+      //
+      // Asserting only `!== '0%'` would have gone green the moment the screen
+      // started rendering an em dash, which is not "reporting how far the
+      // engines agreed" either.
       const agreement = await ctx.text('.stat-value');
-      ctx.check('the screen reports how far the engines agreed',
-        agreement !== null && agreement.trim() !== '0%',
-        `agreement reads ${JSON.stringify(agreement)}`);
+      const compared = await ctx.eval(
+        `return document.body.textContent.includes('Not compared yet')`);
+      ctx.check('the screen reports how far the engines agreed, or says it cannot',
+        agreement !== null && agreement.trim() !== '0%'
+          && (compared === true || /^\d+%$/.test(agreement.trim())),
+        `agreement reads ${JSON.stringify(agreement)}, "not compared" shown: ${compared}`);
+
+      const disagreementNote = await ctx.eval(
+        `const s=[...document.querySelectorAll('section')].find(
+           (n) => n.textContent.includes('Where they disagreed'));
+         return s ? s.textContent.replace('Where they disagreed', '').trim().slice(0, 120) : null`);
+      ctx.check('an empty disagreement list explains itself rather than reading as agreement',
+        disagreementNote !== null && disagreementNote.length > 0,
+        `the section under the heading reads ${JSON.stringify(disagreementNote)}`);
     },
   },
 
@@ -477,6 +638,18 @@ export const JOURNEYS = [
       const label = await ctx.text('#replay-title');
       ctx.check('the replay screen names the run it is showing',
         label !== null && label.trim() !== '—', `run label reads ${JSON.stringify(label)}`);
+
+      // Both figures hold a release, and neither can be read without knowing
+      // how much evidence is behind it. A live run photographed "100%" in
+      // green against a bar of 70%, taken over a single rating, with nothing
+      // on screen to say so.
+      const gateCaptions = await ctx.eval(
+        `return [...document.querySelectorAll('.stat')]
+           .map((s) => s.textContent.trim()).join(' | ')`);
+      ctx.check('each gate says how much evidence it rests on',
+        typeof gateCaptions === 'string'
+          && /(\d+ of \d+ rated|of \d+ rated|Nothing rated yet)/.test(gateCaptions),
+        `the gate tiles read ${JSON.stringify(gateCaptions)}`);
       const suggestions = await ctx.count('#rate-title ~ .group .row');
       ctx.check('the screen lists suggestions to rate', suggestions > 0, `${suggestions} suggestions rendered`);
     },

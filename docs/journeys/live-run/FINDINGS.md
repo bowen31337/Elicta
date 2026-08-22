@@ -333,3 +333,133 @@ None of the 21 remaining failures is unfinished work from this pass.
 The handbook is in drift on seven chapters, because the screens they show
 changed. That is the mechanism working; it needs a human to re-read them
 and run `gen.py accept`.
+
+---
+
+# Re-run — 21 August 2026
+
+**56 passed / 28 failed**, clean state database, real Anthropic OAuth token, no
+Deepgram key, `ELICTA_INFERENCE_MODEL=claude-haiku-4-5-20251001`.
+
+Journey 1 is 13 of 14. The preparation screen now does what journey 1 says it
+does — create the engagement, add documents by dropping a file or by link, tag
+them, keep the vocabulary list, reorder and prune the bank — and the live run
+drives all of it. Its one failure is the question bank, which cannot be drafted
+on this credential.
+
+## What the run found about the credential, not the code
+
+The first re-run reported "rate limited" and "the provider rejected the
+configured credential". Both were wrong, and both were the product's own
+wording rather than the provider's:
+
+| Probe | Result |
+|---|---|
+| `GET /v1/models` | 200 |
+| `POST /v1/messages` — `claude-haiku-4-5-20251001` | **200** |
+| `POST /v1/messages` — opus-5 / sonnet-5 / fable-5 | 429, **no `retry-after`, no rate-limit headers** |
+| `POST /v1/messages/batches` | **403** `permission_error`, naming the scopes it wanted |
+
+So: the token is valid; the *default model* is not on its plan, and the Batch
+API needs a scope it does not carry. Anthropic signals the first as
+`rate_limit_error`, which is indistinguishable from throttling unless you
+notice there is no retry hint — and the product was actively telling the
+operator "the same request should succeed shortly", which was never true.
+
+Three reporting defects were fixed as a result: a 403 scope error is now its own
+`NOT_ENTITLED` failure carrying the provider's sentence rather than "re-enter
+your credential"; a 429 with no retry hint says the model may not be one this
+credential can use; and `ELICTA_INFERENCE_MODEL` — the documented way out — was
+dead, because it was only read when the settings model was falsy and that field
+defaults to `claude-opus-5`.
+
+## What is still open
+
+* **A bank drafted by a real provider has not been seen.** The submission is
+  refused for want of a scope. The collector that goes back for a finished
+  batch is built, tested and started by the process, and is proven against a
+  stand-in batch that finishes on the second sweep.
+* **Consent is fail-open.** `DEFAULT_CONSENT_MODEL = ENGAGEMENT_LEVEL` means the
+  gate answers `not_required`, a session starts unconfirmed, and no
+  `ConsentRecord` is written. Journey 2 fails on exactly that (13/0 → 8/5). The
+  decision is deliberate and documented at the constant; this is the harness
+  reporting it, not a regression in it.
+* **No speech vendor client exists** on either path, and this run had no
+  Deepgram key configured.
+* **The engagement picker lists 20.** An earlier attempt at this run failed
+  journey 1's toolbar check because the state database had accumulated 28
+  engagements and `eng-28` was not in the list. Real for any deployment past
+  twenty; the run was redone against a clean database.
+
+
+---
+
+# Re-run after the storage work — 21 August 2026
+
+**65 passed / 19 failed**, up from 56/28 earlier the same day. Same clean state
+database, same credential, same model override.
+
+| Journey | Earlier | Now | Why |
+|---|---|---|---|
+| 01 Prepare | 13P/1F | **16P/1F** | Three new checks: a vocabulary term is removed, the removal takes effect, and removing an id nobody has is a 404 rather than a cheerful 204 |
+| 02 Consent | 8P/5F | **10P/0F** | The journey was rewritten to assert what this build does — see below |
+| 07 Write-up | 4P/10F | **8P/6F** | The debrief reaches a model it is entitled to and answers for real; the remaining six are the artifacts downstream of it |
+
+## What the run now proves that it could not before
+
+* **What an operator types is kept.** Documents and vocabulary are written to
+  SQLite as they are added, and the screenshot for journey 1 shows them read
+  back from the database rather than held in a process.
+* **A removal is real and is soft.** The run adds a deliberately mistyped
+  keyterm, removes it, and the screenshot shows the three correct words with the
+  typo gone — while the row is still in the database, marked.
+* **A 404 for an id nobody has.** Answering 204 to any delete would make a typo
+  look like a successful removal, which is the failure mode a soft delete is
+  least able to survive: nothing is erased, so nothing looks wrong.
+
+## Journey 2 passing 10/10 does not mean consent is on the record
+
+`DEFAULT_CONSENT_MODEL` is `ENGAGEMENT_LEVEL`, so the gate answers
+`not_required`, a session starts with nothing confirmed and no `ConsentRecord`
+is written. The journey now asserts that behaviour rather than the asking one,
+which is the honest thing for a harness to do — but it means a green journey 2
+records that consent is *not being asked for*, not that it was obtained. The
+decision is deliberate and documented at the constant.
+
+## Still open
+
+* A bank drafted end to end by a real provider: the credential cannot submit a
+  batch job at all.
+* Erasing a client's data outright. Removal is soft everywhere, on purpose: real
+  erasure would have to decide about recordings, consent records and debrief
+  artifacts, and the PRD asks for none of it.
+* The engagement list shows the first twenty.
+
+## What the 21 August re-run added
+
+Two findings that only a live run could produce, both from journey 5.
+
+**The panel's degraded badge could not detect a connection dropping.** Its mode
+came from whether a provider was *configured* — a fact fixed when the service
+started. An outage, an expired credential, a throttle and a revoked scope all
+left it reporting the model as reachable. It now comes from what real calls
+found. The credential here supplies the proof: it is accepted on
+`POST /v1/messages` and refused on `/v1/messages/batches` for want of a scope,
+which is a genuine upstream failure across a genuine seam.
+
+**And the first version of that fix was wrong, in a way only the live run
+showed.** The observation was wired into the audit wrapper both the compiler and
+the debrief engines share, so the batch refusal above — a *pre-meeting* compile,
+on a different entitlement — put the live panel into degraded mode about a model
+that was answering fine. Journey 5's oldest check, "the panel is not falsely
+claiming degraded mode while the model is reachable", went red the first time it
+ran end to end. Every unit test still passed: each was scoped to one seam, and
+the defect was that two seams shared one opinion.
+
+**A third, about the harness rather than the product.** Chrome was launched with
+no `--user-data-dir`, so `localStorage` — where the toolbar keeps the chosen
+engagement — survived between runs. Against a fresh state database the picker
+opened holding the previous run's id, and journey 1 failed on the toolbar check
+in a way that read as a regression in the picker. Each run now gets a profile of
+its own and deletes it afterwards.
+

@@ -16,7 +16,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -86,11 +88,20 @@ export class Cdp {
 
 export async function launchBrowser({ width, height, scale = 2 }) {
   const port = 9222 + Math.floor(Math.random() * 500);
+  // A profile of this run's own, thrown away with it. Without one Chrome uses
+  // its default profile, so `localStorage` — which is where the toolbar keeps
+  // the chosen engagement and meeting — survives from run to run. Against a
+  // fresh state database that means the picker opens holding an id the service
+  // has never heard of, and journey 1 fails on "the engagement can be chosen
+  // from the toolbar" with the previous run's id in the message. It reads
+  // exactly like a regression in the picker, and the picker is fine.
+  const profile = mkdtempSync(path.join(tmpdir(), 'elicta-live-run-'));
   const chrome = spawn(
     CHROME,
     [
       '--headless=new',
       `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
       '--no-sandbox',
       '--disable-gpu',
       '--hide-scrollbars',
@@ -130,7 +141,18 @@ export async function launchBrowser({ width, height, scale = 2 }) {
     mobile: false,
   });
 
-  return { cdp, chrome, socket, close: () => { socket.close(); chrome.kill(); } };
+  return {
+    cdp,
+    chrome,
+    socket,
+    close: () => {
+      socket.close();
+      chrome.kill();
+      // Best effort: a profile left behind is litter in the temp directory,
+      // not a failed run, so it must never take the run down with it.
+      try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+    },
+  };
 }
 
 /**
@@ -141,11 +163,12 @@ export async function launchBrowser({ width, height, scale = 2 }) {
  * what makes playback match the wall clock the run actually took.
  */
 export class Recorder {
-  constructor(cdp, outPath, { fps = 10, scaleTo = 1280 } = {}) {
+  constructor(cdp, outPath, { fps = 10, scaleTo = 1280, viewport = null } = {}) {
     this.cdp = cdp;
     this.outPath = outPath;
     this.fps = fps;
     this.scaleTo = scaleTo;
+    this.viewport = viewport;
     this.latest = null;
     this.frames = 0;
     this.ffmpeg = null;
@@ -170,10 +193,31 @@ export class Recorder {
       void this.cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => undefined);
     });
 
+    // Re-assert the emulated viewport immediately before the screencast, or
+    // the capture is the headless *window's* visible area instead: Chrome
+    // returned 1280x657 against a viewport whose own `innerHeight` reported
+    // 800, and the missing 143px were the bottom of the page — exactly where
+    // the caption bar is fixed. Every recording silently cropped the one piece
+    // of chrome that says what the run was doing at that moment, while the
+    // screenshots beside it (`Page.captureScreenshot`, which does honour the
+    // override) came out full height. `maxWidth`/`maxHeight` alone do not fix
+    // it; they cap a frame rather than choosing what is in it.
+    if (this.viewport !== null) {
+      await this.cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: this.viewport.width,
+        height: this.viewport.height,
+        deviceScaleFactor: this.viewport.scale ?? 1,
+        mobile: false,
+      });
+    }
+
     await this.cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 85,
       everyNthFrame: 1,
+      ...(this.viewport === null
+        ? {}
+        : { maxWidth: this.viewport.width, maxHeight: this.viewport.height }),
     });
 
     this.ticker = setInterval(() => {

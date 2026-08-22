@@ -50,9 +50,14 @@ const SCENES = [
        .find(b => b.textContent.includes('Asked it'))?.click()`,
   },
   { scene: 'degraded', name: 'panel-degraded', ...PANEL },
-  { scene: 'prep', name: 'prep-question-tree', ...SCREEN },
+  // Taller than the other review screens: preparation grew documents,
+  // vocabulary, the bank, meetings and engagement management, and a picture
+  // cropped above half of what the chapter describes is worse than no picture.
+  { scene: 'engagements', name: 'engagements-list', ...SCREEN },
+  { scene: 'prep', name: 'prep-question-tree', ...SCREEN, height: 2000 },
   { scene: 'consent-pending', name: 'consent-pending', ...SCREEN },
   { scene: 'consent-confirmed', name: 'consent-confirmed', ...SCREEN },
+  { scene: 'consent-not-required', name: 'consent-not-asked', ...SCREEN },
   { scene: 'recording', name: 'recording-divergences', ...SCREEN },
   { scene: 'debrief', name: 'debrief-artifacts', ...SCREEN },
   { scene: 'debrief-chat', name: 'debrief-conversation', ...SCREEN },

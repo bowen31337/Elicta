@@ -30,7 +30,10 @@ const SECRETS = {
   anthropicToken: process.env.ELICTA_ANTHROPIC_TOKEN ?? '',
   deepgramKey: process.env.ELICTA_DEEPGRAM_KEY ?? '',
 };
-if (SECRETS.anthropicToken === '') {
+// Only journey 10 needs the token, so only demand it when journey 10 is in
+// the selection. `--only 02` used to exit 2 here, which made the flag useless
+// for regenerating one journey's evidence — the case it exists for.
+if (SECRETS.anthropicToken === '' && (ONLY === null || ONLY.split(',').includes('10'))) {
   console.error('ELICTA_ANTHROPIC_TOKEN is not set — journey 10 cannot run.');
   process.exit(2);
 }
@@ -54,6 +57,37 @@ async function callApi(method, path, body, timeoutMs = 30000) {
       signal: controller.signal,
       headers: body ? { 'content-type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await response.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { json = text.slice(0, 400); }
+    // `text` is the whole body. `json` truncates a non-JSON one to keep report
+    // entries readable, which is right for a failure message and wrong for a
+    // caller that has to parse it — the session stream is server-sent events,
+    // and reading its frames out of a 400-character slice would silently stop
+    // working the moment a meeting carried a few more of them.
+    return { status: response.status, json, text };
+  } catch (error) {
+    return { status: 0, json: { error: String(error.message ?? error) }, text: '' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Uploads one file the way the panel's drop zone does: `multipart/form-data`,
+ *  with the boundary the runtime picks rather than one written by hand. */
+async function uploadApi(path, { filename, content, fields = {} }, timeoutMs = 30000) {
+  const form = new FormData();
+  form.append('file', new Blob([content]), filename);
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API}${path}`, {
+      method: 'POST',
+      signal: controller.signal,
+      body: form,
     });
     const text = await response.text();
     let json = null;
@@ -117,13 +151,18 @@ async function main() {
     let shotIndex = 0;
     const networkAt = failedRequests.length;
 
-    const recorder = new Recorder(cdp, `${dir}/journey.${tool.ext}`, { fps: 10, scaleTo: 1280 });
+    const recorder = new Recorder(cdp, `${dir}/journey.${tool.ext}`, {
+      fps: 10,
+      scaleTo: 1280,
+      viewport: VIEWPORT,
+    });
     await recorder.start(tool);
 
     const ctx = {
       state, secrets: SECRETS, sleep,
       eval: (expression) => cdp.eval(expression),
       api: (method, path, body = null, timeoutMs) => callApi(method, path, body, timeoutMs),
+      upload: (path, file, timeoutMs) => uploadApi(path, file, timeoutMs),
       async narrate(message) {
         console.log(`    · ${message}`);
         await cdp.eval(OVERLAY(`${journey.id} — ${journey.title}`, message));
