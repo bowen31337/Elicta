@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import io
 import time
+import wave
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -33,6 +35,36 @@ BatchTranscriptionOutput = _models.BatchTranscriptionOutput
 TranscriptSegment = _models.TranscriptSegment
 
 BASE_URL = "https://api.assemblyai.com"
+
+# The capture pipeline's fixed format (architecture §7): linear PCM, 16 kHz,
+# mono, 16-bit little-endian samples. This is the same format Deepgram is
+# handed raw, declared through `encoding`/`sample_rate`/`channels` query
+# parameters rather than a container.
+CAPTURE_SAMPLE_RATE_HZ = 16000
+CAPTURE_CHANNELS = 1
+CAPTURE_SAMPLE_WIDTH_BYTES = 2  # 16-bit
+
+
+def _wrap_pcm_as_wav(pcm: bytes) -> bytes:
+    """Wrap headerless capture-format PCM in a minimal WAV container.
+
+    AssemblyAI's `/v2/upload` has no format parameters — unlike Deepgram's
+    `/v1/listen`, it infers the encoding from the container the bytes arrive
+    in, and treats an undeclared body as opaque `application/octet-stream`.
+    Confirmed live: the same PCM bytes uploaded headerless never transcribed;
+    wrapped in the 44-byte RIFF/WAVE header this function writes, they did.
+    The header adds no re-encoding and loses nothing — it only states, for a
+    vendor that needs it stated, the format the capture pipeline already
+    fixes: 16 kHz, mono, 16-bit little-endian linear PCM.
+    """
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(CAPTURE_CHANNELS)
+        writer.setsampwidth(CAPTURE_SAMPLE_WIDTH_BYTES)
+        writer.setframerate(CAPTURE_SAMPLE_RATE_HZ)
+        writer.writeframes(pcm)
+    return buffer.getvalue()
 
 
 class AssemblyAIUnavailable(Exception):
@@ -105,7 +137,9 @@ def assemblyai_record_engine(
         async with httpx.AsyncClient(timeout=600.0, transport=transport) as client:
             try:
                 uploaded = await client.post(
-                    f"{BASE_URL}/v2/upload", headers=headers, content=bytes(audio)
+                    f"{BASE_URL}/v2/upload",
+                    headers=headers,
+                    content=_wrap_pcm_as_wav(bytes(audio)),
                 )
                 if uploaded.status_code != 200:
                     raise AssemblyAIUnavailable(

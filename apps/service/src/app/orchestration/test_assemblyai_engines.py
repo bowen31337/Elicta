@@ -14,11 +14,17 @@ No test here makes a live call; every engine test drives an
 
 from __future__ import annotations
 
+import io
+import wave
+
 import httpx
 import pytest
 
 from app.modules.settings.models import SecretValue
 from app.orchestration.assemblyai_engines import (
+    CAPTURE_CHANNELS,
+    CAPTURE_SAMPLE_RATE_HZ,
+    CAPTURE_SAMPLE_WIDTH_BYTES,
     AssemblyAIUnavailable,
     assemblyai_record_engine,
     to_batch_transcription,
@@ -305,3 +311,81 @@ def test_a_response_missing_utterances_entirely_is_a_failure() -> None:
 
     with pytest.raises(ValueError, match="no utterances"):
         to_batch_transcription({"status": "completed"}, "assemblyai")
+
+
+@pytest.mark.asyncio
+async def test_the_upload_wraps_pcm_in_a_wav_container_with_the_right_format() -> None:
+    """AssemblyAI infers format from the container, unlike Deepgram which is
+    told the format in query parameters. A body with no header, or one
+    claiming the wrong rate/channels/depth, silently fails to transcribe on
+    the real vendor even though every mocked test here would still pass —
+    so this parses the header back out rather than comparing a magic blob."""
+
+    pcm = b"\x01\x00\x02\x00\x03\x00\x04\x00" * 100
+    uploaded_bodies: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            uploaded_bodies.append(request.content)
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        lambda session_id: pcm,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    await engine("session_123", "audio_ref_unused", [])
+
+    assert len(uploaded_bodies) == 1
+    body = uploaded_bodies[0]
+
+    assert body[:4] == b"RIFF"
+    assert body[8:12] == b"WAVE"
+
+    with wave.open(io.BytesIO(body), "rb") as reader:
+        assert reader.getframerate() == CAPTURE_SAMPLE_RATE_HZ
+        assert reader.getnchannels() == CAPTURE_CHANNELS
+        assert reader.getsampwidth() == CAPTURE_SAMPLE_WIDTH_BYTES
+        assert reader.readframes(reader.getnframes()) == pcm
+
+
+@pytest.mark.asyncio
+async def test_the_wav_header_adds_exactly_44_bytes() -> None:
+    """A future change that drops the header, or adds a second one, must
+    fail here rather than only on the real vendor."""
+
+    pcm = b"\x00\x01" * 500
+    uploaded_bodies: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            uploaded_bodies.append(request.content)
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        lambda session_id: pcm,
+        MockStore(),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    await engine("session_123", "audio_ref_unused", [])
+
+    assert len(uploaded_bodies[0]) == 44 + len(pcm)
+
