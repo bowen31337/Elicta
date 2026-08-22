@@ -74,9 +74,14 @@ describe('listing the microphones a browser can see', () => {
    * A browser withholds device labels until permission has been granted, so
    * before the prompt every label is `''`. Rendering a blank row would read as
    * a broken screen rather than an un-permissioned one.
+   *
+   * The `deviceId` is blank for the same reason and on the same condition.
+   * This fixture used to pair an empty label with a real id, which is a
+   * combination no browser produces — and pairing them that way is what let
+   * the empty id reach `getUserMedia` unnoticed for as long as it did.
    */
   it('gives an unnamed device something readable to show', async () => {
-    const media = fakeMediaDevices([{ kind: 'audioinput', deviceId: 'mic-9', label: '' }]);
+    const media = fakeMediaDevices([{ kind: 'audioinput', deviceId: '', label: '' }]);
 
     const sources = await listBrowserSources(media);
 
@@ -228,5 +233,85 @@ describe('a secure page that simply has no microphone', () => {
         inputCount: 0,
       }),
     ).toMatch(/secure page/i);
+  });
+});
+
+/**
+ * A browser withholds the `deviceId` on the same condition it withholds the
+ * label: until microphone permission has been granted. Before the prompt,
+ * `enumerateDevices` returns one blank placeholder per device *kind* — every
+ * field the empty string — and this file's fixtures used to give those
+ * placeholders a real id, which is the one combination a browser never
+ * produces.
+ *
+ * That gap cost a live run every recording. The screen listed "Microphone 1",
+ * enabled Start, and opened it with `deviceId: { exact: '' }` — a constraint
+ * no device can satisfy. Chrome answered `NotFoundError`, the screen said "No
+ * microphone matching that input was found", and because nothing ever asked
+ * for permission plainly, the id stayed empty and the next attempt failed the
+ * same way. For ever.
+ */
+describe('opening a device the browser has refused to name', () => {
+  it('asks for the default microphone rather than a device id nothing can match', async () => {
+    const media = fakeMediaDevices([]);
+
+    await openBrowserCapture(media, '');
+
+    const constraints = media.getUserMedia.mock.calls[0][0] as {
+      audio: Record<string, unknown>;
+    };
+    // Not `deviceId: { exact: '' }`, and not `deviceId: {}` either — the
+    // absence of the constraint is what means "whichever one you default to".
+    expect(constraints.audio).not.toHaveProperty('deviceId');
+  });
+
+  it('keeps platform voice processing off for the default microphone too', async () => {
+    const media = fakeMediaDevices([]);
+
+    await openBrowserCapture(media, '');
+
+    const constraints = media.getUserMedia.mock.calls[0][0] as {
+      audio: Record<string, unknown>;
+    };
+    // `audio: true` would pass the test above and quietly undo the promise the
+    // consent screen makes to the client.
+    expect(constraints.audio.echoCancellation).toBe(false);
+    expect(constraints.audio.noiseSuppression).toBe(false);
+    expect(constraints.audio.autoGainControl).toBe(false);
+  });
+
+  it('still pins the device once the browser has named one', async () => {
+    const media = fakeMediaDevices([]);
+
+    await openBrowserCapture(media, 'mic-1');
+
+    const constraints = media.getUserMedia.mock.calls[0][0] as {
+      audio: Record<string, unknown>;
+    };
+    expect(constraints.audio.deviceId).toEqual({ exact: 'mic-1' });
+  });
+});
+
+describe('which device was actually opened', () => {
+  /**
+   * When the caller asked for the default microphone there is no id to carry
+   * forward — the browser chose, and only the track it handed back knows what
+   * it chose. Without asking it, the screen cannot mark the row that is live.
+   */
+  it('reports the id the browser settled on', async () => {
+    const track = { ...fakeTrack(), getSettings: () => ({ deviceId: 'mic-1' }) };
+    const media = fakeMediaDevices([], [track]);
+
+    const session = await openBrowserCapture(media, '');
+
+    expect(session.deviceId).toBe('mic-1');
+  });
+
+  it('reports nothing rather than guessing when the track will not say', async () => {
+    const media = fakeMediaDevices([], [fakeTrack()]);
+
+    const session = await openBrowserCapture(media, '');
+
+    expect(session.deviceId).toBeNull();
   });
 });

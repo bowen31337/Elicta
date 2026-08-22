@@ -31,6 +31,10 @@ interface MediaTrackLike {
   kind: string;
   enabled: boolean;
   stop(): void;
+  /** Optional because a test double need not model it, and because a browser
+   *  that will not say which device it opened is a state to report, not to
+   *  guess at. */
+  getSettings?(): { deviceId?: string };
 }
 
 interface MediaStreamLike {
@@ -115,9 +119,13 @@ export async function listBrowserSources(
   return devices
     .filter((device) => device.kind === 'audioinput')
     .map((device, index) => ({
+      // Withheld until permission is granted, exactly like the label below, so
+      // before the prompt this is the empty string — and it stays that way
+      // until an open succeeds. `openBrowserCapture` reads that as "the
+      // default microphone"; it is not an id anything can be matched against.
       id: device.deviceId ?? '',
-      // Labels are withheld until permission is granted, so before the prompt
-      // every one of these is the empty string.
+      // Labels are withheld on the same condition, so before the prompt every
+      // one of these is the empty string.
       label: device.label && device.label.trim() !== '' ? device.label : `Microphone ${index + 1}`,
       degraded: true,
     }));
@@ -128,6 +136,14 @@ export interface BrowserCaptureSession {
   pause(): void;
   resume(): void;
   stop(): void;
+  /**
+   * The device the browser actually opened, once it will say.
+   *
+   * Asking for the default microphone means the caller never named one, so
+   * this is the only account of what was chosen — and without it the screen
+   * cannot mark the row that is live.
+   */
+  readonly deviceId: string | null;
 }
 
 function openFailureMessage(cause: unknown): string {
@@ -150,32 +166,44 @@ function openFailureMessage(cause: unknown): string {
 /**
  * Opens one microphone for capture.
  *
- * The three processing constraints are switched off on purpose, and it is the
- * same claim the consent screen makes to the client: platform voice processing
- * is tuned for a human listener and removes detail a transcriber uses. Leaving
- * them at their defaults would quietly undo that promise.
+ * `sourceId` may be the empty string, and that is not a caller's mistake: it
+ * is what `listBrowserSources` returns for a device the browser has not yet
+ * been given permission to name. Pinning `deviceId: { exact: '' }` on it fails
+ * with `NotFoundError` every time, and since no other call here asks for
+ * permission, the id would stay empty and the next attempt would fail the
+ * same way — which is exactly what a live run hit on every recording.
  */
 export async function openBrowserCapture(
   media: MediaDevicesLike,
   sourceId: string,
 ): Promise<BrowserCaptureSession> {
+  // Switched off on purpose, and it is the same claim the consent screen makes
+  // to the client: platform voice processing is tuned for a human listener and
+  // removes detail a transcriber uses. Leaving them at their defaults — which
+  // is what a bare `audio: true` would do — would quietly undo that promise.
+  const audio: Record<string, unknown> = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+  };
+  // An empty id is not a device, it is the browser declining to name one, and
+  // `exact` on it can never be satisfied. Ask for the default microphone
+  // instead: the prompt that raises is what turns the placeholder into a named
+  // device for every attempt after this one.
+  if (sourceId !== '') {
+    audio.deviceId = { exact: sourceId };
+  }
+
   let stream: MediaStreamLike;
   try {
-    stream = await media.getUserMedia({
-      audio: {
-        deviceId: { exact: sourceId },
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-      video: false,
-    });
+    stream = await media.getUserMedia({ audio, video: false });
   } catch (cause) {
     throw new Error(openFailureMessage(cause));
   }
 
   const tracks = stream.getAudioTracks();
   return {
+    deviceId: tracks[0]?.getSettings?.().deviceId ?? null,
     // Pausing silences the track rather than stopping it: the device stays
     // open, so resuming is instant and does not re-prompt. FR-1.3 wants pause
     // to take effect on the tap, and a disabled track emits silence at once.

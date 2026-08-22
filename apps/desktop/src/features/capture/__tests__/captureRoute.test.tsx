@@ -137,3 +137,25 @@ describe('a browser that can reach a microphone', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/refused/i);
   });
 });
+
+describe('the recording clock on screen', () => {
+  it('shows the recording running rather than a frozen 00:00', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      browserWithMicrophone();
+      render(<CaptureRoute />);
+
+      await userEvent.click(await screen.findByRole('button', { name: /start recording/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument(),
+      );
+
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      await waitFor(() => expect(screen.getByText('00:04')).toBeInTheDocument());
+      expect(screen.queryByText('00:00')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -69,6 +69,11 @@ export interface UseCapture {
   readonly blockedReason: string | null;
   /** The last failure from trying to open a microphone, if any. */
   readonly error: string | null;
+  /**
+   * How long this recording has been running, in whole seconds, not counting
+   * time spent paused. Zero when nothing is recording.
+   */
+  readonly elapsedSeconds: number;
   readonly start: (sourceId?: string) => Promise<void>;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
@@ -100,6 +105,56 @@ export function useCapture(): UseCapture {
 
   const session = useRef<BrowserCaptureSession | null>(null);
   const media = environment.mediaDevices;
+
+  /**
+   * The recording clock.
+   *
+   * It lives here rather than in either backend because neither can supply
+   * it: the shell's `capture_status` reports a frame count and no timestamp,
+   * and a browser `MediaStream` has no start time on it at all. The route
+   * used to pass the literal `"00:00"`, so a forty-minute recording displayed
+   * exactly what it displayed before it began.
+   *
+   * Recorded time, not wall time: `recorded` banks whatever a run accumulated
+   * when it paused, and `runningSince` is the start of the run in progress.
+   * Deriving it from the two on every tick — rather than incrementing a
+   * counter — is what keeps it honest when the interval is throttled, which
+   * a background tab does routinely.
+   */
+  const recorded = useRef(0);
+  const runningSince = useRef<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const capturing = status.state === 'capturing';
+
+  useEffect(() => {
+    if (status.state === 'idle') {
+      recorded.current = 0;
+      runningSince.current = null;
+      setElapsedSeconds(0);
+      return undefined;
+    }
+
+    if (!capturing) {
+      // Paused. Bank the run that just ended and stop the clock where it is.
+      if (runningSince.current !== null) {
+        recorded.current += Date.now() - runningSince.current;
+        runningSince.current = null;
+        setElapsedSeconds(recorded.current / 1000);
+      }
+      return undefined;
+    }
+
+    if (runningSince.current === null) runningSince.current = Date.now();
+    const read = () => {
+      const since = runningSince.current;
+      setElapsedSeconds(
+        (recorded.current + (since === null ? 0 : Date.now() - since)) / 1000,
+      );
+    };
+    read();
+    const timer = setInterval(read, 250);
+    return () => clearInterval(timer);
+  }, [capturing, status.state]);
 
   const listSources = useCallback(async () => {
     if (shell) return (await callShell<CaptureSourceOption[]>('list_audio_sources')) ?? [];
@@ -176,10 +231,23 @@ export function useCapture(): UseCapture {
         source: sources.find((source) => source.id === chosen) ?? null,
         frames: 0,
       });
-      // Device labels are withheld until permission is granted, so the list
-      // read before the prompt was a set of placeholders. Re-read it now that
-      // the browser will tell us their names.
-      setSources(await listSources());
+      // Device ids and labels are both withheld until permission is granted,
+      // so the list read before the prompt was a set of placeholders. Re-read
+      // it now that the browser will tell us what they are.
+      const named = await listSources();
+      setSources(named);
+      // The status is still holding the placeholder, whose empty id matches
+      // nothing in the list that just came back — which leaves the row that is
+      // recording without its "In use" marker. Re-point it at the device the
+      // browser says it opened, which for a default microphone is the only
+      // account of which one that was.
+      const opened = session.current?.deviceId;
+      if (opened !== null && opened !== undefined) {
+        setStatus((current) => ({
+          ...current,
+          source: named.find((source) => source.id === opened) ?? current.source,
+        }));
+      }
     },
     [shell, media, sources, runShell, listSources],
   );
@@ -205,5 +273,18 @@ export function useCapture(): UseCapture {
     setStatus(IDLE);
   }, [shell, runShell]);
 
-  return { status, sources, available, blockedReason, error, start, pause, resume, stop };
+  return {
+    status,
+    sources,
+    available,
+    blockedReason,
+    error,
+    // Floored here rather than at each write, so a caller can never be handed
+    // a fractional second to render.
+    elapsedSeconds: Math.max(0, Math.floor(elapsedSeconds)),
+    start,
+    pause,
+    resume,
+    stop,
+  };
 }

@@ -4,6 +4,7 @@ import './capture.css';
 import { useState } from 'react';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { formatElapsed } from './elapsed';
 import { useCapture } from './useCapture';
 
 /**
@@ -237,7 +238,7 @@ export default function CaptureRoute() {
   return (
     <CaptureScreen
       state={state}
-      elapsed="00:00"
+      elapsed={formatElapsed(capture.elapsedSeconds)}
       sources={capture.sources.map((source) => ({
         id: source.id,
         label: source.label,
