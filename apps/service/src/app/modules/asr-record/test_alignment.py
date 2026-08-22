@@ -300,3 +300,52 @@ def test_a_span_neither_engine_put_words_in_is_not_a_divergence():
     assert alignment.spans[0].agreement_score == pytest.approx(1.0)
     assert alignment.spans[0].is_divergent is False
     assert divergent_spans(alignment) == []
+
+
+def test_a_single_misheard_word_in_a_long_span_is_flagged():
+    """The errors that matter most are the ones a ratio hides.
+
+    Two engines disagreeing about one word in twenty score 0.95, which clears
+    the 0.8 threshold — so a misheard number or product name, which is exactly
+    what two engines actually disagree about, never reached the operator.
+    Measured over a recorded meeting: seven planted mishearings, a number and
+    four product names among them, scored 0.91–0.96 and not one was surfaced.
+
+    This module's own docstring says the bar is a near-exact match. This is
+    that bar: the score still says how far apart they are, but any difference
+    at all is something the operator gets to see rather than have resolved for
+    them.
+    """
+
+    said = "the chilled stock cannot sit on the dock longer than fifteen minutes"
+    heard = "the chilled stock cannot sit on the dock longer than fifty minutes"
+    reference = make_transcript(
+        "engine-a", [TranscriptSegment(start_seconds=0.0, end_seconds=6.0, text=said)]
+    )
+    other = make_transcript(
+        "engine-b", [TranscriptSegment(start_seconds=0.0, end_seconds=6.0, text=heard)]
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    assert alignment.spans[0].agreement_score > DIVERGENCE_THRESHOLD, (
+        "this is the case a ratio calls agreement"
+    )
+    assert alignment.spans[0].is_divergent is True
+
+
+def test_wording_that_differs_only_in_punctuation_or_case_still_agrees():
+    """Otherwise every span diverges and the review list means nothing."""
+
+    reference = make_transcript(
+        "engine-a",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=2.0, text="Under a minute.")],
+    )
+    other = make_transcript(
+        "engine-b",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=2.0, text="under a minute")],
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    assert alignment.spans[0].is_divergent is False

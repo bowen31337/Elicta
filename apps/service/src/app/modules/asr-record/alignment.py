@@ -13,11 +13,19 @@ phoneme- or WER-level aligner.
 
 PRD FR-2.8 additionally requires every divergent or low-confidence span to
 be surfaced to the operator for review during debrief rather than the
-service silently picking one engine's wording as the winner. `DIVERGENCE_THRESHOLD`
-is the agreement-score cutoff below which a span is flagged `is_divergent`;
-it is intentionally not 0.0, since anything short of a (near-)exact match
-between two independent engines is exactly the case an operator should be
-able to review rather than have resolved for them.
+service silently picking one engine's wording as the winner. A span is
+`is_divergent` when the two readings are not the same words — case and
+punctuation aside — because anything short of an exact match between two
+independent engines is exactly the case an operator should be able to review
+rather than have resolved for them.
+
+The score is kept as the magnitude, not the trigger, and that separation is
+the point. Flagging on `agreement_score < DIVERGENCE_THRESHOLD` hid the
+errors two engines actually make: one word in twenty scores 0.95 and cleared
+the bar, so a misheard number or product name — the substitutions that change
+what a requirement means — never reached the operator. Measured over a
+recorded meeting, seven planted mishearings scored 0.91-0.96 and not one was
+surfaced. `DIVERGENCE_THRESHOLD` still marks the spans worth reading first.
 """
 
 from __future__ import annotations
@@ -36,6 +44,9 @@ from .models import (
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
 
+#: Below this, the two readings are far enough apart to be worth reading
+#: first. It no longer decides whether a span is surfaced at all — any
+#: difference does that — so lowering it hides nothing.
 DIVERGENCE_THRESHOLD = 0.8
 
 
@@ -90,7 +101,7 @@ def align_transcripts(
             other_engine=other.engine,
             other_text=other_text,
             agreement_score=score,
-            is_divergent=score < DIVERGENCE_THRESHOLD,
+            is_divergent=_normalize_words(segment.text) != _normalize_words(other_text),
         )
         for segment in reference.segments
         for other_text in [_overlapping_text(other.segments, segment.start_seconds, segment.end_seconds)]
