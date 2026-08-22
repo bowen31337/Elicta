@@ -233,3 +233,48 @@ def test_the_write_up_is_built_from_one_engine_not_both() -> None:
         f"cleaning saw {seen[0]} utterances for a two-segment meeting: "
         "both engines' transcripts reached the write-up"
     )
+
+
+FAR_FUTURE_MS = 4_102_444_800_000  # 2100-01-01, comfortably after any test run
+
+
+def test_a_record_path_engine_call_is_audited() -> None:
+    """NFR-2.7: a record-path vendor call is a call across the egress boundary too.
+
+    The compiler and debrief seams already write one `EgressLogRow` per call,
+    audited against the caller's own `engagement_id`; the record path's batch
+    engines were the exception, wired in production with no audit chokepoint
+    at all. This proves a call through an injected fake engine — standing in
+    for a real vendor, so nothing leaves the machine here either — lands a
+    row in `GET /api/audit/egress` against the meeting's own engagement.
+    """
+
+    backend = Backend()
+    app = build_app(
+        backend,
+        record_path_engines=[_engine("vendor-a", "the chilled dock rule is fifteen minutes")],
+    )
+    with TestClient(app) as client:
+        engagement_id = _engagement(client)
+        meeting_id = _meeting(client, engagement_id)
+
+        response = client.post(
+            f"/api/sessions/{meeting_id}/record-path-transcript",
+            json={"audio_ref": "fixture://northgate-1"},
+        )
+        assert response.status_code == 201, response.text
+
+        audit = client.get(
+            "/api/audit/egress",
+            params={
+                "engagement_id": engagement_id,
+                "start_ms": 0,
+                "end_ms": FAR_FUTURE_MS,
+            },
+        )
+    assert audit.status_code == 200, audit.text
+    rows = audit.json()
+    assert rows, "the record-path engine call left no audit row"
+    assert any(row["processor_name"] == "vendor-a" for row in rows), rows
+    assert all(row["engagement_id"] == engagement_id for row in rows), rows
+    assert all(row["success"] for row in rows), rows

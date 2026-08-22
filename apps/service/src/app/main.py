@@ -30,6 +30,7 @@ from app.composition import (
     attach_state_store,
     build_app,
     build_bank_collector,
+    read_session_audio,
 )
 from app.module_loader import MountedRouter, load_modules
 from app.modules.settings.models import SecretKey
@@ -37,6 +38,8 @@ from app.modules.settings.sqlite_store import SqliteSettingsStore
 from app.modules.settings.store import SettingsStore
 from app.orchestration.anthropic_engines import engines_from_settings
 from app.orchestration.bank_collector import DEFAULT_INTERVAL_SECONDS
+from app.orchestration.deepgram_engines import deepgram_diarizer
+from app.orchestration.record_engines import build_record_engines
 from app.persistence import open_state_store
 from app.persistence.store import redact_database_url, resolve_database_url
 
@@ -81,7 +84,6 @@ def create_app(
     # that need a model fail closed and name what is missing; the service
     # still starts and serves its full API.
     store = settings_store or SqliteSettingsStore(default_settings_database())
-    debrief_engines, compiler_engines = engines_from_settings(store)
 
     # G4: an engagement's memory has to outlive the process, so the backend
     # this function builds for itself is bound to the state database. A
@@ -99,11 +101,25 @@ def create_app(
         backend = attach_state_store(Backend(), open_state_store(database_url))
         logger.info("startup: state is durable in %s", redact_database_url(database_url))
 
+    read_audio = read_session_audio(backend)
+    debrief_engines, compiler_engines = engines_from_settings(
+        store, diarize=deepgram_diarizer(read_audio, store)
+    )
+
+    # A selected vendor that cannot run is a refusal at startup, not a silent
+    # omission that shows up as a missing transcript hours later.
+    record_engines = build_record_engines(store, read_audio)
+    logger.info(
+        "startup: record path engines: %s",
+        ", ".join(name for name, _ in record_engines),
+    )
+
     app = build_app(
         backend,
         debrief_engines=debrief_engines,
         compiler_engines=compiler_engines,
         settings_store=store,
+        record_path_engines=record_engines,
     )
     mounted: list[MountedRouter] = load_modules(app)
 

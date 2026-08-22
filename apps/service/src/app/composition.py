@@ -544,6 +544,39 @@ def _audited_debrief_engines(
     )
 
 
+def _audited_record_engine(backend: Backend, name: str, transcribe: Any) -> Any:
+    """One record-path batch engine, audited per call. See `_audited_compiler_engines`.
+
+    Unlike the compiler and debrief seams, this list is built once at
+    startup, before any session — let alone its engagement — exists, so the
+    fixed `engagement_id` `_audit_seam` wants cannot be resolved until the
+    call itself supplies a session id. The record path keys everything by
+    the meeting and calls it a session (see `_engagement_of_meeting`), so
+    that id is resolved fresh on every call and a fresh audited wrapper
+    built around it; falling back to the id itself keeps a session with no
+    known engagement recorded rather than dropped.
+    """
+
+    async def call(session_id: str, *args: Any, **kwargs: Any) -> Any:
+        engagement_id = _engagement_of_meeting(backend, session_id) or session_id
+        return await _audit_seam(backend, engagement_id, transcribe, name)(
+            session_id, *args, **kwargs
+        )
+
+    return call
+
+
+def _audited_record_engines(
+    backend: Backend, engines: Sequence[tuple[str, Any]]
+) -> list[tuple[str, Any]]:
+    """The record path's batch engines, audited. See `_audited_compiler_engines`."""
+
+    return [
+        (name, _audited_record_engine(backend, name, transcribe))
+        for name, transcribe in engines
+    ]
+
+
 class _BackendEgressSink:
     """Writes each audited call's row where `GET /api/audit/egress` reads."""
 
@@ -581,6 +614,20 @@ def upstream_status_for(failure: UpstreamFailure) -> int:
     """
 
     return _UPSTREAM_STATUS.get(failure, 503)
+
+
+def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
+    """The `read_audio` every vendor client takes, bound to one backend.
+
+    Injected rather than imported so a client never reaches for `Backend` —
+    the same discipline `orchestration/engines.py` follows for inference.
+    """
+
+    def read(session_id: str) -> bytes:
+        entry = backend.session_audio.get(session_id)
+        return bytes(entry.buffer) if entry is not None else b""
+
+    return read
 
 
 def _engagement_of_meeting(backend: Backend, meeting_id: str) -> str | None:
@@ -1225,10 +1272,11 @@ def build_app(
     # stage downstream of transcription working from "hello there". Injected
     # for the same reason `debrief_engines` is: the seam is where a vendor, or
     # a fixture standing in for one, substitutes.
-    engines = (
+    engines = _audited_record_engines(
+        backend,
         list(record_path_engines)
         if record_path_engines is not None
-        else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
+        else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)],
     )
 
     async def get_vocabulary(session_or_meeting_id: str) -> list[str]:
