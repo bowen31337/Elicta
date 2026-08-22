@@ -195,7 +195,68 @@ describe('the recording review screen', () => {
     // A 404 on every source is content, not failure: this meeting has not
     // happened yet.
     expect(await screen.findByText('Where they disagreed')).toBeInTheDocument();
-    expect(screen.getByText('0%')).toBeInTheDocument();
+  });
+
+  it('says nothing was compared rather than reporting nought per cent', async () => {
+    /**
+     * A live run photographed "Engines agreed 0%" beside "Needs a look 0" —
+     * two engines that both finished, no disagreements between them, and a
+     * headline saying they agreed about nothing. Both numbers were on screen
+     * at once and they contradict each other.
+     *
+     * 100% would be the more flattering lie and 0% is the more alarming one;
+     * neither is a measurement. Nothing was aligned, so there is nothing to
+     * take a share of, and the honest answer is that it cannot be told yet —
+     * which is what this journey already promises about the same measurement
+     * made against real recordings.
+     */
+    stubService(BASE);
+    render(<RecordingRoute />);
+
+    await screen.findByText('Where they disagreed');
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getByText(/not compared/i)).toBeInTheDocument();
+  });
+
+  it('tells an empty disagreement list apart from an uncompared one', async () => {
+    // Same ambiguity as the headline number, one section down: a bare heading
+    // with nothing under it reads as "they agreed on everything", which is the
+    // conclusion an operator would act on and the one nothing here supports.
+    stubService(BASE);
+    render(<RecordingRoute />);
+
+    await screen.findByText('Where they disagreed');
+    expect(screen.getByText(/nothing has been compared/i)).toBeInTheDocument();
+  });
+
+  it('says so plainly when the engines were compared and agreed throughout', async () => {
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-1/record/divergences': {
+        ...ALIGNMENT,
+        spans: ALIGNMENT.spans.filter((span) => !span.is_divergent),
+      },
+      '/api/sessions/meeting-1/record-path-transcript': TRANSCRIPTS,
+    });
+    render(<RecordingRoute />);
+
+    expect(await screen.findByText(/agreed everywhere they were compared/i)).toBeInTheDocument();
+  });
+
+  it('reports full agreement when the engines were compared and did not differ', async () => {
+    // The case 0% was standing in for. Two engines that ran and matched is a
+    // real result, and a different one from never having run.
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-1/record/divergences': {
+        ...ALIGNMENT,
+        spans: ALIGNMENT.spans.filter((span) => !span.is_divergent),
+      },
+      '/api/sessions/meeting-1/record-path-transcript': TRANSCRIPTS,
+    });
+    render(<RecordingRoute />);
+
+    expect(await screen.findByText('100%')).toBeInTheDocument();
   });
 
   it('takes the screen away when the service cannot be reached', async () => {

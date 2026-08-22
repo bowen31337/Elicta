@@ -35,6 +35,8 @@ score that could average an embarrassment away.
 
 | | |
 |---|---|
-| ✅ Ready | Replaying meetings, rating suggestions, both quality bars, and automatic blocking of a release that fails either |
+| ✅ Ready | Replaying meetings, recording ratings, both quality bars, and automatic blocking of a release that fails either |
+| ✅ Ready | **Both figures now say what they were measured over.** A live run photographed "Useful when surfaced 100%", in green, against a bar of 70% — taken over a single rating, with nothing on screen to say so. These two numbers can hold a release, and neither can be read without knowing how much evidence is behind it. The release check has always printed the fraction; the screen printed the percentage alone. A run with nothing rated now reports that, rather than a pass or a failure it has no grounds for |
+| ⏳ Not yet | **Rating from the screen.** A run's individual suggestions are not listed anywhere the screen can read them, so the section that should offer them to rate is empty and the ratings behind the figures were sent directly to the service. The rating itself works; the way in does not exist yet |
 | ⏳ Not yet | Both bars are judged per language, so adding a language means finding a fluent rater with business-analysis experience — not just translating a word list. Worth planning for early |
 | ✅ Decided | The starting weights are now chosen rather than left at a placeholder, and the reasoning is written down: say less, more confidently, because a suggestion that misfires in front of a client costs more than one that never fires. A question you have already asked can never be suggested again ahead of one you have not — that is guaranteed by the numbers themselves, not left to chance |

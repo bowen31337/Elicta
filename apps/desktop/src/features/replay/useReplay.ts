@@ -82,6 +82,13 @@ export function useReplay(): ReplayData {
     precisionPercent: Math.round((figure?.precision_at_surfaced ?? 0) * 100),
     precisionThreshold: M1_THRESHOLD_PERCENT,
     embarrassmentCount: figure?.embarrassing_count ?? 0,
+    // How much evidence the two gates rest on. A live run photographed
+    // "Useful when surfaced 100%" in green against "M1 needs 70%", measured
+    // over a single rating, with nothing on screen to say so. Both numbers can
+    // hold a release, and neither can be read without its denominator — which
+    // the CI gate has always printed and this screen never did.
+    ratedCount: figure?.surfaced_count ?? 0,
+    usefulCount: figure?.useful_count ?? 0,
     // No endpoint lists a run's individual suggestions, so there is nothing to
     // rate here yet. An empty list is the honest rendering of that; inventing
     // rows to fill the section would be the `ack: {message}` mistake again.

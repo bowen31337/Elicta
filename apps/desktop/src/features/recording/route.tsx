@@ -23,7 +23,8 @@ export interface Divergence {
 export interface RecordingScreenProps {
   readonly meetingTitle: string;
   readonly engines: readonly { name: string; status: 'complete' | 'failed' }[];
-  readonly agreementPercent: number;
+  /** `null` when nothing was aligned — see `useRecording`. */
+  readonly agreementPercent: number | null;
   readonly divergences: readonly Divergence[];
   readonly audioDestroyedAt: string | null;
 }
@@ -53,7 +54,14 @@ export function RecordingScreen({
       <div className="stat-row">
         <div className="stat">
           <span className="t-caption">Engines agreed</span>
-          <span className="stat-value">{agreementPercent}%</span>
+          {agreementPercent === null ? (
+            <>
+              <span className="stat-value">—</span>
+              <span className="t-footnote">Not compared yet</span>
+            </>
+          ) : (
+            <span className="stat-value">{agreementPercent}%</span>
+          )}
         </div>
         <div className="stat">
           <span className="t-caption">Needs a look</span>
@@ -93,6 +101,16 @@ export function RecordingScreen({
         <h2 className="t-section" id="diverge-title">
           Where they disagreed
         </h2>
+        {/* An empty list means two different things and the operator acts on
+            them differently: nothing compared is work still to come, agreement
+            throughout is a result. A bare heading reads as the second. */}
+        {divergences.length === 0 ? (
+          <p className="t-footnote hint">
+            {agreementPercent === null
+              ? 'Nothing has been compared yet — this meeting has no pair of transcripts to set against each other.'
+              : 'The engines agreed everywhere they were compared, so there is nothing here to review.'}
+          </p>
+        ) : null}
         {divergences.map((divergence) => (
           <div className="group" key={divergence.id}>
             <div className="row row--header">

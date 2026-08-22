@@ -143,3 +143,57 @@ describe('the replay screen', () => {
     expect(screen.queryByText('M2 needs zero')).not.toBeInTheDocument();
   });
 });
+
+describe('how much evidence the gates rest on', () => {
+  /**
+   * A live run photographed "Useful when surfaced 100%" in green against
+   * "M1 needs 70%" — measured over exactly one rated suggestion, with nothing
+   * on screen to say so. These two numbers block a release, and a reader
+   * cannot judge a rate without knowing what it was taken over. The CI gate
+   * has always printed the fraction; the screen printed the percentage alone.
+   */
+  it('says how many ratings the precision figure was taken over', async () => {
+    stubService({
+      '/api/replay/runs': RUNS,
+      '/api/replay/runs/run-1/metrics': {
+        run_id: 'run-1',
+        languages: [
+          {
+            language: 'en',
+            surfaced_count: 1,
+            useful_count: 1,
+            embarrassing_count: 0,
+            precision_at_surfaced: 1,
+          },
+        ],
+      },
+    });
+    render(<ReplayRoute />);
+
+    expect(await screen.findByText('100%')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 rated/i)).toBeInTheDocument();
+  });
+
+  it('says nothing has been rated rather than showing a rate over nothing', async () => {
+    stubService({
+      '/api/replay/runs': RUNS,
+      '/api/replay/runs/run-1/metrics': {
+        run_id: 'run-1',
+        languages: [
+          {
+            language: 'en',
+            surfaced_count: 0,
+            useful_count: 0,
+            embarrassing_count: 0,
+            precision_at_surfaced: 0,
+          },
+        ],
+      },
+    });
+    render(<ReplayRoute />);
+
+    // Both gates say it, because both are unmeasured.
+    expect(await screen.findAllByText(/nothing rated yet/i)).toHaveLength(2);
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+  });
+});

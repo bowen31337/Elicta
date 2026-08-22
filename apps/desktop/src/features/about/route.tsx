@@ -131,6 +131,19 @@ export function AboutScreen({
             </div>
           ))}
         </div>
+        {/* An empty list is not "nothing is needed" — capture needs the
+            microphone. Nothing asks the operating system what this build was
+            granted, and in a browser there is no operating system to ask, so
+            the heading stood over nothing and read as reassurance. */}
+        {permissions.length === 0 ? (
+          <p className="t-footnote hint">
+            What this build has been granted cannot be read here. Outside the
+            installed application there is no operating system to ask, and the
+            installed one does not yet report it — so this is a gap in what
+            Elicta can tell you, not a sign that nothing is needed. Capture
+            needs the microphone.
+          </p>
+        ) : null}
         {missing.length > 0 ? (
           <p className="t-footnote hint">
             Capture will not start without {missing.map((p) => p.name).join(' and ')}.

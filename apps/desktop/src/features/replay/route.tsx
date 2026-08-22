@@ -25,6 +25,9 @@ export interface ReplayScreenProps {
   readonly runLabel: string;
   readonly precisionPercent: number;
   readonly precisionThreshold: number;
+  /** How many suggestions the two figures were measured over. */
+  readonly ratedCount?: number;
+  readonly usefulCount?: number;
   readonly embarrassmentCount: number;
   readonly suggestions: readonly Suggestion[];
 }
@@ -33,10 +36,15 @@ export function ReplayScreen({
   runLabel,
   precisionPercent,
   precisionThreshold,
+  ratedCount = 0,
+  usefulCount = 0,
   embarrassmentCount,
   suggestions,
 }: ReplayScreenProps) {
-  const m1Pass = precisionPercent >= precisionThreshold;
+  // Nothing rated is not a failing gate and it is certainly not a passing one.
+  // Either verdict over an empty set is a claim no evidence supports.
+  const measured = ratedCount > 0;
+  const m1Pass = measured && precisionPercent >= precisionThreshold;
   const m2Pass = embarrassmentCount === 0;
 
   return (
@@ -49,15 +57,21 @@ export function ReplayScreen({
       </header>
 
       <div className="stat-row">
-        <div className={m1Pass ? 'stat stat--pass' : 'stat stat--fail'}>
+        <div className={measured ? (m1Pass ? 'stat stat--pass' : 'stat stat--fail') : 'stat'}>
           <span className="t-caption">Useful when surfaced</span>
-          <span className="stat-value">{precisionPercent}%</span>
-          <span className="t-caption">M1 needs {precisionThreshold}%</span>
+          <span className="stat-value">{measured ? `${precisionPercent}%` : '—'}</span>
+          <span className="t-caption">
+            {measured
+              ? `${usefulCount} of ${ratedCount} rated · M1 needs ${precisionThreshold}%`
+              : 'Nothing rated yet · M1 needs ' + precisionThreshold + '%'}
+          </span>
         </div>
-        <div className={m2Pass ? 'stat stat--pass' : 'stat stat--fail'}>
+        <div className={measured ? (m2Pass ? 'stat stat--pass' : 'stat stat--fail') : 'stat'}>
           <span className="t-caption">Embarrassing</span>
-          <span className="stat-value">{embarrassmentCount}</span>
-          <span className="t-caption">M2 needs zero</span>
+          <span className="stat-value">{measured ? embarrassmentCount : '—'}</span>
+          <span className="t-caption">
+            {measured ? `of ${ratedCount} rated · M2 needs zero` : 'Nothing rated yet · M2 needs zero'}
+          </span>
         </div>
       </div>
 
@@ -130,6 +144,8 @@ export default function ReplayRoute() {
       precisionPercent={replay.precisionPercent}
       precisionThreshold={replay.precisionThreshold}
       embarrassmentCount={replay.embarrassmentCount}
+      ratedCount={replay.ratedCount}
+      usefulCount={replay.usefulCount}
       suggestions={replay.suggestions}
     />
   );

@@ -45,5 +45,7 @@ the client wanted — and that error carries all the way into the write-up.
 
 | | |
 |---|---|
-| ✅ Ready | The whole screen — pause and resume, the state display, the input warning, and voice enrolment |
+| ✅ Ready | Pause and resume, the state display, and the input warning |
 | ✅ Ready | Pause now pauses a real microphone. Audio captured while paused is discarded rather than held back, and resuming is instant because the device is never closed |
+| ✅ Ready | **A control that cannot work now says why.** A live run photographed a greyed-out "Start recording" beside an empty input list, with no explanation anywhere on the screen — the page was secure and the browser offered microphone access, so both existing checks passed and the screen concluded there was nothing to explain. The machine simply had no microphone. That case now says so, because an operator can act on "no microphone" and can do nothing at all about a dead button |
+| ⏳ Not yet | **Recording your own voice.** The screen offers it and the button does nothing yet, so every voice in the room is still treated the same way — which is the error the section above describes, still waiting to be prevented |

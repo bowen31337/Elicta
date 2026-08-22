@@ -41,6 +41,13 @@ names are placeholders rather than companies. Everything on this page describes
 machinery that is finished and waiting, not a recording that has been through
 it. The comparison is real; it has had nothing real to compare.
 
+The screen says exactly that rather than putting a figure on it. It used to
+report that the engines had agreed on none of the recording, directly beside a
+count of nought disagreements — two numbers contradicting each other in the same
+row. Neither was a measurement. Where nothing has been compared it now says so,
+and that reads differently from two engines that were compared and matched
+throughout.
+
 There is also a way to measure how much the pairing catches, once it runs: given
 a recording and a known-correct transcript, it reports what share of the mistakes
 the two services would have shown you. A sample containing no mistakes reports

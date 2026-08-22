@@ -112,13 +112,20 @@ export function useRecording(): RecordingData {
       name: transcript.engine,
       status: transcript.status === 'complete' ? ('complete' as const) : ('failed' as const),
     })),
-    // The share of aligned spans the two engines agreed on. With nothing
-    // aligned this is 0 rather than 100: two engines that have not run have
-    // not agreed about anything, and a full-marks reading of an empty set is
-    // the most flattering possible lie.
+    // The share of aligned spans the two engines agreed on, or `null` when
+    // there is nothing to take a share of.
+    //
+    // This used to read 0 for an empty set, on the reasoning that engines
+    // which have not run have not agreed about anything and that 100 would be
+    // the most flattering possible lie. Both halves are right and the
+    // conclusion was wrong: a live run photographed "Engines agreed 0%" beside
+    // "Needs a look 0" — two finished engines, no disagreements, and a
+    // headline saying they matched on nothing. 0 is not the cautious answer,
+    // it is the alarming lie. Neither number is a measurement, so neither is
+    // reported.
     agreementPercent:
       spans.length === 0
-        ? 0
+        ? null
         : Math.round(((spans.length - divergent.length) / spans.length) * 100),
     divergences: useMemo(
       (): readonly Divergence[] =>

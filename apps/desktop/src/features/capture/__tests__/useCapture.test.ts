@@ -54,3 +54,35 @@ describe('inside the desktop shell', () => {
     expect(result.current.available).toBe(true);
   });
 });
+
+describe('a browser with no microphone attached', () => {
+  /**
+   * The pure check is unit-tested next door; this is the wiring, which is the
+   * half that was missing. The count has to reach the check from the same
+   * enumeration that fills the source list, or the screen keeps showing a dead
+   * button beside an empty list exactly as a live run photographed it.
+   */
+  it('reports the reason once the enumeration has come back empty', async () => {
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { enumerateDevices: async () => [], getUserMedia: async () => ({}) },
+    });
+
+    const { result } = renderHook(() => useCapture());
+
+    await waitFor(() => expect(result.current.blockedReason).toMatch(/no microphone/i));
+  });
+
+  it('says nothing about microphones before the browser has been asked', () => {
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { enumerateDevices: () => new Promise(() => {}), getUserMedia: async () => ({}) },
+    });
+
+    const { result } = renderHook(() => useCapture());
+
+    expect(result.current.blockedReason).toBeNull();
+  });
+});

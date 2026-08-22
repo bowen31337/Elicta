@@ -45,7 +45,18 @@ to check.
 
 ## Where this is honest about itself
 
-Replaying, rating, both bars and the automatic block all work today.
+Replaying, recording ratings, both bars and the automatic block all work today.
+
+Each bar now shows what it was measured over, which matters more than it sounds.
+A figure of "useful nine times in ten" means one thing across four ratings and
+quite another across four hundred, and the screen used to show only the
+percentage — once reporting a comfortable pass, in green, from a single rating.
+A run with nothing rated yet says so, rather than claiming either a pass or a
+failure it has no grounds for.
+
+What is missing is the way in. A run's individual suggestions are not yet listed
+on the screen, so there is nowhere to sit and rate them; the ratings behind these
+figures were recorded another way.
 
 Both bars are judged separately for each language, so adding a language means
 finding a fluent rater who also does business analysis — not just translating a

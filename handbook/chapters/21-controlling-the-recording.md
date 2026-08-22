@@ -9,8 +9,11 @@ You reach for pause when a client says *"can we take this bit off the record."*
 A control that needs hunting for — or that asks whether you are sure — fails at
 exactly that moment.
 
-So it runs the full width of the screen, never moves, and takes effect
-immediately. There is no buffered audio still on its way.
+So it is the largest control on the screen, never moves, and takes effect
+immediately. There is no buffered audio still on its way. Stopping sits beside
+it, deliberately smaller: stopping ends the meeting's recording and hands the
+microphone back, and it is not the thing you want under your thumb when you
+meant to pause.
 
 ![Recording, with pause one tap away](../../docs/journeys/screenshots/capture-recording.png)
 
@@ -27,6 +30,18 @@ cannot distinguish those colours.
 
 Audio captured while paused is discarded rather than held back, and resuming is
 instant because the microphone is never actually closed.
+
+## Starting, and choosing what to listen to
+
+Before anything is recording, the screen offers the inputs it can see and a
+single button to begin. Where there is more than one, you pick which before you
+start rather than discovering afterwards that it took the wrong one.
+
+Running Elicta in a web browser rather than as an installed application, the
+microphone is the browser's to give, and browsers only hand it over on a secure
+page. On an address that is not secure, the screen says so plainly rather than
+claiming the feature is missing — the difference matters, because that one is
+yours to fix and takes a moment.
 
 ## It will argue for a better microphone
 
@@ -58,9 +73,17 @@ Recording your own voice does not. The screen offers it and the button does
 nothing yet, so today every voice in the room is treated the same way — which
 is the error described above, still waiting to be prevented.
 
-Capture itself needs the installed application. Opened in a browser the screen
-says so plainly and disables the controls, rather than sitting there looking
-ready to record.
+Capture no longer needs the installed application. In a browser on a secure
+page, the page's own microphone is used and the browser's recording indicator
+stays lit throughout, so the room can see the recording is running. What the
+installed application still has to itself is everything the browser cannot
+reach: the wired inputs and the silent join.
+
+Where recording cannot start, the screen says which of the reasons it is — the
+page is not secure, the browser offers no microphone access, or the machine has
+no microphone attached — and disables the controls rather than sitting there
+looking ready. That last one was found the hard way: the controls went grey on
+a perfectly ordinary page and nothing on the screen accounted for it.
 
 <!-- HANDBOOK-NAV -->
 

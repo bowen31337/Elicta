@@ -14,6 +14,13 @@
 /* Pause is reached for under pressure: full width, no hunting. */
 .capture-toggle { width: 100%; margin-top: var(--space-3); }
 
+/* Pause is the control an operator reaches for without looking, so it keeps
+   the full width it had; Stop sits beside it and is sized to its own label
+   rather than wrapping onto two lines. */
+.capture-controls { align-items: center; gap: var(--space-3); }
+.capture-controls .capture-toggle { flex: 1; }
+.capture-controls .btn { white-space: nowrap; }
+
 .capture-warning {
   margin: var(--space-1) 0 0;
   padding: var(--space-4) var(--space-5);

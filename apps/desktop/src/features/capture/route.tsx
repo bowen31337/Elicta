@@ -1,6 +1,8 @@
 import '../prep/screens.css';
 import './capture.css';
 
+import { useState } from 'react';
+
 import { ScreenEyebrow } from '../../ui/Mark';
 import { useCapture } from './useCapture';
 
@@ -22,6 +24,9 @@ import { useCapture } from './useCapture';
 export type CaptureState = 'capturing' | 'paused' | 'stopped';
 
 export interface CaptureSource {
+  /** The device to open. Defaults to the label for the fixed journey scenes,
+   *  which render a source list but never start one. */
+  readonly id?: string;
   readonly label: string;
   readonly kind: 'wired' | 'loopback' | 'acoustic';
   readonly active: boolean;
@@ -35,6 +40,12 @@ export interface CaptureScreenProps {
   readonly enrolmentSeconds: number;
   /** Fired by the pause/resume control. Omitted by the fixed journey scenes. */
   readonly onTogglePause?: () => void;
+  /** Opens the chosen input. Omitted by the fixed journey scenes. */
+  readonly onStart?: (sourceId: string) => void;
+  /** Releases the device. Omitted by the fixed journey scenes. */
+  readonly onStop?: () => void;
+  /** A failure from trying to open the microphone, in the operator's terms. */
+  readonly captureError?: string | null;
   /** Shown when the audio backend is unreachable, so "not recording" is
    *  never left looking like a choice the operator made. */
   readonly unavailableReason?: string;
@@ -65,10 +76,17 @@ export function CaptureScreen({
   operatorEnrolled,
   enrolmentSeconds,
   onTogglePause,
+  onStart,
+  onStop,
+  captureError,
   unavailableReason,
 }: CaptureScreenProps) {
   const copy = STATE_COPY[state];
   const acoustic = sources.find((source) => source.active && source.kind === 'acoustic');
+  const blocked = Boolean(unavailableReason);
+  const sourceId = (source: CaptureSource) => source.id ?? source.label;
+  const [chosen, setChosen] = useState<string | null>(null);
+  const selected = chosen ?? (sources.length > 0 ? sourceId(sources[0]) : null);
 
   return (
     <main className="screen" aria-labelledby="capture-title">
@@ -92,14 +110,56 @@ export function CaptureScreen({
           </div>
           <span className="t-body tabular capture-elapsed">{elapsed}</span>
         </div>
-        <button
-          type="button"
-          className="btn btn--filled capture-toggle"
-          onClick={onTogglePause}
-          disabled={Boolean(unavailableReason)}
-        >
-          {state === 'paused' ? 'Resume recording' : 'Pause recording'}
-        </button>
+        {state === 'stopped' ? (
+          <div className="row row--form capture-controls">
+            {sources.length > 1 ? (
+              <>
+                <label className="sr-only" htmlFor="capture-input">
+                  Which input to record from
+                </label>
+                <select
+                  id="capture-input"
+                  className="field field--inline"
+                  value={selected ?? ''}
+                  onChange={(event) => setChosen(event.target.value)}
+                >
+                  {sources.map((source) => (
+                    <option key={sourceId(source)} value={sourceId(source)}>
+                      {source.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn--filled capture-toggle"
+              onClick={() => (selected === null ? undefined : onStart?.(selected))}
+              disabled={blocked || selected === null}
+            >
+              Start recording
+            </button>
+          </div>
+        ) : (
+          <div className="row row--form capture-controls">
+            <button
+              type="button"
+              className="btn btn--filled capture-toggle"
+              onClick={onTogglePause}
+              disabled={blocked}
+            >
+              {state === 'paused' ? 'Resume recording' : 'Pause recording'}
+            </button>
+            <button type="button" className="btn" onClick={onStop} disabled={blocked}>
+              Stop recording
+            </button>
+          </div>
+        )}
+        {captureError ? (
+          <p className="capture-warning t-footnote" role="alert">
+            {captureError}
+          </p>
+        ) : null}
         {unavailableReason ? (
           <p className="capture-warning t-footnote" role="status">
             {unavailableReason}
@@ -179,6 +239,7 @@ export default function CaptureRoute() {
       state={state}
       elapsed="00:00"
       sources={capture.sources.map((source) => ({
+        id: source.id,
         label: source.label,
         kind: source.degraded ? 'acoustic' : source.id === 'loopback' ? 'loopback' : 'wired',
         active: capture.status.source?.id === source.id,
@@ -188,11 +249,14 @@ export default function CaptureRoute() {
       onTogglePause={() => {
         void (capture.status.state === 'paused' ? capture.resume() : capture.pause());
       }}
-      unavailableReason={
-        capture.available
-          ? undefined
-          : 'Audio capture is unavailable outside the desktop app, so nothing is being recorded.'
-      }
+      onStart={(sourceId) => void capture.start(sourceId)}
+      onStop={() => void capture.stop()}
+      captureError={capture.error}
+      // `blockedReason` is the whole message now, not a flag the screen turns
+      // into one: the old sentence blamed the desktop app for a page served
+      // over plain HTTP, which is neither true nor something an operator can
+      // act on.
+      unavailableReason={capture.blockedReason ?? undefined}
     />
   );
 }
