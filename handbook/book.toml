@@ -32,6 +32,27 @@ voice as a fact.
 # ── Getting started ──────────────────────────────────────────────────────
 
 [[chapter]]
+id = "quick-start"
+part = "Getting Started"
+file = "chapters/00-quick-start.md"
+title = "Elicta Quick Start"
+kind = "prose"
+summary = "The whole path in one hour, before the chapters that take it slowly."
+# It shows a screen from nearly every part of the product, which is what an
+# hour-long walkthrough is. That makes it the chapter most often put into
+# drift, and deliberately so: it is also the one a new reader meets first, so
+# a stale picture here costs more than a stale picture anywhere else.
+watches = [
+    "apps/desktop/src/features/settings",
+    "apps/desktop/src/features/engagements",
+    "apps/desktop/src/features/prep",
+    "apps/desktop/src/features/consent",
+    "apps/desktop/src/features/capture",
+    "apps/desktop/src/features/panel",
+    "apps/desktop/src/features/debrief-chat",
+]
+
+[[chapter]]
 id = "what-it-does"
 part = "Getting Started"
 file = "chapters/01-what-elicta-does.md"

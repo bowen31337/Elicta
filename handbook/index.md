@@ -24,6 +24,7 @@ voice as a fact.
 
 | Chapter | What it covers |
 |---|---|
+| [Elicta Quick Start](chapters/00-quick-start.md) | The whole path in one hour, before the chapters that take it slowly. |
 | [What Elicta Does](chapters/01-what-elicta-does.md) | The problem it solves, and what using it is like. |
 | [Setting It Up](chapters/02-setting-it-up.md) | Choosing the outside services, and how credentials are handled. |
 | [Getting It Onto People's Machines](chapters/03-installing-it.md) | For whoever rolls it out, and the mistake worth avoiding. |
@@ -60,5 +61,5 @@ voice as a fact.
 | [What It Will Not Do](chapters/41-what-it-will-not-do.md) | The edges of the product, and why each line was drawn. |
 | [What Works Today](chapters/50-what-works-today.md) *(generated)* | Every status note, collected — including the parts that are not finished. |
 
-15 chapters, of which 1 are generated
+16 chapters, of which 1 are generated
 from the code and must never be edited by hand.

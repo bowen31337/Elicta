@@ -43,6 +43,12 @@ page. On an address that is not secure, the screen says so plainly rather than
 claiming the feature is missing — the difference matters, because that one is
 yours to fix and takes a moment.
 
+The browser also asks your permission the first time, and it asks when you
+press the button to start rather than the moment the screen opens. Until you
+have allowed it, the browser will not tell Elicta the names of your
+microphones, so the list shows a single unnamed input; allow it once and the
+real names, and any other inputs, appear from then on.
+
 ## It will argue for a better microphone
 
 Elicta does not simply accept whatever audio it is given. A wired input, or

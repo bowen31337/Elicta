@@ -6,10 +6,12 @@ it permission to use them. It is done in the app, once, by whoever administers
 Elicta for the team — not by an engineer editing a server somewhere, because the
 person who needs a key changed is rarely the person who could deploy one.
 
-The screen is in three parts, one for each outside service, and each part says
-whether it is ready before you read a single field. The credential for a service
-sits inside that service's own part, named after the company that issued it, so
-there is no list of keys to work out which of them goes where.
+The screen is a short stack of parts, and each one says whether it is ready
+before you read a single field. Most are an outside service; the rest are
+choices about your own installation, such as where the data is kept and whether
+every meeting asks about recording. The credential for a service sits inside
+that service's own part, named after the company that issued it, so there is no
+list of keys to work out which of them goes where.
 
 ## Before anything is set up
 
@@ -110,6 +112,26 @@ glance that a machine is pointed where you think it is.
 
 A change here takes effect the next time the service starts, not the moment you
 save it. The screen says so rather than letting you assume otherwise.
+
+## Whether every meeting asks about recording
+
+Elicta can work either of two ways, and which one it uses is set here rather
+than decided meeting by meeting.
+
+As it arrives, consent is treated as standing for the engagement: no meeting
+stops to ask, and recording begins the moment you start it. That suits a firm
+whose engagement letter already covers recording, and it is the quieter of the
+two. It also means nothing is written down — a recording made this way carries
+no record that anyone was told, because none was ever taken.
+
+The other setting makes every meeting pause before it records, show the wording
+you would read out, and keep a note of who confirmed it and when. That note is
+what an audit later asks for.
+
+Which is right is a question about how your engagements are contracted, and
+Elicta cannot answer it for you. What it can do is stop the choice from being
+invisible, which is why it sits on this screen with the consequence written
+next to it rather than being buried where only a developer would find it.
 
 ## For a shared installation
 

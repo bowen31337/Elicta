@@ -57,4 +57,4 @@ so rather than describing what is intended as though it already worked.
 
 ---
 
-[Contents](../index.md) · [Setting It Up](02-setting-it-up.md) →
+← [Elicta Quick Start](00-quick-start.md) · [Contents](../index.md) · [Setting It Up](02-setting-it-up.md) →
