@@ -1,23 +1,49 @@
 # Starting a Meeting
 
 Recording a client without a clear record of their consent is the kind of mistake
-that ends an engagement. So in Elicta it is a gate you pass, not a warning you
-read past.
+that ends an engagement. Elicta has a gate for exactly that — and in this build,
+the gate is set not to ask.
 
-## Consent first
+## What this build does
 
-The screen shows how consent works for this client — agreed once for the whole
-engagement, or needed for every meeting — and whether it has actually been given.
+As it ships today, Elicta does not stop to ask for consent before a meeting.
+Every engagement is treated as having settled consent once, for the engagement as
+a whole, so no meeting puts a question in front of you and recording can start
+straight away.
 
-Until somebody confirms it on the record, recording cannot start. The button is
-simply unavailable.
+The screen says so in as many words, and it is careful about the difference
+between not asking and having an answer: it reports that nothing has been
+recorded here, rather than showing you a reassuring tick.
+
+![Consent is not being asked for, and nothing is on record](../../docs/journeys/screenshots/consent-not-asked.png)
+
+That is a deliberate setting for this stage, not something we overlooked. What it
+means in practice is that having the consent conversation, and being able to show
+later that you had it, rests with you and not with the software. Elicta will not
+stop you, and it will not be holding a record you can point to afterwards.
+
+## When consent is asked at every meeting
+
+The gate itself is built and works. Where an engagement is set to ask at every
+meeting, recording cannot start until somebody confirms it on the record. The
+button is simply unavailable.
 
 ![Consent not yet confirmed, and recording cannot start](../../docs/journeys/screenshots/consent-pending.png)
+
+Confirming happens here, on the same screen. Elicta sets out what has to be true
+before recording — that everyone in the meeting has been told and has agreed —
+together with the law that requirement rests on, and asks for the name of the
+person confirming it. That name is not a participant list. It identifies whoever
+is accountable for having disclosed the recording, which is what somebody
+reviewing this later actually needs to know.
 
 Once confirmed, the screen keeps who confirmed it and when. The answer to "did we
 have permission for this?" is never a memory test.
 
 ![Consent confirmed, and recording can begin](../../docs/journeys/screenshots/consent-confirmed.png)
+
+Choosing which way an engagement works is not yet something the screens can do,
+so for now every engagement takes the setting described above.
 
 ## What happens to the audio, said before it happens
 

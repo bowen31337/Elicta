@@ -67,7 +67,7 @@ file = "chapters/10-preparing.md"
 title = "Preparing for an Engagement"
 kind = "prose"
 summary = "Documents, the client's own words, and reviewing the questions."
-watches = ["apps/desktop/src/features/prep"]
+watches = ["apps/desktop/src/features/prep", "apps/desktop/src/features/engagements"]
 
 [[chapter]]
 id = "starting"

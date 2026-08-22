@@ -13,6 +13,11 @@ dependencies = [
     "anthropic>=0.40",
     "python-multipart>=0.0.32",
     "alembic>=1.14",
+    # The document connector talks to Microsoft Graph over this. It arrived
+    # transitively through the Anthropic SDK and was declared only as a dev
+    # dependency, which made a production import depend on somebody else's
+    # dependency tree not changing.
+    "httpx>=0.27",
 ]
 
 [dependency-groups]

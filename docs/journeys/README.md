@@ -43,12 +43,18 @@ and there is no way for a reader to tell them apart.
 
 ## About the screenshots
 
-Every image is captured from the running product, not drawn. They are taken
-from fixed example data — one invented client, Northwind Logistics, appearing
-across all twelve — so the same open question can be followed from the
-preparation screen, through the meeting, into the write-up, and on to the next
-meeting. Nothing in them is a real client, a real recording or a real
-credential.
+Every image is a photograph of the real screen, not a drawing of one: the same
+components the product ships, rendered from fixed example data rather than from
+a running service. One invented client, Northwind Logistics, appears across all
+twelve, so the same open question can be followed from the preparation screen,
+through the meeting, into the write-up, and on to the next meeting. Nothing in
+them is a real client, a real recording or a real credential.
+
+Fixed data is what keeps them readable — a screenshot that moved with the clock
+would make every change to them noise. It also means a screenshot shows what
+the screen *renders*, not what the service behind it can currently supply; the
+status table at the foot of each journey is where that difference is stated,
+and `live-run/` is where it is measured.
 
 The screens are checked automatically against the WCAG 2.2 AA accessibility
 standard, in light and dark appearance and at two window sizes, and that check

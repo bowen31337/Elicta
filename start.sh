@@ -18,6 +18,15 @@
 #   ./start.sh --host 127.0.0.1        # keep it on this machine only
 #   ./start.sh --web-port 3000 --api-port 8080
 #   ./start.sh --reload        # also restart the service on Python edits
+#   ./start.sh --https         # serve over TLS, so the microphone works
+#
+# Microphone capture needs a *secure context*. Browsers expose
+# `navigator.mediaDevices` only over HTTPS or on localhost, so on a plain-HTTP
+# LAN address the API is absent rather than merely blocked and the Capture
+# screen says so. `--https` generates a self-signed certificate covering this
+# machine's addresses and serves the panel over TLS, which is enough to make
+# the context secure. The browser will warn that the certificate is not
+# trusted; accepting it once is expected.
 #
 set -euo pipefail
 
@@ -27,6 +36,7 @@ cd "$REPO_ROOT"
 HOST="${ELICTA_HOST:-0.0.0.0}"
 WEB_PORT="${ELICTA_WEB_PORT:-1420}"
 API_PORT="${ELICTA_API_PORT:-8000}"
+HTTPS="${ELICTA_HTTPS:-0}"
 MODE=dev
 RELOAD=0
 INSTALL=auto
@@ -39,6 +49,8 @@ Options:
   --web-port PORT    port for the panel UI (default 1420)
   --api-port PORT    port for the service tier (default 8000)
   --prod             build the bundle and serve it, instead of the dev server
+  --https            serve over TLS with a self-signed certificate, so the
+                     browser will allow microphone access from a LAN address
   --reload           restart the service when its Python sources change
   --install          install/sync dependencies before starting
   --no-install       never install, fail if dependencies are missing
@@ -53,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --api-port) API_PORT="${2:?--api-port needs a value}"; shift 2 ;;
     --prod|--preview) MODE=prod; shift ;;
     --dev) MODE=dev; shift ;;
+    --https) HTTPS=1; shift ;;
     --reload) RELOAD=1; shift ;;
     --install) INSTALL=always; shift ;;
     --no-install) INSTALL=never; shift ;;
@@ -183,8 +196,44 @@ done
 # The UI talks to the service through the proxy on its own origin. A bare "/"
 # is the same-origin base URL: the generated client trims the trailing slash
 # before joining the path.
+# ── where to point a browser ──────────────────────────────────────────────
+lan_addresses() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+  elif command -v ifconfig >/dev/null 2>&1; then
+    { ifconfig 2>/dev/null || true; } | awk '/inet /{print $2}' | grep -v '^127\.' || true
+  fi
+}
+
 export VITE_SERVICE_BASE_URL=/
 export ELICTA_SERVICE_URL="http://127.0.0.1:${API_PORT}"
+
+SCHEME=http
+if [[ "$HTTPS" == 1 ]]; then
+  command -v openssl >/dev/null 2>&1 || die "--https needs openssl on PATH"
+  CERT_DIR=".certs"
+  CERT="${CERT_DIR}/panel.crt"
+  KEY="${CERT_DIR}/panel.key"
+  mkdir -p "$CERT_DIR"
+  # Regenerated when missing or expired. The SAN list carries every address
+  # this machine answers on, because a browser matches the certificate against
+  # the address in the bar — a certificate for `localhost` alone is rejected
+  # on the LAN address, which is exactly the case this flag exists for.
+  if ! openssl x509 -checkend 86400 -noout -in "$CERT" >/dev/null 2>&1; then
+    echo "→ generating a self-signed certificate in ${CERT_DIR}/"
+    sans="DNS:localhost,IP:127.0.0.1,IP:::1"
+    while read -r addr; do
+      [[ -n "$addr" ]] && sans="${sans},IP:${addr}"
+    done < <(lan_addresses)
+    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+      -keyout "$KEY" -out "$CERT" -subj "/CN=Elicta local" \
+      -addext "subjectAltName=${sans}" >/dev/null 2>&1 ||
+      die "openssl could not generate a certificate"
+  fi
+  export ELICTA_HTTPS_CERT="$PWD/$CERT"
+  export ELICTA_HTTPS_KEY="$PWD/$KEY"
+  SCHEME=https
+fi
 
 if [[ "$MODE" == prod ]]; then
   echo "→ building the panel bundle"
@@ -197,23 +246,14 @@ else
 fi
 WEB_PID=$!
 
-# ── where to point a browser ──────────────────────────────────────────────
-lan_addresses() {
-  if command -v ip >/dev/null 2>&1; then
-    ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
-  elif command -v ifconfig >/dev/null 2>&1; then
-    { ifconfig 2>/dev/null || true; } | awk '/inet /{print $2}' | grep -v '^127\.' || true
-  fi
-}
-
 sleep 1
 echo ""
 echo "  Elicta is up."
-echo "    on this machine   http://localhost:${WEB_PORT}"
+echo "    on this machine   ${SCHEME}://localhost:${WEB_PORT}"
 if [[ "$HOST" == "0.0.0.0" || "$HOST" == "::" ]]; then
   while read -r addr; do
     if [[ -n "$addr" ]]; then
-      echo "    on the network    http://${addr}:${WEB_PORT}"
+      echo "    on the network    ${SCHEME}://${addr}:${WEB_PORT}"
     fi
   done < <(lan_addresses)
 fi

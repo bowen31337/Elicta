@@ -342,6 +342,14 @@ _TITLE_RE = re.compile(r"^#\s+(?:\d+\.\s*)?(.+?)\s*$", re.M)
 
 
 @dataclass(frozen=True)
+class UnknownStatusMarker:
+    #: Repo-relative path of the journey the row is in.
+    document: str
+    #: The marker cell as written, so the message can quote it back.
+    marker: str
+
+
+@dataclass(frozen=True)
 class ReadinessNote:
     #: The journey this came from, without its number.
     area: str
@@ -350,11 +358,11 @@ class ReadinessNote:
     note: str
 
 
-def collect_readiness(root: Path) -> list[ReadinessNote]:
+def _status_rows(root: Path):
+    """Every row of every journey's status table, with its journey."""
     base = Path(root) / JOURNEYS
     if not base.is_dir():
-        return []
-    found: list[ReadinessNote] = []
+        return
     for document in sorted(base.glob("*.md")):
         if document.name.upper().startswith("README"):
             continue
@@ -365,9 +373,45 @@ def collect_readiness(root: Path) -> list[ReadinessNote]:
         title = _TITLE_RE.search(text)
         area = title.group(1) if title else document.stem
         for marker, note in _ROW_RE.findall(text[heading.end():]):
-            state = next((name for symbol, name in _STATES.items()
-                          if symbol in marker), "")
-            if not state or set(note) <= set("- "):
-                continue      # the table's own separator row
-            found.append(ReadinessNote(area=area, state=state, note=note))
+            yield document, area, marker, note
+
+
+def _state_of(marker: str) -> str:
+    return next((name for symbol, name in _STATES.items() if symbol in marker), "")
+
+
+def unknown_status_markers(root: Path) -> list[UnknownStatusMarker]:
+    """Status rows carrying a marker none of the three states recognise.
+
+    `collect_readiness` skips such a row, and so does the header row and the
+    `|---|` separator — which means an unrecognised marker is indistinguishable
+    from table furniture and vanishes from the handbook in silence. It has
+    happened: a "not yet" row written with a construction emoji rather than the
+    hourglass simply was not there afterwards, and nothing said so.
+
+    Reported rather than raised, so one mistyped emoji names itself instead of
+    stopping the whole build.
+    """
+    found: list[UnknownStatusMarker] = []
+    for document, _area, marker, note in _status_rows(root):
+        if _state_of(marker) or set(note) <= set("- "):
+            continue
+        if not any(character > "\u2000" for character in marker):
+            continue      # a plain-text cell: the table's own header row
+        found.append(UnknownStatusMarker(
+            # Repo-relative, like every other finding's location, so the
+            # message is the same length whoever's machine printed it.
+            document=Path(document).relative_to(Path(root)).as_posix(),
+            marker=marker,
+        ))
+    return found
+
+
+def collect_readiness(root: Path) -> list[ReadinessNote]:
+    found: list[ReadinessNote] = []
+    for _document, area, marker, note in _status_rows(root):
+        state = _state_of(marker)
+        if not state or set(note) <= set("- "):
+            continue      # the table's own separator row
+        found.append(ReadinessNote(area=area, state=state, note=note))
     return found

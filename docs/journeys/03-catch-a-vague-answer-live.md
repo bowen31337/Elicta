@@ -56,6 +56,7 @@ deliberately the quietest thing on the screen — a way out, not the way to work
 
 | | |
 |---|---|
-| ✅ Ready | The whole panel, all four responses, the running coverage count, and the live connection that feeds suggestions to it |
-| ✅ Ready | Your taps are sent back, so the debrief knows which suggestions you used and which you set aside |
-| ✅ Ready | The microphone is connected. The desktop app opens the device, and audio flows through to the suggestions on this screen |
+| ✅ Ready | The panel itself: the running coverage count and time remaining, the suggestion and the line saying why it fired, all four one-tap responses, and the box for typing your own. It is connected to the meeting's live session, so whatever that session sends appears here |
+| ✅ Ready | Your taps are recorded against the meeting and sent back, so the debrief knows which suggestions you used and which you set aside |
+| ✅ Ready | The microphone. The desktop app opens the device, offers the audio interface and the silent-join path, and releases it when you stop |
+| ⏳ Not yet | Anything to put in the panel. Nothing turns speech into words yet: the connection point for a transcription service has three implementations and all three are stand-ins used for testing, so no sentence is ever produced, nothing is ever recognised as vague, and no suggestion is ever raised. Everything above this line works and has been tested; during a real meeting the panel would sit at its resting state all the way through |

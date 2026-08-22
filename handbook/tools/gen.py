@@ -30,6 +30,7 @@ import drift
 import generators
 import lint
 import render
+import sources
 import typeset
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -262,6 +263,14 @@ def collect_findings(root: Path) -> list[lint.Finding]:
             lint.ERROR, "stale-pdf", f"handbook/{PDF_NAME}",
             "built from different chapters than the ones on disk; "
             "run `python3 handbook/tools/gen.py build`",
+        ))
+
+    for unknown in sources.unknown_status_markers(root):
+        found.append(lint.Finding(
+            lint.ERROR, "unknown-status-marker", unknown.document,
+            f"the status row marked {unknown.marker!r} uses no recognised "
+            f"marker, so it is dropped from the generated chapter without "
+            f"anything saying so; use one of \u2705, \u23f3 or \u2699",
         ))
 
     lock = drift.load_lock(root)

@@ -77,6 +77,40 @@ You can also point Elicta at a service it does not ship support for, though it
 will tell you that some behaviour then needs checking against that provider
 yourself.
 
+## Reading documents from SharePoint or OneDrive
+
+This one is optional, and it is worth knowing exactly what it buys you before
+you go asking anybody for it.
+
+Documents reach Elicta two ways: you drop the files onto the preparation screen,
+or you paste a link to them. Dropping files needs nothing set up at all. A link
+has to be fetched, and fetching from your organisation's SharePoint or OneDrive
+means Elicta has to be allowed in — which is a registration your Microsoft
+administrator creates, giving you a directory id, an application id and a
+secret. Those three go here.
+
+Until they are filled in, pasting a link is refused, with a message saying so.
+That is deliberate. A link recorded but never read would sit in the document
+list looking like preparation that had happened, and the questions drafted from
+it would quietly be drafted from nothing.
+
+## Where your data is kept
+
+Everything an engagement remembers — the client, its meetings, the documents
+you attach and what was read out of them, the words you add, and the drafted
+questions — is written to a single file on this machine as you work. Nothing
+needs installing for that, and nothing leaves the machine to make it happen.
+
+A firm that would rather keep all of it on its own database server can say so
+here instead, and Elicta will use that from then on. The connection details
+include a password, so they are stored the same way as every other credential
+on this screen: entered once, never shown back. What the screen does show is
+which server is in use, with the password taken out, so you can confirm at a
+glance that a machine is pointed where you think it is.
+
+A change here takes effect the next time the service starts, not the moment you
+save it. The screen says so rather than letting you assume otherwise.
+
 ## For a shared installation
 
 Where several machines share a deployment, the key can come from your own secret

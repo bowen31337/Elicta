@@ -97,8 +97,14 @@ class RouteReaderTest(unittest.TestCase):
         self.assertEqual(routes[("/api/a", "DELETE")], "untagged")
 
     def test_this_repo_serves_the_documented_number_of_paths(self):
+        # Counted from `packages/api-client/openapi.json`, which is generated
+        # from the service. So this asserts two things at once: how many paths
+        # there are, and that the generated client has been regenerated since
+        # they changed. It caught the second — the client sat at 42 while the
+        # service served 46, missing among others the engagement's meetings
+        # list that the toolbar picker calls.
         routes = sources.collect_routes(REPO)
-        self.assertEqual(len({r.path for r in routes}), 42)
+        self.assertEqual(len({r.path for r in routes}), 49)
 
 
 class EnvVarReaderTest(unittest.TestCase):
@@ -215,8 +221,15 @@ class EnvVarReaderTest(unittest.TestCase):
         # .env.example's own preamble promises every variable is marked
         # REQUIRED or OPTIONAL. Several are not. The handbook shows the gap
         # rather than filing them under a marker they do not carry.
+        #
+        # Asserted as "some remain" rather than by name: this used to pin
+        # `DATABASE_URL`, which has since been marked OPTIONAL and commented
+        # out — a variable being fixed should not fail the guard that noticed
+        # it was broken. When the list finally empties, this test is the one to
+        # invert, because at that point the preamble is telling the truth.
         unmarked = [v.name for v in sources.collect_env_vars(REPO) if v.marker == "unmarked"]
-        self.assertIn("DATABASE_URL", unmarked)
+        self.assertTrue(unmarked, "every variable is marked now — invert this guard")
+        self.assertNotIn("DATABASE_URL", unmarked)
 
     def test_this_repo_declares_both_required_and_optional_variables(self):
         env = sources.collect_env_vars(REPO)
@@ -327,6 +340,29 @@ class ReadinessReaderTest(unittest.TestCase):
     def test_prose_before_the_status_section_is_ignored(self):
         notes = sources.collect_readiness(self.root)
         self.assertFalse(any("Some prose" in n.note for n in notes))
+
+    def test_a_marker_nobody_recognises_is_reported_rather_than_dropped(self):
+        # A row marked with an emoji that is not one of the three reads exactly
+        # like a row that was collected, and disappears from the handbook
+        # without anything saying so. That happened: a "not yet" row written
+        # with a different construction emoji vanished from the generated
+        # chapter, and the only signal was the row not being there.
+        write(self.root, "docs/journeys/05-odd.md", """
+            # 5. Odd
+
+            ## Where this stands
+
+            | | |
+            |---|---|
+            | \U0001f6a7 Not yet | The connector nobody has built |
+            """)
+        unknown = sources.unknown_status_markers(self.root)
+        self.assertEqual(len(unknown), 1)
+        self.assertIn("05-odd.md", unknown[0].document)
+        self.assertIn("\U0001f6a7", unknown[0].marker)
+
+    def test_the_recognised_markers_are_not_reported_as_unknown(self):
+        self.assertEqual(sources.unknown_status_markers(self.root), [])
 
     def test_a_journey_with_no_status_table_contributes_nothing(self):
         write(self.root, "docs/journeys/04-empty.md", "# 4. Nothing\n\nJust prose.\n")

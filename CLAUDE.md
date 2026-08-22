@@ -115,11 +115,15 @@ Database migrations (Alembic, run from the repo root):
 uv run --project apps/service alembic upgrade head         # apply
 uv run --project apps/service alembic upgrade head --sql   # render SQL, no database needed
 ```
-`DATABASE_URL` selects the target (see `.env.example`); it must use the `asyncpg` driver.
+State defaults to **SQLite** under `ELICTA_STATE_DIR` (or `~/.elicta`) — no database
+server needed, and `.env.example` leaves `DATABASE_URL` commented out on purpose so
+copying it does not silently opt a laptop onto PostgreSQL. `DATABASE_URL` (or the
+`state_database_url` secret, which wins) selects another target; the migration
+harness wants the `asyncpg` driver and the service strips that marker.
 
 Run the service:
 ```bash
-cd apps/service && uv run uvicorn app.main:app --reload    # serves 42 API paths
+cd apps/service && uv run uvicorn app.main:app --reload    # serves 49 API paths
 ```
 
 Run the whole system as a web app on `0.0.0.0` (service + panel, both processes, network-reachable
@@ -127,8 +131,19 @@ Run the whole system as a web app on `0.0.0.0` (service + panel, both processes,
 ```bash
 ./start.sh                  # dev server on :1420, service on :8000
 ./start.sh --prod           # build the bundle and serve it via `vite preview`
+./start.sh --https          # serve over TLS, which is what the microphone needs
 ./start.sh --help           # ports, host, --reload, dependency handling
 ```
+**Microphone capture in a browser needs a secure context.** Browsers expose
+`navigator.mediaDevices` only over HTTPS or on `localhost`, so on a plain-HTTP
+LAN address the API is *absent* rather than blocked — there is nothing to
+permit and no prompt to accept, and the Capture screen says so. `--https`
+generates a self-signed certificate in `.certs/` (gitignored) whose SAN list
+covers every address the machine answers on, because a certificate for
+`localhost` alone is rejected on the LAN address. The browser warns once that
+it is not trusted. `vite.config.ts` reads `ELICTA_HTTPS_CERT`/`ELICTA_HTTPS_KEY`.
+Capture prefers the Tauri commands when the shell is present and falls back to
+`features/capture/browserCapture.ts` otherwise.
 The panel is served same-origin with an `/api` proxy to the service (`vite.config.ts`), because
 parts of the UI request `/api/...` relative to the page and the service mounts no CORS middleware.
 
@@ -172,6 +187,66 @@ embarrassment gates, plus signing/release workflows.
   list (Anthropic / Bedrock / Vertex / Foundry / compatible gateway) is **closed to Anthropic
   Messages API surfaces** — structured outputs, cache-boundary control and the slow lane's
   request shape all assume it, so an OpenAI-shaped endpoint would fail per stage, not at setup.
+- **Documents have two intake paths, and both must end in text.** An upload
+  (`POST /engagements/{id}/documents`) carries its own bytes; a link
+  (`.../documents/link`) is fetched from Microsoft Graph by
+  `documents/graph.py`, whose credentials are an Entra ID app registration
+  (`documents.tenant_id` / `documents.client_id` plus the
+  `microsoft_graph_client_secret` secret; `ELICTA_GRAPH_*` are the headless
+  fallback). `classify_reference_link_host` decides which hosts count and
+  separates OneDrive from SharePoint by the `-my` tenant suffix. Both paths run
+  `extract_text` and `index_document` — a document that lands in the list and
+  in no index is invisible to retrieval depending only on how it arrived, which
+  is what happened. **An unreadable link is refused, not attached**: attaching
+  one with an empty body is what made `bank/compile` return an empty bank and
+  read as a missing model. `extract_text` is stdlib-only (OOXML via `zipfile`,
+  PDF via `zlib`) and is best-effort on PDFs — a scanned page yields nothing
+  rather than noise.
+- **State is SQLite by default, and everything an operator types is in it.**
+  `persistence/models.py` owns the seven durable tables; `resolve_database_url`
+  decides which database: a URL saved in Settings (secret `state_database_url`,
+  shown back with the password stripped) beats `DATABASE_URL`, which beats a
+  SQLite file under `ELICTA_STATE_DIR`. A change applies **on restart** — the
+  collections are opened once and bound into `Backend`. Two traps: a
+  `DurableMapping` only persists through `__setitem__`, so
+  `x.setdefault(k, []).append(v)` writes to memory and nowhere else — reassign
+  the whole list; and adding a column to a model without a matching revision
+  fails `test_migrations`, which exists because such a column works on SQLite
+  and is missing on PostgreSQL. Documents and vocabulary were classified as
+  "rebuilt on demand" and were not — nothing rebuilds what somebody typed, and
+  a live restart came back with zero of both.
+- **Deletion is soft, everywhere it exists.** Engagements, reference documents
+  and vocabulary terms carry `deleted_at`; set, the row stops loading and
+  disappears from every list, and nothing erases. Two traps: `_replace_children`
+  rewrites a child list whole, so it must exclude marked rows or the mark lasts
+  exactly one write; and `StateStore.soft_delete` deliberately does **not** take
+  `self._lock`, because it is reached as a `DurableMapping.forget` which already
+  holds it and `threading.Lock` is not reentrant — taking it deadlocked the
+  process rather than raising. Real erasure is deliberately absent: it would
+  have to decide about recordings, consent records and artifacts, and the PRD
+  asks for none of it.
+- **A citation is grounded by its quote, not by its offsets.**
+  `citations/extraction.py` re-derives `start/end_char_index` from where
+  `cited_text` actually occurs (nearest to the model's guess; whitespace runs
+  match each other, because `extract_text` joins paragraphs with `\n` and models
+  quote across them with a space), and stores the document's own text for that
+  span. A quote the document does not contain still fails the whole run — that
+  is the fabrication check and must stay. What no longer fails a run is model
+  arithmetic: a pass of ~150 questions was lost live because a model quoted
+  `…cross-dock.` and gave a span one character short of the full stop.
+- **A compile finishes in two visits, and something has to make the second.**
+  The Analyst pass is submitted as a batch and collected minutes later;
+  `fetch_batch` returns `[]` while it is still processing. `BankCollector`
+  (`orchestration/bank_collector.py`) sweeps every 30s, and `main`'s lifespan is
+  what starts it — deliberately not `build_app`, or every `TestClient` would
+  poll a provider. It stops asking about a batch that ended, failed or expired,
+  because the expensive mistake is polling for ever, not missing one. Watch for
+  three traps that each made the bank silently empty: the submission guard once
+  asked `_completed()` of a record whose only states are `SUBMITTED`/`FAILED`;
+  collected candidates land in `analyst_passes` and the bank endpoint reads
+  `compiled_candidates`, so `_store_compiled_candidates` joins them; and a
+  stopped compile writes its reason to a stage record that nothing read until
+  `log_compile_outcome`.
 - **`app/orchestration/` owns pipeline order.** `debrief.py` runs architecture §7 steps 2–8,
   `compiler.py` runs §3.10; `composition.py` decides *when* they run. Stages fail closed — a
   failed stage halts the chain rather than feeding the next one. Add a stage to the orchestrator,

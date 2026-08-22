@@ -4,14 +4,23 @@ This is what Elicta is for. A client says something that sounds like an answer
 but is not one, and five seconds later you ask the question that pins it down —
 instead of thinking of it in the car afterwards.
 
+One thing to know before the rest of this chapter describes it. The panel is
+built, connected to the meeting, and tested — but nothing yet turns speech into
+words, so in this build no sentence is ever recognised and no suggestion is ever
+raised. What follows is how the panel behaves when something reaches it. Today
+it would sit at the resting state described in the next section for the whole
+meeting.
+
 ## Before anyone speaks
 
-The panel shows how much of your template is covered and how long is left, and
-nothing else. There is no suggestion because nobody has said anything yet.
+The panel shows how much of your template is covered, how long is left, and
+which languages it is listening for — worked out from what you told it about the
+client, so nobody has to pick one before the meeting starts. There is no
+suggestion, because nobody has said anything yet.
 
 ![The panel before the meeting starts](../../docs/journeys/screenshots/panel-before-meeting.png)
 
-An empty panel is the correct resting state. Anything shown here would pull your
+A near-empty panel is the correct resting state. Anything more would pull your
 eyes to a screen during the part of the meeting where you are establishing
 rapport.
 
