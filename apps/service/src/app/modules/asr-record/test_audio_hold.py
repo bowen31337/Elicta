@@ -104,3 +104,91 @@ def test_the_first_chunk_marks_the_audio_retained() -> None:
     )
 
     assert backend.retained_audio["meeting-1"] == "session:meeting-1"
+
+
+def test_a_chunk_is_refused_once_the_audio_has_been_destroyed() -> None:
+    """NFR-2.4's destruction record has to stay true after it is written.
+
+    The hold is a dict keyed by session, so a chunk with `sequence: 0` for a
+    finished session simply recreated it — and nothing destroyed it a second
+    time, because `destroy_if_ready` is only re-entered when a gating stage
+    finishes and both had already finished. The service was left holding
+    audio for a session whose own destruction event says it holds none.
+    """
+
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    from app.composition import Backend, build_app
+    from app.modules.debrief.pipeline.models import (
+        AudioDestructionEvent,
+        AudioDestructionStatus,
+    )
+
+    backend = Backend()
+    client = TestClient(build_app(backend))
+
+    client.post(
+        "/api/sessions/meeting-1/audio-chunk",
+        json={"sequence": 0, "pcm": _pcm(1, 4)},
+    )
+
+    now = datetime.now(UTC)
+    backend.audio_destruction_events.append(
+        AudioDestructionEvent(
+            session_id="meeting-1",
+            audio_ref="session:meeting-1",
+            status=AudioDestructionStatus.COMPLETE,
+            requested_at=now,
+            completed_at=now,
+        )
+    )
+    backend.retained_audio.pop("meeting-1", None)
+    backend.session_audio.pop("meeting-1", None)
+
+    late = client.post(
+        "/api/sessions/meeting-1/audio-chunk",
+        json={"sequence": 0, "pcm": _pcm(7, 4)},
+    )
+
+    assert late.status_code == 410, late.text
+    assert "meeting-1" not in backend.session_audio, "destroyed audio came back"
+    assert "meeting-1" not in backend.retained_audio, (
+        "the session was recorded as holding audio again, with nothing left to destroy it"
+    )
+
+
+def test_another_session_is_unaffected_by_a_destroyed_one() -> None:
+    """The refusal is per session, not a switch that closes the endpoint."""
+
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    from app.composition import Backend, build_app
+    from app.modules.debrief.pipeline.models import (
+        AudioDestructionEvent,
+        AudioDestructionStatus,
+    )
+
+    backend = Backend()
+    client = TestClient(build_app(backend))
+
+    now = datetime.now(UTC)
+    backend.audio_destruction_events.append(
+        AudioDestructionEvent(
+            session_id="meeting-1",
+            audio_ref="session:meeting-1",
+            status=AudioDestructionStatus.COMPLETE,
+            requested_at=now,
+            completed_at=now,
+        )
+    )
+
+    accepted = client.post(
+        "/api/sessions/meeting-2/audio-chunk",
+        json={"sequence": 0, "pcm": _pcm(1, 4)},
+    )
+
+    assert accepted.status_code == 202, accepted.text

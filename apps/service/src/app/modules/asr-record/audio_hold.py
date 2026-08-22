@@ -12,6 +12,7 @@ crashed browser costs the tail rather than the recording.
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +26,18 @@ class ChunkOutOfOrder(Exception):
     Raised rather than tolerated: appending across a gap produces a transcript
     with a join nobody can see, and appending a duplicate produces one with a
     stutter. Both read as a bad engine rather than a lost packet.
+    """
+
+
+class AudioAlreadyDestroyed(Exception):
+    """A chunk arrived for a session whose audio has been destroyed (NFR-2.4).
+
+    The hold is a plain dict keyed by session, so a chunk with `sequence: 0`
+    for a finished session simply recreated it — and nothing would destroy it
+    again, because the gate is only re-entered when a stage finishes and every
+    stage for that session already had. The service would then be holding
+    audio for a session whose destruction record says it was destroyed, which
+    is the one thing that record must never be wrong about.
     """
 
 
@@ -66,9 +79,28 @@ def audio_ref_for(session_id: str) -> str:
 
 
 def append_chunk(
-    held: dict[str, SessionAudio], session_id: str, *, sequence: int, pcm: str
+    held: dict[str, SessionAudio],
+    session_id: str,
+    *,
+    sequence: int,
+    pcm: str,
+    audio_was_destroyed: Callable[[str], bool] | None = None,
 ) -> AudioChunkAccepted:
-    """Append one chunk, or refuse it for being out of order."""
+    """Append one chunk, or refuse it for being out of order or too late.
+
+    `audio_was_destroyed` answers whether this session's audio already has a
+    destruction record. It is injected rather than read here for the reason
+    everything else in this module is: the destruction events live at the
+    composition root, which is the only place that sees both this hold and
+    the stages that gate it.
+    """
+
+    if audio_was_destroyed is not None and audio_was_destroyed(session_id):
+        raise AudioAlreadyDestroyed(
+            f"{session_id}: this session's audio has been destroyed and its "
+            "destruction recorded — accepting more of it would make that "
+            "record false"
+        )
 
     entry = held.setdefault(session_id, SessionAudio())
     if sequence != entry.next_sequence:
@@ -90,7 +122,9 @@ def discard(held: dict[str, SessionAudio], session_id: str) -> None:
 
 
 def build_audio_chunk_router(
-    held: dict[str, SessionAudio], on_audio_retained: Any
+    held: dict[str, SessionAudio],
+    on_audio_retained: Any,
+    audio_was_destroyed: Callable[[str], bool] | None = None,
 ) -> APIRouter:
     """`POST /api/sessions/{id}/audio-chunk` — one slice of a live recording."""
 
@@ -107,10 +141,18 @@ def build_audio_chunk_router(
         first = session_id not in held
         try:
             accepted = append_chunk(
-                held, session_id, sequence=payload.sequence, pcm=payload.pcm
+                held,
+                session_id,
+                sequence=payload.sequence,
+                pcm=payload.pcm,
+                audio_was_destroyed=audio_was_destroyed,
             )
         except ChunkOutOfOrder as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AudioAlreadyDestroyed as exc:
+            # 410 rather than 409: this is not a sequence the client can
+            # correct and retry. That recording is over and its audio is gone.
+            raise HTTPException(status_code=410, detail=str(exc)) from exc
 
         # The destruction gate is keyed off `retained_audio`; a session that
         # never lands there is never destroyed and never noticed.

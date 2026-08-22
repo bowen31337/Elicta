@@ -2380,8 +2380,31 @@ def _include_operational_routers(
 
         backend.retained_audio[session_id] = audio_ref
 
+    def audio_was_destroyed(session_id: str) -> bool:
+        """Whether this session's audio already has a destruction record.
+
+        NFR-2.4's record has to stay true after it is written. Nothing marked
+        a session closed, so a chunk with `sequence: 0` posted after the
+        destruction event recreated the hold and re-recorded the audio as
+        retained — and nothing destroyed it again, because `destroy_if_ready`
+        is only re-entered when a gating stage finishes and both had already
+        finished for that session. The result was audio retained after a
+        record asserting it was destroyed.
+
+        Read from the events rather than a flag beside them: the event list
+        *is* the record, and a second place saying the same thing is a second
+        place to disagree with it.
+        """
+
+        return any(
+            event.session_id == session_id
+            for event in backend.audio_destruction_events
+        )
+
     app.include_router(
-        _audio_hold.build_audio_chunk_router(backend.session_audio, on_audio_retained)
+        _audio_hold.build_audio_chunk_router(
+            backend.session_audio, on_audio_retained, audio_was_destroyed
+        )
     )
 
 
