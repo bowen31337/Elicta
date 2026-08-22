@@ -69,3 +69,57 @@
 .about-identity .mark { color: var(--accent); flex: none; }
 .about-identity h1 { margin: 0; }
 .about-identity p { margin: 2px 0 0; }
+
+/* ---- Preparation: the controls that write ------------------------------ */
+
+/* A row that takes input rather than reporting it. The label sits above its
+   field in `.row-main`, so the row is taller than a reading row and the
+   controls beside it stay centred against the pair. */
+.row--form { align-items: flex-end; padding-top: var(--space-3); padding-bottom: var(--space-3); }
+.row--form .row-main { gap: var(--space-2); }
+.row--form label { cursor: pointer; }
+
+/* A field sized to its content, for the tag and kind selects that sit beside
+   a full-width input rather than under a label of their own. */
+.field--inline { width: auto; min-width: 8.5rem; }
+
+/* A refusal the operator can act on — an unsupported link, a term the service
+   would not take. `--red-ink` rather than the vivid system red: this is text,
+   and the vivid fills fail AA at this size. */
+.prep-error { color: var(--red-ink); margin: 0 var(--space-2); }
+
+/* The second way documents come in: dropped, or chosen. A drop target is
+   invisible until it is used, so it says what it is rather than relying on a
+   dashed border to imply it — and the file input behind `Choose files` is the
+   keyboard path, not an afterthought. */
+.dropzone {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-5); margin-top: var(--space-3);
+  border: 1.5px dashed var(--separator); border-radius: var(--radius-lg);
+  background: var(--bg-tertiary); text-align: center;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+}
+.dropzone p { margin: 0; }
+.dropzone--over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-tertiary)); }
+.dropzone-pick { margin-top: var(--space-2); }
+/* The label is the control here, so it has to look and behave like one. */
+label.dropzone-pick { cursor: pointer; }
+
+/* A chip you can take back out. The × sits inside the pill so the word and
+   its removal read as one thing, and it is a real button so it is reachable
+   without a pointer. */
+.pill--removable { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pill-remove {
+  font: inherit; line-height: 1; color: var(--label-supporting);
+  background: none; border: 0; padding: 0 0 1px; cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+.pill-remove:hover:not(:disabled) { color: var(--red-ink); }
+.pill-remove:disabled { cursor: default; opacity: 1; color: var(--label-supporting); }
+
+/* A filled button that is disabled kept the accent fill and took the muted
+   disabled ink, which left a pale label on saturated blue — legible enough for
+   the audit, which exempts disabled controls, and not legible to a person. It
+   reads as a live button that has gone wrong; a muted fill reads as waiting. */
+.btn--filled:disabled { background: var(--fill-4); color: var(--label-tertiary); }

@@ -93,7 +93,7 @@ def _build_pass_record(
     if not (MIN_CANDIDATES <= candidate_count <= MAX_CANDIDATES):
         raise ValueError(
             f"analyst pass produced {candidate_count} candidates, outside the "
-            f"required {MIN_CANDIDATES}-{MAX_CANDIDATES} range (PRD FR-4.1)"
+            f"accepted {MIN_CANDIDATES}-{MAX_CANDIDATES} range"
         )
 
     candidates = build_bank_candidates(engagement_id, raw_result.output.candidates)

@@ -94,8 +94,20 @@ def test_a_successful_run_persists_a_complete_record_with_assigned_ids():
     assert saved == [result]
 
 
-@pytest.mark.parametrize("count", [0, 1, 149, 301, 500])
-def test_a_candidate_count_outside_150_to_300_fails_the_run(count: int):
+@pytest.mark.parametrize(
+    "count",
+    [0, 1, MIN_CANDIDATES - 1, MAX_CANDIDATES + 1, MAX_CANDIDATES * 2],
+    ids=["none", "one", "just-under", "just-over", "far-over"],
+)
+def test_a_candidate_count_outside_the_accepted_band_fails_the_run(count: int):
+    """Written against the constants rather than the digits.
+
+    The band moved once already — the floor came down when a perfectly good
+    pass over a small document set was thrown away for being small — and a test
+    naming the old numbers would have had to be rewritten to say the same
+    thing. What is under test is that the band is enforced, not where it sits.
+    """
+
     saved: list[EngagementBmadAnalystPass] = []
 
     async def save(record: EngagementBmadAnalystPass) -> None:
@@ -114,12 +126,12 @@ def test_a_candidate_count_outside_150_to_300_fails_the_run(count: int):
     assert result.status == BmadAnalystPassStatus.FAILED
     assert result.candidates is None
     assert str(count) in result.error
-    assert "FR-4.1" in result.error
+    assert str(MIN_CANDIDATES) in result.error and str(MAX_CANDIDATES) in result.error
     assert saved == [result]
 
 
 @pytest.mark.parametrize("count", [MIN_CANDIDATES, 200, MAX_CANDIDATES])
-def test_boundary_counts_within_150_to_300_succeed(count: int):
+def test_boundary_counts_inside_the_accepted_band_succeed(count: int):
     result = asyncio.run(
         run_bmad_analyst_pass(
             "engagement-1",

@@ -16,6 +16,7 @@ source document, and persisting the durable pass record.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -33,39 +34,92 @@ RunDocumentExtractionPass = Callable[[str, list[ExtractionSourceDocument]], Awai
 SaveEngagementDocumentExtractionPass = Callable[[EngagementDocumentExtractionPass], Awaitable[None]]
 
 
-def _validate_citation(documents: dict[str, str], citation: CitedSpan) -> None:
-    """Raise `ValueError` unless `citation` actually grounds in its named document's text.
+_WHITESPACE = re.compile(r"\s+")
 
-    A citation naming a document the extraction pass was never given, a span
-    past the end of that document's text, or a `cited_text` that doesn't
-    match the substring at `[start_char_index, end_char_index)` would be
-    indistinguishable from a fabricated citation -- the same failure mode
-    `debrief/pipeline/bmad_analyst.py`'s chain treats as a run-failing
-    vendor contract violation for a citation naming an unknown utterance_id.
+
+def _whitespace_flexible(quote: str) -> re.Pattern[str]:
+    """`quote` as a pattern where any run of whitespace matches any other.
+
+    Documents arrive with paragraph breaks in them — `extract_text` joins Word
+    paragraphs with a newline — and a model quoting across one writes a space.
+    Treating those as the same character is not a loosening of grounding: every
+    other character still has to match exactly, and the span that comes back
+    is a real span of the real document.
+    """
+
+    return re.compile(
+        r"\s+".join(re.escape(part) for part in _WHITESPACE.split(quote.strip()) if part)
+    )
+
+
+def _locate(text: str, citation: CitedSpan) -> tuple[int, int] | None:
+    """Where `cited_text` actually is, or `None` if it is not there at all.
+
+    Nearest to where the model said, so a phrase occurring twice resolves to
+    the one it meant rather than the first in the file.
+    """
+
+    quote = citation.cited_text
+    claimed = citation.start_char_index
+
+    occurrences = sorted(
+        {(found, found + len(quote)) for found in _all_occurrences(text, quote)}
+    )
+    if not occurrences:
+        occurrences = sorted(
+            (match.start(), match.end())
+            for match in _whitespace_flexible(quote).finditer(text)
+        )
+    if not occurrences:
+        return None
+    return min(occurrences, key=lambda span: abs(span[0] - claimed))
+
+
+def _all_occurrences(text: str, quote: str) -> list[int]:
+    found: list[int] = []
+    at = text.find(quote)
+    while at != -1:
+        found.append(at)
+        at = text.find(quote, at + 1)
+    return found
+
+
+def _ground_citation(documents: dict[str, str], citation: CitedSpan) -> CitedSpan:
+    """The citation with its span re-derived from where the quote really is.
+
+    A citation naming a document the pass was never given, or quoting text that
+    document does not contain, is indistinguishable from a fabricated one and
+    still fails the run -- the same vendor-contract violation
+    `debrief/pipeline/bmad_analyst.py` treats as fatal.
+
+    What no longer fails the run is arithmetic. A model that quotes the
+    document correctly and miscounts the offsets by a character has produced a
+    grounded claim with a wrong number attached, and failing ~150 drafted
+    questions over it (which happened) serves nobody. The offsets are derived
+    data, so they are derived here: the returned span is the real location, and
+    `cited_text` becomes the document's own text for it, which is stricter than
+    trusting the model's rendition of its own quote.
     """
 
     if citation.document_id not in documents:
         raise ValueError(f"citation names unknown document_id {citation.document_id!r}")
 
     text = documents[citation.document_id]
-    if citation.end_char_index <= citation.start_char_index:
+    located = _locate(text, citation)
+    if located is None:
         raise ValueError(
-            f"citation end_char_index {citation.end_char_index} is not after "
-            f"start_char_index {citation.start_char_index}"
-        )
-    if citation.end_char_index > len(text):
-        raise ValueError(
-            f"citation span [{citation.start_char_index}, {citation.end_char_index}) "
-            f"is past the end of document {citation.document_id!r} ({len(text)} chars)"
+            f"citation cited_text does not appear in document "
+            f"{citation.document_id!r}: {citation.cited_text!r}"
         )
 
-    actual = text[citation.start_char_index : citation.end_char_index]
-    if actual != citation.cited_text:
-        raise ValueError(
-            f"citation cited_text does not match document {citation.document_id!r} "
-            f"at [{citation.start_char_index}, {citation.end_char_index}): "
-            f"expected {citation.cited_text!r}, found {actual!r}"
-        )
+    start, end = located
+    return citation.model_copy(
+        update={
+            "start_char_index": start,
+            "end_char_index": end,
+            "cited_text": text[start:end],
+        }
+    )
 
 
 def format_source_doc(citation: CitedSpan) -> str:
@@ -106,8 +160,8 @@ def build_extracted_claims(
 
     claims: list[ExtractedClaim] = []
     for index, draft in enumerate(drafts):
-        _validate_citation(document_text_by_id, draft.citation)
-        claims.append(ExtractedClaim(id=f"claim-{index}", text=draft.text, citation=draft.citation))
+        grounded = _ground_citation(document_text_by_id, draft.citation)
+        claims.append(ExtractedClaim(id=f"claim-{index}", text=draft.text, citation=grounded))
 
     return claims
 

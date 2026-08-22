@@ -50,6 +50,31 @@ class ContextPackDocument(BaseModel):
     text: str
 
 
+#: The requirements-template sections a bank is filed under when the engagement
+#: has not named a template of its own.
+#:
+#: A list, and a closed one, because the Analyst pass used to be given neither.
+#: Told to "use the sections the documents themselves imply", a live compile
+#: invented a section called *Operations* and put 65 of its 97 candidates in it
+#: — a bin, not a section. Two banks filed under sections each compile chose
+#: for itself cannot be compared, and coverage tracked against sections nobody
+#: declared can never be marked covered.
+#:
+#: Resolving an engagement's own `target_requirements_template` — free text
+#: today — into a section list is separate and still open. Until it lands this
+#: is the taxonomy, stated once rather than guessed at per compile.
+DEFAULT_TEMPLATE_SECTIONS: tuple[str, ...] = (
+    "Scope and outcomes",
+    "Volumes",
+    "Performance",
+    "Operations",
+    "Integrations",
+    "Data and compliance",
+    "Roles and decision authority",
+    "Constraints and dependencies",
+)
+
+
 class AnalystContextPack(BaseModel):
     """One engagement's compiled context pack, as read by the BMAD Analyst pass (PRD FR-4.1, architecture §3.10)."""
 
@@ -57,6 +82,10 @@ class AnalystContextPack(BaseModel):
     sector: str
     project_type: str
     documents: list[ContextPackDocument]
+    #: The sections a candidate may be filed under. Empty falls back to
+    #: `DEFAULT_TEMPLATE_SECTIONS` at the point the request is built, so an
+    #: older caller keeps working and still gets a closed list.
+    template_sections: list[str] = Field(default_factory=list)
 
 
 class BmadCandidateDraft(BaseModel):

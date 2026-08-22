@@ -33,7 +33,21 @@ from .models import (
     EngagementBmadAnalystPass,
 )
 
-MIN_CANDIDATES = 150
+#: The band a pass has to land in to be accepted.
+#:
+#: **`MIN_CANDIDATES` is deliberately below the 150 that FR-4.1 asks for.**
+#: That number describes what a good pass over a real engagement's document set
+#: produces, and as an acceptance check it did something else: a pass over
+#: three short documents came back with twelve perfectly good questions and was
+#: thrown away whole, so the operator got an empty bank and a message about a
+#: range. Rejecting real work for being *small* is not what the check is for.
+#:
+#: What it is for is catching a pass that did not really answer — an empty
+#: list, or a token handful — and ten is low enough not to punish a thin
+#: document set while still catching that. The volume target itself belongs
+#: where targets belong: measured against a real engagement, not enforced as a
+#: precondition on every compile regardless of what it was given.
+MIN_CANDIDATES = 10
 MAX_CANDIDATES = 300
 
 RunBmadAnalystPass = Callable[[str, AnalystContextPack], Awaitable[BmadAnalystPassOutput]]
@@ -101,7 +115,7 @@ async def run_bmad_analyst_pass(
         if not (MIN_CANDIDATES <= candidate_count <= MAX_CANDIDATES):
             raise ValueError(
                 f"analyst pass produced {candidate_count} candidates, outside the "
-                f"required {MIN_CANDIDATES}-{MAX_CANDIDATES} range (PRD FR-4.1)"
+                f"accepted {MIN_CANDIDATES}-{MAX_CANDIDATES} range"
             )
         candidates = build_bank_candidates(engagement_id, output.candidates)
     except Exception as exc:

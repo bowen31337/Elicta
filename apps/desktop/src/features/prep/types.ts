@@ -1,7 +1,17 @@
+/**
+ * The three tags a reference document can carry, and the only three the
+ * service's `DocumentStatus` enum accepts. The tag is not filing: it decides
+ * whether a contradiction against the document is worth interrupting for.
+ */
+export type DocumentStatus = 'ground truth' | 'hypothesis' | 'superseded';
+
+/** The kinds of word the transcriber is told about, mirroring `VocabularyTermType`. */
+export type VocabularyTermType = 'product_name' | 'internal_system' | 'acronym';
+
 export interface ReferenceDocument {
   readonly id: string;
   readonly name: string;
-  readonly status: 'ground truth' | 'hypothesis' | 'superseded';
+  readonly status: DocumentStatus;
 }
 
 export interface BankCandidate {
@@ -18,3 +28,29 @@ export interface QuestionBankSection {
 export interface QuestionBank {
   readonly sections: readonly QuestionBankSection[];
 }
+
+/** One keyterm, with the id a removal needs. */
+export interface VocabularyEntry {
+  readonly id: string;
+  readonly term: string;
+}
+
+/** One meeting in the engagement being prepared. */
+export interface PreparedMeeting {
+  readonly id: string;
+  readonly purpose: string | null;
+  readonly captureMode: string;
+  readonly state: string;
+  readonly scheduledAt: string | null;
+}
+
+/**
+ * How the audio reaches Elicta (PRD FR-1.1). Three, because those are the
+ * three the product supports, and a free-text box here would let an operator
+ * invent a fourth the capture path has never heard of.
+ */
+export const CAPTURE_MODES = [
+  { value: 'line-in', label: 'Line-in from the meeting machine' },
+  { value: 'silent-join', label: 'Silent join (loopback)' },
+  { value: 'microphone', label: 'Microphone' },
+] as const;

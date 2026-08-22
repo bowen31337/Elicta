@@ -57,6 +57,7 @@ from fastapi import APIRouter, HTTPException
 from .errors import CandidateNotFoundError
 from .models import (
     BankCandidate,
+    BankCompileOutcome,
     BankCompileTrigger,
     CandidatePatchRequest,
     EngagementQuestionBank,
@@ -71,6 +72,9 @@ DeleteCandidate = Callable[[str], Awaitable[None]]
 UpdateCandidate = Callable[[str, CandidatePatchRequest], Awaitable[BankCandidate]]
 GetCompiledCandidates = Callable[[str], Awaitable[list[BankCandidate]]]
 TriggerBankCompile = Callable[[str], Awaitable[str]]
+#: Reads the *latest* compile outcome for one engagement, or `None`
+#: when none has run. See `BankCompileOutcome`.
+ReadBankCompileOutcome = Callable[[str], Awaitable["BankCompileOutcome | None"]]
 
 
 def build_meeting_bank_router(
@@ -124,7 +128,18 @@ def build_engagement_bank_router(get_compiled_candidates: GetCompiledCandidates)
     return router
 
 
-def build_engagement_bank_compile_router(trigger_bank_compile: TriggerBankCompile) -> APIRouter:
+def build_engagement_bank_compile_router(
+    trigger_bank_compile: TriggerBankCompile,
+    read_compile_outcome: ReadBankCompileOutcome | None = None,
+) -> APIRouter:
+    """The trigger, and — when supplied — the answer to "so what happened?".
+
+    `read_compile_outcome` is optional so that a caller wiring only the trigger
+    keeps working. It should not stay optional for long: a compile that answers
+    202 and a bank that answers an empty list are, between them, capable of
+    saying nothing at all about four failed attempts in a row.
+    """
+
     router = APIRouter(prefix="/api/engagements", tags=["compiler-bank"])
 
     @router.post("/{engagement_id}/bank/compile", response_model=BankCompileTrigger, status_code=202)
@@ -135,5 +150,20 @@ def build_engagement_bank_compile_router(trigger_bank_compile: TriggerBankCompil
             engagement_id=engagement_id,
             triggered_at=datetime.now(UTC),
         )
+
+    if read_compile_outcome is not None:
+
+        @router.get(
+            "/{engagement_id}/bank/compile",
+            response_model=BankCompileOutcome,
+            status_code=200,
+        )
+        async def get_bank_compile_outcome(engagement_id: str) -> BankCompileOutcome:
+            outcome = await read_compile_outcome(engagement_id)
+            if outcome is None:
+                raise HTTPException(
+                    status_code=404, detail="no bank compile has run for this engagement"
+                )
+            return outcome
 
     return router

@@ -34,15 +34,35 @@ from app.modules.compiler.citations.structuring import run_claim_structuring_pas
 
 from .engines import (
     CompilerEngines,
+    UpstreamFailure,
     enforce_filesystem_permission,
     engagement_filesystem_scope,
+    upstream_failure_in,
 )
 
 _COMPLETE = "complete"
+_SUBMITTED = "submitted"
 
 
 def _completed(record: Any) -> bool:
     return getattr(getattr(record, "status", None), "value", None) == _COMPLETE
+
+
+def _submitted(record: Any) -> bool:
+    """Whether a batch submission got as far as a job id.
+
+    A submission's terminal states are `SUBMITTED` and `FAILED` — there is no
+    `COMPLETE`, because the pass itself finishes later and out of that record's
+    view. Asking `_completed` here therefore always answered no, so every
+    compile stopped at this stage and `collect_engagement_compile` had no
+    reachable caller: `POST /bank/compile` returned 202 and the bank stayed
+    empty for ever, with no stage reporting a failure.
+    """
+
+    return (
+        getattr(getattr(record, "status", None), "value", None) == _SUBMITTED
+        and getattr(record, "batch_job_id", None) is not None
+    )
 
 
 @dataclass(frozen=True)
@@ -66,6 +86,10 @@ class CompileRun:
     analyst_passes: list[Any] = field(default_factory=list)
     stages_completed: list[str] = field(default_factory=list)
     stopped_at: str | None = None
+    #: Why the direct Analyst route failed, when it was tried and did. The
+    #: passes carry their own records; this is the one a caller reads when the
+    #: run stopped at `analyst-pass-direct`.
+    direct_analyst_error: str | None = None
 
     @property
     def batch_job_id(self) -> str | None:
@@ -126,11 +150,97 @@ async def submit_engagement_compile(
         engines.submit_batch,
         sinks.save_batch_submission,
     )
-    if not _completed(run.submission) or run.submission.batch_job_id is None:
-        run.stopped_at = "batch-submission"
-        return run
+    if not _submitted(run.submission):
+        return await _analyst_without_a_batch(run, context_pack, engines, sinks)
     run.stages_completed.append("batch-submission")
 
+    return run
+
+
+#: The stage name a compile that bypassed the Batch API reports having run.
+#: Distinct from `batch-submission` on purpose: it costs more, and a fallback
+#: that leaves no trace is a bill nobody can account for.
+DIRECT_ANALYST_STAGE = "analyst-pass-direct"
+
+#: What `collect_bmad_analyst_batch_results` is handed in place of a job id
+#: when there is no job. It never reaches a provider — the fetch it is passed
+#: ignores it and returns results that are already in hand.
+_NO_BATCH_JOB = "direct"
+
+
+async def _analyst_without_a_batch(
+    run: CompileRun,
+    context_pack: Any,
+    engines: CompilerEngines,
+    sinks: CompilerSinks,
+) -> CompileRun:
+    """Run the Analyst pass directly when the batch was refused as not permitted.
+
+    A credential can be perfectly good for `/v1/messages` and carry no batch
+    scope at all, and until this existed that combination meant the question
+    bank could never be drafted — the compile stopped at submission and the
+    screen showed an empty bank, however many times it was asked.
+
+    Only an entitlement refusal is worth a second route. A provider that is
+    unreachable or throttled will answer the direct call exactly as it answered
+    the batch, so trying costs a round trip to learn what the first one said.
+
+    The results go through the same collection the batch path uses, which is
+    where the candidate-count contract and the per-engagement failure handling
+    live. Bypassing that too would be a second implementation of the part most
+    worth having only one of.
+    """
+
+    if engines.run_analyst is None:
+        run.stopped_at = "batch-submission"
+        return run
+
+    refusal = getattr(run.submission, "error", None) or ""
+    if upstream_failure_in(refusal) is not UpstreamFailure.NOT_ENTITLED:
+        run.stopped_at = "batch-submission"
+        return run
+
+    enforce_filesystem_permission(
+        engagement_filesystem_scope(run.engagement_id),
+        FilesystemOperation.WRITE,
+        f"engagements/{run.engagement_id}/bank/candidates.json",
+    )
+
+    async def already_in_hand(_job_id: str) -> Any:
+        return await engines.run_analyst(run.engagement_id, context_pack)
+
+    # The collection wraps each *result*, not the fetch that produces them, so
+    # a provider refusing this call would otherwise travel straight out of the
+    # compile — the batch path never sees that because its fetch happens in a
+    # later visit, behind its own handler.
+    try:
+        run.analyst_passes = await collect_bmad_analyst_batch_results(
+            _NO_BATCH_JOB, engines.name, already_in_hand, sinks.save_analyst_pass
+        )
+    except Exception as exc:  # noqa: BLE001 — recorded as this stage's failure
+        run.direct_analyst_error = str(exc)
+        run.stopped_at = DIRECT_ANALYST_STAGE
+        return run
+
+    if not run.analyst_passes or not all(_completed(p) for p in run.analyst_passes):
+        # Named for the stage that actually failed. Reporting it as
+        # `batch-submission` — which the first version did — made a fallback
+        # that ran and failed indistinguishable from one that never ran, and
+        # threw away the message saying why. Against a real credential that
+        # looked exactly like the fallback not being wired at all.
+        run.direct_analyst_error = next(
+            (
+                getattr(record, "error", None)
+                for record in run.analyst_passes or []
+                if not _completed(record)
+            ),
+            None,
+        )
+        run.stopped_at = DIRECT_ANALYST_STAGE
+        return run
+
+    run.stopped_at = None
+    run.stages_completed.append(DIRECT_ANALYST_STAGE)
     return run
 
 
@@ -145,6 +255,13 @@ async def collect_engagement_compile(
     Writing the bank is the one filesystem write §3.11 allows these agents,
     so the scope is checked here too rather than trusted.
     """
+
+    if run.analyst_passes:
+        # Already in hand: this run went the direct route because its batch was
+        # refused, and there is nothing to collect. Falling through would reset
+        # a finished run to "stopped at batch-submission" — undoing, on the way
+        # past, the work that just succeeded.
+        return run
 
     if run.batch_job_id is None:
         run.stopped_at = run.stopped_at or "batch-submission"
@@ -163,5 +280,10 @@ async def collect_engagement_compile(
         run.stopped_at = "batch-collection"
         return run
 
+    # A collection only ever succeeds on a retry — the first attempt runs
+    # microseconds after submission, when no batch has finished. Leaving the
+    # earlier stop in place would have the run report itself stopped at the
+    # stage it just completed.
+    run.stopped_at = None
     run.stages_completed.append("batch-collection")
     return run

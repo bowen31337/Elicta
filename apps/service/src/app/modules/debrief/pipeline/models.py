@@ -583,3 +583,28 @@ class SessionCitationTable(BaseModel):
     requested_at: datetime
     completed_at: datetime
     error: str | None = None
+
+class DebriefCompletion(BaseModel):
+    """How far the write-up got, and what stopped it (PRD NFR-4.1).
+
+    The §7 pipeline fails closed: a stage that cannot complete halts the chain
+    rather than feeding the next one, which is right, and it means a run that
+    met an unreachable model simply produces fewer artifacts. Without this the
+    difference between "the connection dropped during the write-up" and "this
+    meeting decided nothing" was invisible on the screen where it matters, and
+    an operator would have read the second where the first was true.
+
+    `reason` is whatever the halted stage recorded and is often absent — a
+    stage refused before it was attempted has nothing to report. The stage name
+    is the part that must always be there, because it is already enough to act
+    on.
+    """
+
+    session_id: str
+    complete: bool
+    stages_completed: list[str]
+    stopped_at: str | None = None
+    reason: str | None = None
+    #: `not_configured`, `failed`, or `unknown` — never the raw prose. See
+    #: `_completion_cause`. `reason` stays for whoever is diagnosing it.
+    cause: str | None = None

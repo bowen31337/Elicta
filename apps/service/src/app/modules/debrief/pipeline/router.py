@@ -25,7 +25,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 
-from .models import AudioDestructionEvent, CitationRow
+from .models import AudioDestructionEvent, CitationRow, DebriefCompletion
 
 SaveCitationRow = Callable[[CitationRow], Awaitable[None]]
 GetAudioDestruction = Callable[[str], Awaitable[AudioDestructionEvent | None]]
@@ -69,5 +69,37 @@ def build_audio_destruction_router(get_event: GetAudioDestruction) -> APIRouter:
         if event is None:
             raise HTTPException(status_code=404, detail="no audio destruction event")
         return event
+
+    return router
+
+
+GetDebriefCompletion = Callable[[str], Awaitable[DebriefCompletion | None]]
+
+
+def build_debrief_completion_router(get_completion: GetDebriefCompletion) -> APIRouter:
+    """Build the read route that says what the write-up could not produce.
+
+    The pipeline has always recorded this — `stopped_at` names the first stage
+    that did not complete — into a dictionary read only to stop the pipeline
+    running twice. Serving it is what turns "recorded" into "visible", which is
+    the half of the promise that was missing.
+
+    A 404 means no debrief has run for this meeting: not yet asked for, rather
+    than asked for and stopped. Reporting those the same way would put a
+    failure notice on every meeting whose write-up is simply still to come.
+    """
+
+    router = APIRouter(prefix="/api/meetings", tags=["debrief-pipeline"])
+
+    @router.get(
+        "/{meeting_id}/debrief/completion",
+        response_model=DebriefCompletion,
+        status_code=200,
+    )
+    async def get_debrief_completion(meeting_id: str) -> DebriefCompletion:
+        completion = await get_completion(meeting_id)
+        if completion is None:
+            raise HTTPException(status_code=404, detail="no debrief run for this meeting")
+        return completion
 
     return router

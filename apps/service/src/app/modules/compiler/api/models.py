@@ -135,3 +135,34 @@ class BankCompileTrigger(BaseModel):
     job_id: str = Field(min_length=1)
     engagement_id: str
     triggered_at: datetime
+
+
+class BankCompileOutcome(BaseModel):
+    """How far one engagement's last bank compile got, and what stopped it (PRD FR-4.8).
+
+    `job_id` on the trigger is "what a caller polls or correlates against
+    later" — and until this existed there was nothing to poll. The compile
+    answers 202 whatever happens after it, and the bank answers an empty list
+    whatever the reason, so an operator watching an empty bank had no way to
+    tell a provider that refused the request from a document set that produced
+    no questions.
+
+    `cause` is a kind, never the pipeline's own prose: `not_configured` when
+    nothing is set up, one of the provider failure kinds when a provider
+    refused, `failed` for anything else and `unknown` when the stage recorded
+    no reason at all. `reason` carries the sentence verbatim for whoever is
+    diagnosing it, and is not meant for a screen.
+    """
+
+    engagement_id: str
+    compile_id: str = Field(min_length=1)
+    #: `running`, `complete` or `stopped`. Three states rather than a boolean,
+    #: because a compile that has not got anywhere yet and one that finished
+    #: cleanly are both "nothing has stopped it" — and reporting the first as
+    #: the second tells an operator their empty bank is the finished article.
+    state: str = "stopped"
+    complete: bool
+    stages_completed: list[str] = Field(default_factory=list)
+    stopped_at: str | None = None
+    reason: str | None = None
+    cause: str | None = None

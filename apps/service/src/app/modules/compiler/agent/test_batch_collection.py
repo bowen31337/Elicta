@@ -106,8 +106,12 @@ def test_a_vendor_reported_error_persists_a_failed_record_for_only_that_engageme
     assert saved == results
 
 
-@pytest.mark.parametrize("count", [0, 1, 149, 301, 500])
-def test_a_candidate_count_outside_150_to_300_fails_only_that_engagement(count: int):
+@pytest.mark.parametrize(
+    "count",
+    [0, 1, MIN_CANDIDATES - 1, MAX_CANDIDATES + 1, MAX_CANDIDATES * 2],
+    ids=["none", "one", "just-under", "just-over", "far-over"],
+)
+def test_a_candidate_count_outside_the_accepted_band_fails_only_that_engagement(count: int):
     raw_results = [
         AnalystBatchResult(custom_id="engagement-1", output=make_output(count)),
         AnalystBatchResult(custom_id="engagement-2", output=make_output(MIN_CANDIDATES)),
@@ -125,7 +129,7 @@ def test_a_candidate_count_outside_150_to_300_fails_only_that_engagement(count: 
     by_engagement = {record.engagement_id: record for record in results}
     assert by_engagement["engagement-1"].status == BmadAnalystPassStatus.FAILED
     assert str(count) in by_engagement["engagement-1"].error
-    assert "FR-4.1" in by_engagement["engagement-1"].error
+    assert str(MIN_CANDIDATES) in by_engagement["engagement-1"].error
     assert by_engagement["engagement-2"].status == BmadAnalystPassStatus.COMPLETE
 
 
