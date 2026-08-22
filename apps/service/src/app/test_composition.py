@@ -183,6 +183,35 @@ async def test_the_gate_fires_when_diarization_finishes_last() -> None:
     assert len(backend.audio_destruction_events) == 1
 
 
+async def test_the_gate_counts_the_engines_the_app_was_built_with() -> None:
+    """One injected engine is one transcript to wait for, not two.
+
+    `record_path_engines` is a supported injection and nothing forces it to
+    carry two — the two-vendor rule is a validator on the *settings*, and a
+    caller assembling the app directly never passes through it. Against a
+    hardcoded count of two, a single-engine app's session collected its one
+    transcript and then waited forever: the audio was never destroyed
+    (NFR-2.4) and the debrief never started.
+    """
+
+    backend = _backend_with_audio()
+
+    async def transcribe(session_id: str, audio_ref: str, keyterms: list[str]) -> None:
+        raise AssertionError("this engine is never called in this test")
+
+    build_app(backend, record_path_engines=[("only-engine", transcribe)])
+
+    backend.record_path_transcripts[SESSION] = [
+        _transcript("only-engine", TranscriptionStatus.COMPLETE)
+    ]
+    backend.session_diarizations[SESSION] = _diarization(DiarizationStatus.COMPLETE)
+
+    event = await _install_audio_lifecycle(backend).destroy_if_ready(SESSION)
+
+    assert event is not None, "the only engine finished and the gate never fired"
+    assert SESSION not in backend.retained_audio
+
+
 # --------------------------------------------------------------------------
 # Pipeline stages that are triggered by an HTTP request. Each of these was
 # implemented and unit-tested but never invoked; the tests below assert the

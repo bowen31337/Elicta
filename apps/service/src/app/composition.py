@@ -385,6 +385,13 @@ class Backend:
     session_audio: dict[str, Any] = field(default_factory=dict)  # str -> SessionAudio
     session_diarizations: dict[str, SessionDiarization] = field(default_factory=dict)
     audio_destruction_events: list[AudioDestructionEvent] = field(default_factory=list)
+    #: How many transcripts a session must collect before the record path is
+    #: finished with its audio. Set by `build_app` from the engines it was
+    #: actually given, never assumed: it defaults to the two FR-2.6 requires
+    #: and a validator enforces, but `build_app(record_path_engines=[one])` is
+    #: a supported injection, and under a hardcoded 2 that session's audio was
+    #: never destroyed and its debrief never ran — both gates wait for a
+    #: transcript that no engine exists to write.
     record_path_engine_count: int = 2
 
     known_meetings: set[str] = field(default_factory=set)
@@ -1278,6 +1285,9 @@ def build_app(
         if record_path_engines is not None
         else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)],
     )
+    # The two gates that wait for "every engine" count against this, so it is
+    # read from the engines this app was built with rather than assumed.
+    backend.record_path_engine_count = len(engines)
 
     async def get_vocabulary(session_or_meeting_id: str) -> list[str]:
         """The engagement's vocabulary, for a caller holding a meeting id (FR-2.9).

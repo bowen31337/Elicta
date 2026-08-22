@@ -106,14 +106,14 @@ def create_app(
         store, diarize=deepgram_diarizer(read_audio, store)
     )
 
-    # A selected vendor with no batch client at all (`UnconfiguredVendor`) is
-    # a configuration error nothing can recover from while running, so that
-    # still stops startup. A selected vendor missing only its credential does
-    # not: like an unconfigured inference key elsewhere in this function, it
-    # still gets an engine — one that fails closed, by name, the moment it is
-    # called — so the service still starts and serves its full API. The
-    # startup log says which is which, so the gap is visible immediately
-    # rather than discovered from a `FAILED` transcript hours later.
+    # Nothing selected here stops the service starting. A vendor missing its
+    # credential, and a vendor with no batch client at all, both still get an
+    # engine — one that fails closed, by name, the moment it is called — like
+    # an unconfigured inference key elsewhere in this function, so the service
+    # still starts and serves its full API. It has to: the screen the mistake
+    # is corrected on is served by this process. The startup log says which
+    # engine is which, so the gap is visible immediately rather than
+    # discovered from a `FAILED` transcript hours later.
     record_engines = build_record_engines(store, read_audio)
     logger.info(
         "startup: record path engines: %s",

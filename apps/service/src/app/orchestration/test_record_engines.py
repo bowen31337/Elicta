@@ -88,14 +88,14 @@ def test_no_speech_credentials_at_all_still_builds_two_engines() -> None:
     assert [name for name, _ in engines] == ["deepgram", "assemblyai"]
 
 
-def test_a_vendor_with_no_client_is_refused_by_name() -> None:
-    """A custom endpoint has no batch client here, and pretending otherwise
-    produces a session with fewer transcripts than engines.
+def _custom_vendor_store() -> InMemorySettingsStore:
+    """A save the settings model permits: one real vendor and one with no client.
 
     `ConnectorSettings.record_vendors` requires exactly two distinct vendors
-    (PRD FR-2.6, architecture T3), so this pairs the custom vendor with a
-    configured Deepgram credential rather than selecting it alone — the
-    engine under test is still the second one built, refused by name.
+    (PRD FR-2.6, architecture T3), so the custom vendor is paired with
+    Deepgram rather than selected alone — which is exactly what an operator
+    can save from the Settings form, `custom_base_url` being its only extra
+    requirement.
     """
 
     from app.modules.settings.models import ConnectorSettings
@@ -108,6 +108,72 @@ def test_a_vendor_with_no_client_is_refused_by_name() -> None:
         )
     )
     store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg")
+    return store
 
-    with pytest.raises(UnconfiguredVendor, match="custom"):
-        build_record_engines(store, lambda _session: b"pcm")
+
+def test_a_vendor_with_no_client_still_builds_an_engine() -> None:
+    """Never a startup refusal: this list is built from a saved form.
+
+    A vendor with no batch client is unusable, but refusing to build the
+    engine list for it stopped the whole service starting — including the
+    Settings screen the selection would be corrected on.
+    """
+
+    engines = build_record_engines(_custom_vendor_store(), lambda _session: b"pcm")
+
+    assert [name for name, _ in engines] == ["deepgram", "custom"]
+
+
+async def test_a_vendor_with_no_client_fails_closed_by_name_when_called() -> None:
+    """Unusable, and it says so where the operator is looking.
+
+    `run_record_path_transcription` turns this into a `FAILED` transcript for
+    that engine, so the setting's claim of two engines stays honest: two
+    transcripts, one of them a named, actionable failure.
+    """
+
+    engines = build_record_engines(_custom_vendor_store(), lambda _session: b"pcm")
+
+    _name, transcribe = engines[1]
+    with pytest.raises(UnconfiguredVendor, match="custom") as excinfo:
+        await transcribe("session-1", "fixture://audio", [])
+
+    assert "no batch client" in str(excinfo.value)
+
+
+def test_describe_record_engines_names_a_vendor_with_no_client() -> None:
+    """The startup log distinguishes "no key yet" from "no client, ever"."""
+
+    labels = describe_record_engines(_custom_vendor_store())
+
+    assert labels == ["deepgram (configured)", "custom (NO CLIENT, fails closed)"]
+
+
+async def test_a_credential_entered_after_startup_takes_effect_without_a_restart() -> None:
+    """The credential is read per call, not sampled at boot.
+
+    This is the same promise `SettingsBackedClient` keeps for inference, and
+    the reason `build_record_engines` builds the vendor's real engine rather
+    than choosing a stand-in from what happened to be configured at startup.
+    An operator who pastes a key into the Settings screen mid-deployment must
+    not have to restart the service to use it.
+    """
+
+    from app.orchestration.assemblyai_engines import AssemblyAIUnavailable
+
+    store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg")
+
+    # No audio held, so the vendor engine stops at its first check and this
+    # test never reaches a network — the credential gate is what is under
+    # test, and it sits in front of that check.
+    engines = build_record_engines(store, lambda _session: b"")
+    _name, transcribe = engines[1]
+
+    with pytest.raises(EngineNotConfiguredError, match="assemblyai_api_key"):
+        await transcribe("session-1", "fixture://audio", [])
+
+    store.set_secret(SecretKey.ASSEMBLYAI_API_KEY, "aai")
+
+    with pytest.raises(AssemblyAIUnavailable, match="nothing to transcribe"):
+        await transcribe("session-1", "fixture://audio", [])

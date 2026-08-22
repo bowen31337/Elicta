@@ -185,3 +185,31 @@ def test_the_app_starts_with_no_speech_credentials_configured() -> None:
 
     api_paths = [path for path in app.openapi()["paths"] if path.startswith("/api")]
     assert api_paths, "an unconfigured speech vendor must not stop the app assembling"
+
+
+def test_the_app_starts_with_a_vendor_that_has_no_batch_client() -> None:
+    """A save the settings model permits must not be able to brick a boot.
+
+    `record_vendors = [deepgram, custom]` passes every validator on
+    `ConnectorSettings` — a custom vendor needs only `custom_base_url` — so it
+    is reachable from the Settings form. No batch client for it exists here,
+    and that used to leave `create_app` raising: a form entry that stops the
+    service starting, which also stops the screen the mistake would be
+    corrected on from being served.
+    """
+
+    from app.modules.settings.models import ConnectorSettings, SpeechVendor
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore()
+    store.write_connectors(
+        ConnectorSettings(
+            record_vendors=[SpeechVendor.DEEPGRAM, SpeechVendor.CUSTOM],
+            custom_base_url="https://custom.example/asr",
+        )
+    )
+
+    app = create_app(settings_store=store)
+
+    api_paths = [path for path in app.openapi()["paths"] if path.startswith("/api")]
+    assert api_paths, "a vendor with no batch client must not stop the app assembling"
