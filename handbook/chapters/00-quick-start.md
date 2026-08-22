@@ -213,10 +213,10 @@ it — rests with you, not with the software. The gate that would hold recording
 shut is built and works, but nothing can switch an engagement over to it yet.
 
 **What you can tell the client about the audio,** truthfully, before a second of
-it exists: it is never written to disk, it lives in memory only while it is being
-turned into text, it is destroyed the moment that finishes — and the deletion is
-itself recorded — and the transcription service is told with every request not to
-keep it.
+it exists: Elicta writes no copy of it anywhere, it is held only for as long as
+it takes to turn it into text, it is destroyed the moment that finishes — and the
+deletion is itself recorded — and the transcription service is told with every
+request not to keep it.
 
 **Starting.** Pick the input before you start, rather than discovering afterwards
 that it took the wrong one. Elicta will argue for a better microphone: a wired

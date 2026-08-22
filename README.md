@@ -210,7 +210,8 @@ necessarily reaches named processors.
   window plus a structured state summary, once per minute. The full transcript is never sent.
 - **At rest**, transcripts and artifacts sit in an encrypted database with the key in the platform
   keystore — macOS Keychain (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), DPAPI / Credential
-  Manager on Windows. Raw audio is never written to disk on the device.
+  Manager on Windows. Elicta writes no copy of the raw audio anywhere on the device;
+  it is held only for as long as it takes to turn it into text.
 - **Every processor** requires a DPA with no-training-on-customer-data terms, vendor-side
   retention set to zero or the minimum available, and residency pinned per engagement where
   supported.

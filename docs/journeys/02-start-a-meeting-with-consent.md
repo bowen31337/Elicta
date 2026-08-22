@@ -48,8 +48,8 @@ engagement takes the setting described above.
 The same screen tells you what Elicta will do with the audio, before a second
 of it exists:
 
-- It is never written to disk. It lives in memory only while it is being
-  transcribed.
+- Elicta writes no copy of it anywhere. It is held only for as long as it
+  takes to turn it into text.
 - The moment transcription and speaker identification finish, it is destroyed —
   and the deletion itself is recorded, so the destruction can be shown rather
   than asserted.

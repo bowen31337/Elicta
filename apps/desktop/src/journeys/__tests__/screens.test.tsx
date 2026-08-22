@@ -89,7 +89,7 @@ describe('consent', () => {
   it('states what happens to the audio before any is captured', () => {
     render(<ConsentScreen {...CONSENT_CONFIRMED} />);
 
-    expect(screen.getByText('Never written to disk')).toBeInTheDocument();
+    expect(screen.getByText('Never saved as a file')).toBeInTheDocument();
     expect(screen.getByText('Destroyed after transcription')).toBeInTheDocument();
   });
 });

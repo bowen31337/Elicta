@@ -244,9 +244,10 @@ export function ConsentScreen({
         <div className="group">
           <div className="row">
             <div className="row-main">
-              <span className="t-body">Never written to disk</span>
+              <span className="t-body">Never saved as a file</span>
               <span className="t-footnote">
-                Audio stays in memory for the duration of transcription.
+                Elicta writes no copy of the audio anywhere. It is held only for
+                as long as it takes to turn it into text.
               </span>
             </div>
           </div>

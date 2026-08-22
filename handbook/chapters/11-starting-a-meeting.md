@@ -54,7 +54,7 @@ of it exists. You can read it aloud to a client who asks.
 type: steps
 title: What happens to the recording
 caption: Each of these is something Elicta does, not something it promises.
-item: It is never written to disk | The audio lives in memory only, and only while it is being turned into text.
+item: It is never saved as a file | Elicta writes no copy of the audio anywhere. It is held only for as long as it takes to turn it into text.
 item: It is destroyed as soon as it is used | The moment transcription and speaker identification finish, the recording is deleted — and the deletion is itself recorded, so the destruction can be shown rather than asserted.
 item: The transcription service is told not to keep it | Every request carries that instruction. Your contract may already say so; sending it with each request is what makes it something an audit can check.
 ```
