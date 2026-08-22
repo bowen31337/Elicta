@@ -107,7 +107,17 @@ from app.modules.engagement.api.schemas import (
     EngagementUpdateResponse,
 )
 from app.modules.engagement.documents.errors import (
+    DocumentNotFoundError,
+)
+from app.modules.engagement.documents.errors import (
     EngagementNotFoundError as DocumentEngagementNotFoundError,
+)
+from app.modules.engagement.documents.graph import (
+    GraphCredentials,
+    HttpTransport,
+    MicrosoftGraphConnector,
+    credentials_from,
+    httpx_transport,
 )
 from app.modules.engagement.documents.models import (
     DocumentLinkAttachmentRequest,
@@ -1550,18 +1560,78 @@ def _include_operational_routers(
     async def update_document_status(
         document_id: str, status: DocumentStatus
     ) -> EngagementDocument:
-        for documents in backend.engagement_documents.values():
+        for engagement_id, documents in backend.engagement_documents.items():
             for index, document in enumerate(documents):
                 if document.document_id == document_id:
                     updated = document.model_copy(update={"status": status})
-                    documents[index] = updated
+                    # Whole list reassigned, or the retag lives in memory only.
+                    backend.engagement_documents[engagement_id] = [
+                        *documents[:index],
+                        updated,
+                        *documents[index + 1 :],
+                    ]
                     return updated
-        raise DocumentEngagementNotFoundError(f"no document: {document_id}")
+        # `DocumentNotFoundError`, not the engagement one: the status router
+        # translates only this type into a 404, and raising the sibling here
+        # made retagging an id nobody has a 500 instead.
+        raise DocumentNotFoundError(f"no document: {document_id}")
 
     app.include_router(build_document_status_router(update_document_status))
 
+    async def delete_document(document_id: str) -> bool:
+        """Remove one document from view, keeping the row (FR-3.2).
+
+        The text goes first. A document that is out of the list but still in
+        `document_texts` would go on shaping the drafted questions, which is
+        the opposite of what removing it means.
+        """
+
+        for engagement_id, documents in backend.engagement_documents.items():
+            remaining = [d for d in documents if d.document_id != document_id]
+            if len(remaining) == len(documents):
+                continue
+            backend.document_texts.pop(document_id, None)
+            _mark_row_deleted(backend, "reference_documents", document_id)
+            backend.engagement_documents[engagement_id] = remaining
+            return True
+        return False
+
+    app.include_router(build_document_delete_router(delete_document))
+
+    # FR-3.2's other half. This returned `""` from a dictionary nothing in
+    # production ever wrote to, so a linked document contributed a filename and
+    # no text — and `POST /bank/compile` answered with a job id and an empty
+    # bank, which reads like an unconfigured model rather than an unread file.
+    #
+    # `reference_document_bodies` is still consulted first, and only first: the
+    # tests that seed it are testing the attach path, not Microsoft, and a
+    # seeded body must not send a request.
+    document_settings = settings_store or backend.settings_store
+
+    def graph_credentials() -> GraphCredentials | None:
+        if document_settings is None:
+            # Unreachable from `build_app`, which substitutes an in-memory
+            # store when none is supplied. Kept so a direct caller cannot
+            # reach Microsoft with no configuration behind it.
+            return None  # pragma: no cover
+        configured = document_settings.read().documents
+        return credentials_from(
+            configured.tenant_id,
+            configured.client_id,
+            _revealed(document_settings, SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET),
+        )
+
+    connector = MicrosoftGraphConnector(
+        credentials=graph_credentials,
+        transport=document_transport or httpx_transport,
+    )
+
     async def fetch_body(url: str) -> str:
-        return backend.reference_document_bodies.get(url, "")
+        seeded = backend.reference_document_bodies.get(url)
+        if seeded is not None:
+            return seeded
+        fetched = await connector.fetch(url)
+        return extract_text(fetched.content)
 
     async def attach_document(
         engagement_id: str, request: DocumentLinkAttachmentRequest, body: str
@@ -1820,9 +1890,48 @@ async def _run_debrief_when_record_path_completes(
     async def save_requirements_state(record: Any) -> None:
         backend.requirements_states[engagement_id] = record
 
-    async def cite_filled_slot(utterance_id: str, start: float, end: float) -> Any:
+    async def cite_filled_slot(cited_session_id: str, start: float, end: float) -> Any:
+        """Ground one filled coverage slot in the record path (FR-2.7, FR-8.7).
+
+        `build_coverage_matrix` passes the *session* id, not an utterance id.
+        Building a `CoverageCitation` from the arguments alone omitted every
+        field the model requires, so the constructor raised, the matrix was
+        caught and persisted as FAILED, and a FAILED matrix confirms no
+        requirement — FR-8.9's standing state could never accumulate anything
+        while every stage reported success.
+
+        `cite_record_path_span` is the only way to build one of these, and it
+        refuses a span the transcript does not cover, so a citation cannot be
+        manufactured for a moment nobody said anything.
+        """
+
+        # `record_path_covers_span` is false for a transcript that is not
+        # COMPLETE, so a failed engine's empty output cannot ground a slot.
+        reference = next(
+            (
+                _asr_citation.cite_record_path_span(transcript, start, end)
+                for transcript in backend.record_path_transcripts.get(cited_session_id, [])
+                if _asr_citation.record_path_covers_span(transcript, start, end)
+            ),
+            None,
+        )
+        if reference is None:
+            # No supported path reaches this: a slot is FILLED only because
+            # utterances were classified into it, and those utterances are
+            # built from the segments of the very transcripts searched here.
+            # Kept because the alternative to raising is citing a moment
+            # nobody spoke at.
+            raise ValueError(  # pragma: no cover
+                f"no complete record-path transcript covers {start}-{end}s of "
+                f"session {cited_session_id!r}"
+            )
         return _artifacts_models.CoverageCitation(
-            utterance_id=utterance_id, start_seconds=start, end_seconds=end
+            session_id=reference.session_id,
+            engine=reference.engine,
+            start_seconds=reference.start_seconds,
+            end_seconds=reference.end_seconds,
+            quoted_text=reference.quoted_text,
+            transcript_completed_at=reference.transcript_completed_at,
         )
 
     engines = _audited_debrief_engines(backend, engagement_id, engines)

@@ -481,3 +481,45 @@ def test_running_the_scheduled_work_persists_an_alignment_when_save_alignment_is
 
     assert len(saved_alignments) == 1
     assert saved_alignments[0].session_id == "meeting-1"
+
+
+def test_a_job_whose_shared_setup_blows_up_is_recorded_as_failed():
+    # The vocabulary lookup happens before either engine runs, so nothing it
+    # raises is visible on a transcript. Without this the job would sit at
+    # QUEUED for ever and the operator would be waiting on a run that died.
+    deps = make_job_deps()
+
+    async def get_vocabulary(meeting_id: str) -> list[str]:
+        raise RuntimeError("vocabulary store is unreachable")
+
+    job = asyncio.run(
+        start_record_path_transcription_job(
+            "meeting-1",
+            "recordings/meeting-1.wav",
+            deps["engines"],
+            get_vocabulary,
+            deps["save_transcript"],
+            deps["save_job"],
+            deps["schedule"],
+            job_id="job-1",
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    assert job.status == TranscriptionJobStatus.QUEUED
+    # The scheduled work swallows the failure rather than re-raising it: by
+    # the time it runs there is no caller left to propagate to.
+    asyncio.run(deps["scheduled"][0]())
+
+    assert [j.status for j in deps["saved_jobs"]] == [
+        TranscriptionJobStatus.QUEUED,
+        TranscriptionJobStatus.FAILED,
+    ]
+    # A session never ends up with fewer transcripts than configured engines:
+    # each engine's own FAILED record is persisted before the shared failure
+    # propagates, so the debrief can say which engines were meant to run.
+    assert [t.engine for t in deps["saved_transcripts"]] == ["engine-a", "engine-b"]
+    assert all(t.status == TranscriptionStatus.FAILED for t in deps["saved_transcripts"])
+    assert all(
+        t.error == "vocabulary store is unreachable" for t in deps["saved_transcripts"]
+    )

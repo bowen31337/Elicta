@@ -280,3 +280,23 @@ def test_align_completed_transcripts_aligns_the_two_completed_ones():
     assert alignment.other_engine == "engine-b"
     assert alignment.spans[0].agreement_score == pytest.approx(1.0)
     assert alignment.computed_at == FIXED
+
+
+def test_a_span_neither_engine_put_words_in_is_not_a_divergence():
+    # A pause the reference engine bracketed as a segment, where neither
+    # engine transcribed a word. Scoring that zero would flag every silence
+    # for debrief review, burying the divergences that mean something.
+    reference = make_transcript(
+        "engine-a",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=2.0, text="...")],
+    )
+    other = make_transcript(
+        "engine-b",
+        [TranscriptSegment(start_seconds=0.0, end_seconds=2.0, text="--")],
+    )
+
+    alignment = align_transcripts(reference, other, computed_at=FIXED)
+
+    assert alignment.spans[0].agreement_score == pytest.approx(1.0)
+    assert alignment.spans[0].is_divergent is False
+    assert divergent_spans(alignment) == []

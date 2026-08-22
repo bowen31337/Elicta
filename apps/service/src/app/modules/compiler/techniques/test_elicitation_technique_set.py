@@ -9,6 +9,7 @@ import pytest
 from app.modules.compiler.bank.models import BankCandidate
 from app.modules.compiler.techniques.elicitation_technique_set import (
     DEFAULT_SKILL_DIR,
+    _parse_frontmatter,
     load_elicitation_technique_set,
     verify_candidate_techniques,
 )
@@ -149,3 +150,16 @@ def test_no_drawn_candidates_verifies_to_an_empty_result_with_zero_unknown_count
 
     assert result.candidates == []
     assert result.unknown_technique_count == 0
+
+
+def test_frontmatter_with_no_closing_delimiter_is_refused():
+    # Everything after the opening --- would otherwise be read as fields, so a
+    # technique file truncated mid-write would load as a technique with a
+    # plausible-looking id and no body.
+    with pytest.raises(ValueError, match="missing its closing --- delimiter"):
+        _parse_frontmatter("---\ntechnique_id: t1\nname: Interview\n")
+
+
+def test_a_frontmatter_line_that_is_not_a_key_value_pair_is_refused():
+    with pytest.raises(ValueError, match="malformed frontmatter line"):
+        _parse_frontmatter("---\ntechnique_id: t1\nname Interview\n---\nbody\n")

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+import pytest
+
 from app.modules.debrief.artifacts.models import (
     ConfirmedRequirement,
     CoverageCitation,
@@ -224,3 +226,22 @@ def test_a_decisions_inference_marker_survives_the_merge_unchanged():
         "go with vendor A": ClaimProvenance.STATED,
         "timeline likely slips a month": ClaimProvenance.INFERRED,
     }
+
+
+def test_reconfirming_a_section_with_no_citation_is_refused_rather_than_merged():
+    # A confirmed requirement is only worth anything because a quote backs it.
+    # A FILLED entry that arrived without one cannot be compared against the
+    # standing confirmation, and silently keeping either side would leave the
+    # engagement's state claiming a confirmation nothing supports.
+    async def save(state: RequirementsState) -> None:  # pragma: no cover - never reached
+        raise AssertionError("an uncitable merge must not persist")
+
+    previous = make_state(confirmed_requirements=[make_confirmed_requirement("timeline", "we ship in Q3")])
+    matrix = make_matrix([make_entry("timeline", "Timeline", FillState.FILLED)])
+
+    with pytest.raises(ValueError, match="has no citation"):
+        asyncio.run(
+            merge_requirements_state_forward(
+                "engagement-1", previous, matrix, make_artifacts(), save, merged_at=FIXED
+            )
+        )

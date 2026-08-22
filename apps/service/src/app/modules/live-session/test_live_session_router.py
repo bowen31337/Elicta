@@ -101,3 +101,21 @@ def test_a_session_refused_on_consent_is_never_allocated():
     client.post("/api/meetings/meeting-1/session/start")
 
     assert received == []
+
+
+def test_a_meeting_that_disappears_between_admission_and_start_is_a_404():
+    # Admission and session start are two lookups, and a meeting deleted
+    # between them would otherwise return a 200 with no session behind it.
+    async def start_session(meeting_id: str):
+        return None
+
+    async def admit_capture(meeting_id: str):
+        return CaptureAdmission.ALLOWED
+
+    app = FastAPI()
+    app.include_router(build_live_session_router(start_session, admit_capture))
+
+    response = TestClient(app).post("/api/meetings/meeting-1/session/start")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "meeting not found"
