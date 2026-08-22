@@ -42,9 +42,11 @@ from .router import (
     ListEngagementDocuments,
     UpdateDocumentStatus,
     UploadEngagementDocument,
+    build_document_delete_router,
     build_document_status_router,
     build_engagement_documents_router,
     build_reference_document_link_router,
+    build_vocabulary_delete_router,
 )
 
 __all__ = [
@@ -63,6 +65,8 @@ __all__ = [
     "ReferenceDocumentFetchError",
     "UpdateDocumentStatus",
     "UploadEngagementDocument",
+    "build_document_delete_router",
+    "build_vocabulary_delete_router",
     "build_document_status_router",
     "build_engagement_documents_router",
     "build_reference_document_link_router",

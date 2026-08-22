@@ -7,7 +7,12 @@ from fastapi.testclient import TestClient
 
 from .errors import DocumentNotFoundError, EngagementNotFoundError
 from .models import DocumentStatus, DocumentUploadRequest, EngagementDocument
-from .router import build_document_status_router, build_engagement_documents_router
+from .router import (
+    build_document_delete_router,
+    build_document_status_router,
+    build_engagement_documents_router,
+    build_vocabulary_delete_router,
+)
 
 
 def document(
@@ -314,3 +319,79 @@ def test_unknown_document_id_returns_404():
     )
 
     assert response.status_code == 404
+
+
+def test_an_upload_with_no_filename_and_no_name_is_refused():
+    # A browser can post a file part whose filename is empty. The document
+    # would otherwise land in the list as an untitled row nobody could
+    # identify later, which is worse than making the operator name it.
+    # The body is built by hand because an HTTP client will not send a file
+    # part with an empty filename — it degrades it to a plain form field.
+    client, received = make_client(
+        [], upload_result=document("doc-1", "scoping.docx", DocumentStatus.HYPOTHESIS)
+    )
+    boundary = "----elicta-test-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file"; filename=""\r\n'
+        "Content-Type: text/plain\r\n\r\n"
+        "Inbound pallets are cross-docked within four hours.\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="status"\r\n\r\n'
+        "hypothesis\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = client.post(
+        "/api/engagements/eng-1/documents",
+        content=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "filename" in response.json()["detail"]
+    # Refused before anything was stored, so no half-attached document.
+    assert received == []
+
+
+def _delete_client(*, term_removed: bool = True, document_removed: bool = True) -> TestClient:
+    async def delete_term(engagement_id: str, term_id: str) -> bool:
+        return term_removed
+
+    async def delete_document(document_id: str) -> bool:
+        return document_removed
+
+    app = FastAPI()
+    app.include_router(build_vocabulary_delete_router(delete_term))
+    app.include_router(build_document_delete_router(delete_document))
+    return TestClient(app)
+
+
+def test_removing_a_vocabulary_term_that_is_not_there_is_a_404():
+    # 204 for an id nobody has would report a typo as a successful removal,
+    # and the wrong keyterm would stay in the transcriber's prompt.
+    response = _delete_client(term_removed=False).delete(
+        "/api/engagements/eng-1/vocabulary/no-such-term"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "no vocabulary term: no-such-term"
+
+
+def test_removing_a_vocabulary_term_that_is_there_is_a_204():
+    response = _delete_client(term_removed=True).delete("/api/engagements/eng-1/vocabulary/term-1")
+
+    assert response.status_code == 204
+
+
+def test_removing_a_document_that_is_not_there_is_a_404():
+    response = _delete_client(document_removed=False).delete("/api/documents/no-such-document")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "no document: no-such-document"
+
+
+def test_removing_a_document_that_is_there_is_a_204():
+    response = _delete_client(document_removed=True).delete("/api/documents/doc-1")
+
+    assert response.status_code == 204

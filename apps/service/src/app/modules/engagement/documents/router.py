@@ -116,6 +116,48 @@ def build_engagement_documents_router(
     return router
 
 
+DeleteReferenceDocument = Callable[[str], Awaitable[bool]]
+
+
+DeleteVocabularyTerm = Callable[[str, str], Awaitable[bool]]
+
+
+def build_vocabulary_delete_router(delete_term: DeleteVocabularyTerm) -> APIRouter:
+    """`DELETE /api/engagements/{id}/vocabulary/{term_id}` — drop one keyterm.
+
+    The list where a mistake costs most: a wrong word handed to the transcriber
+    is worse than no word, because it makes the transcript confidently wrong.
+    Until now nothing could take one back out.
+    """
+
+    router = APIRouter(prefix="/api/engagements", tags=["engagement-documents"])
+
+    @router.delete("/{engagement_id}/vocabulary/{term_id}", status_code=204)
+    async def remove_term(engagement_id: str, term_id: str) -> None:
+        if not await delete_term(engagement_id, term_id):
+            raise HTTPException(status_code=404, detail=f"no vocabulary term: {term_id}")
+
+    return router
+
+
+def build_document_delete_router(delete_document: DeleteReferenceDocument) -> APIRouter:
+    """`DELETE /api/documents/{id}` — take a document out of the engagement.
+
+    Soft: the row stays, marked, so a removal is reversible and an audit can
+    still see what was attached. 404 rather than 204 for an id nobody has, so
+    a typo is not silently reported as a successful removal.
+    """
+
+    router = APIRouter(prefix="/api/documents", tags=["engagement-documents"])
+
+    @router.delete("/{document_id}", status_code=204)
+    async def remove_document(document_id: str) -> None:
+        if not await delete_document(document_id):
+            raise HTTPException(status_code=404, detail=f"no document: {document_id}")
+
+    return router
+
+
 def build_document_status_router(
     update_status: UpdateDocumentStatus,
 ) -> APIRouter:
