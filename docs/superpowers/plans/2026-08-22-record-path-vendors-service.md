@@ -49,7 +49,7 @@ the desktop capture tap, the AudioWorklet and the uploader (spec §5.1, §5.2, �
 
 **Files:**
 - Modify: `apps/service/src/app/modules/settings/models.py` (`SecretKey`)
-- Modify: `apps/service/src/app/modules/settings/store.py` (`_SECRET_ENV`)
+- Modify: `apps/service/src/app/modules/settings/store.py` (`_ENV_FALLBACK`)
 - Modify: `.env.example`
 - Modify: `docs/RUNBOOK.md`
 - Test: `apps/service/src/app/modules/settings/test_vendor_credentials.py` (create)
@@ -122,11 +122,11 @@ def test_the_live_path_credential_is_not_orphaned() -> None:
     ],
 )
 def test_a_headless_deployment_can_supply_the_key_by_environment(
-    key: SecretKey, variable: str, monkeypatch: pytest.MonkeyPatch
+    key: SecretKey, variable: str
 ) -> None:
-    from app.modules.settings.store import _SECRET_ENV
+    from app.modules.settings.store import _ENV_FALLBACK
 
-    assert variable in _SECRET_ENV[key]
+    assert variable in _ENV_FALLBACK[key]
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -148,7 +148,7 @@ after `ASR_VENDOR_API_KEY`:
     ASSEMBLYAI_API_KEY = "assemblyai_api_key"
 ```
 
-In `apps/service/src/app/modules/settings/store.py`, inside `_SECRET_ENV`:
+In `apps/service/src/app/modules/settings/store.py`, inside `_ENV_FALLBACK` (that is the existing name — do not rename it):
 
 ```python
     SecretKey.DEEPGRAM_API_KEY: ("ELICTA_DEEPGRAM_API_KEY",),
@@ -243,9 +243,13 @@ def test_the_live_path_key_still_follows_the_live_vendor_setting() -> None:
     from app.modules.settings.models import SpeechVendor
     from app.modules.settings.store import InMemorySettingsStore
 
+    from app.modules.settings.models import ConnectorSettings
+
     store = InMemorySettingsStore()
-    settings = store.read()
-    settings.connectors.live_vendor = SpeechVendor.DEEPGRAM
+    # Through the store's own writer, not by mutating what `read()` returned:
+    # `read()` builds a fresh `ServiceSettings` each call and only happens to
+    # reuse the nested `connectors` instance.
+    store.write_connectors(ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM))
 
     assert _vendor_probe_for(SecretKey.ASR_VENDOR_API_KEY, store) is probe_deepgram
 ```
@@ -333,9 +337,12 @@ git commit -m "fix(settings): probe each speech key against its own vendor"
   - `POST /api/sessions/{session_id}/audio-chunk` taking
     `AudioChunkRequest{sequence: int, pcm: str}` and answering
     `AudioChunkAccepted{received_bytes: int, next_sequence: int}`
-  - `read_session_audio(backend) -> Callable[[str], bytes]`, the injectable
-    `read_audio` every vendor client takes.
   - `audio_ref_for(session_id) -> str`, returning `f"session:{session_id}"`.
+  - `SessionAudio`, holding one session's `buffer` and its `next_sequence`.
+
+  `read_session_audio` is **Task 7's**, not this one's — the clients take an
+  injected `Callable[[str], bytes]` and nothing needs the concrete reader until
+  they are wired together.
 
 **Why:** `retained_audio` holds a reference string and no bytes exist anywhere,
 so `audio_ref` has never pointed at anything.
@@ -1501,8 +1508,17 @@ from app.orchestration.record_engines import UnconfiguredVendor, build_record_en
 
 
 def _store(*vendors: SpeechVendor) -> InMemorySettingsStore:
+    """A store with these record vendors selected.
+
+    Written through `write_connectors` rather than by mutating what `read()`
+    returned: `read()` builds a fresh `ServiceSettings` every call and only
+    happens to reuse the nested `connectors` object.
+    """
+
+    from app.modules.settings.models import ConnectorSettings
+
     store = InMemorySettingsStore()
-    store.read().connectors.record_vendors = list(vendors)
+    store.write_connectors(ConnectorSettings(record_vendors=list(vendors)))
     return store
 
 
