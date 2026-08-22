@@ -19,23 +19,30 @@ from anthropic import (
     AuthenticationError,
     BadRequestError,
     OverloadedError,
+    PermissionDeniedError,
     RateLimitError,
 )
 
 from app.orchestration.anthropic_engines import (
     DEFAULT_MODEL,
     _AnalystArtifacts,
+    _batch_error,
     _BriefOut,
     _ClassifiedTranscript,
     _CleanedTranscript,
     _DecisionOut,
     _EmailOut,
     _OpenQuestionOut,
+    _retry_after,
     _TranslatedLine,
     _TranslatedTranscript,
+    _upstream_failure,
+    _vendor_message,
     anthropic_compiler_engines,
     anthropic_debrief_engines,
+    build_llm_client,
     configured_engines,
+    probe_anthropic_credential,
 )
 from app.orchestration.engines import (
     EngineNotConfiguredError,
@@ -198,11 +205,19 @@ async def test_every_stage_caches_its_instructions_and_uses_the_configured_model
 
 
 async def test_diarization_is_not_treated_as_a_model_call() -> None:
-    """It is a speech-vendor seam; wiring Claude to it would be wrong."""
+    """It is a speech-vendor seam; wiring Claude to it would be wrong.
+
+    And it refuses as an *unset seam* rather than as a bare `RuntimeError`.
+    Nothing downstream can tell a crash from a missing vendor by reading prose,
+    and the debrief screen tried: a live run rendered this refusal's internals
+    to an operator, because that was the only way anything had to classify it.
+    """
+
+    from app.orchestration.engines import EngineNotConfiguredError
 
     engines = anthropic_debrief_engines(_StubClient([]))
 
-    with pytest.raises(RuntimeError, match="speech-vendor"):
+    with pytest.raises(EngineNotConfiguredError, match="speech vendor"):
         await engines.diarize("s1", "s3://audio")
 
 
@@ -556,6 +571,7 @@ def _compiler_calls(engines):
         "structure": lambda: engines.structure("eng-1", []),
         "submit_batch": lambda: engines.submit_batch("eng-1", pack),
         "fetch_batch": lambda: engines.fetch_batch("batch-1"),
+        "run_analyst": lambda: engines.run_analyst("eng-1", pack),
     }
 
 
@@ -598,7 +614,9 @@ async def test_every_debrief_stage_reports_a_rate_limit_as_one(stage: str) -> No
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["extract", "structure", "submit_batch", "fetch_batch"])
+@pytest.mark.parametrize(
+    "stage", ["extract", "structure", "submit_batch", "fetch_batch", "run_analyst"]
+)
 async def test_every_compiler_stage_reports_a_rate_limit_as_one(stage: str) -> None:
     engines = anthropic_compiler_engines(_FailingClient(_rate_limited()))
 
@@ -669,3 +687,618 @@ async def test_a_plain_bug_in_a_stage_is_not_dressed_up_as_a_provider_failure() 
 
     with pytest.raises(ZeroDivisionError):
         await engines.converse([{"role": "user", "content": "hello"}])
+
+
+# --------------------------------------------------------------------------
+# Two refusals that are not what the product used to call them.
+#
+# Both cost a real misdiagnosis: a working OAuth token was reported as rate
+# limited and as a rejected credential, and neither was true. The provider had
+# said exactly what was wrong in both cases and the translation threw it away.
+# --------------------------------------------------------------------------
+
+
+def _scope_denied() -> PermissionDeniedError:
+    return PermissionDeniedError(
+        "forbidden",
+        response=httpx.Response(
+            403,
+            request=httpx.Request("GET", "https://api.anthropic.com/v1/messages/batches"),
+        ),
+        body={
+            "type": "error",
+            "error": {
+                "type": "permission_error",
+                "message": (
+                    "OAuth token does not meet scope requirement "
+                    "any_of(user:batch, user:developer, workspace:developer, "
+                    "workspace:inference)"
+                ),
+            },
+        },
+    )
+
+
+def _rate_limited_without_a_hint() -> RateLimitError:
+    """A 429 carrying no `retry-after` and no rate-limit headers.
+
+    What Anthropic returns when the *model* is not available to the
+    credential's plan: the body says `rate_limit_error`, and the same request
+    repeated a second later is refused identically. Every retry is wasted.
+    """
+
+    return RateLimitError(
+        "rate limited",
+        response=httpx.Response(
+            429,
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+        ),
+        body={"type": "error", "error": {"type": "rate_limit_error", "message": "Error"}},
+    )
+
+
+class TestARefusalThatWaitingCannotFix:
+    def test_a_missing_scope_is_not_reported_as_a_rejected_credential(self):
+        failure = _upstream_failure("analyst batch", _scope_denied())
+
+        assert failure is not None
+        assert failure.failure is UpstreamFailure.NOT_ENTITLED
+        # "Re-enter it on the Settings screen" sends an operator round a loop
+        # that cannot help: the credential is valid, and re-typing it changes
+        # nothing about which scopes it carries.
+        assert "re-enter" not in str(failure).lower()
+
+    def test_the_provider_s_own_words_survive_because_they_name_the_fix(self):
+        failure = _upstream_failure("analyst batch", _scope_denied())
+
+        assert "user:batch" in str(failure)
+
+    def test_a_credential_that_really_is_rejected_still_says_so(self):
+        rejected = AuthenticationError(
+            "unauthorized",
+            response=httpx.Response(
+                401,
+                request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+            ),
+            body=None,
+        )
+
+        failure = _upstream_failure("cleaning", rejected)
+
+        assert failure is not None
+        assert failure.failure is UpstreamFailure.CREDENTIAL_REJECTED
+        assert "Settings" in str(failure)
+
+
+class TestARateLimitWithNoRetryHint:
+    def test_it_does_not_promise_the_request_will_succeed_shortly(self):
+        failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
+
+        assert failure is not None
+        assert "should succeed shortly" not in str(failure)
+
+    def test_it_points_at_the_model_because_that_is_usually_the_cause(self):
+        # "model provider" already appears in the old wording, so this asks for
+        # the specific advice instead: the model chosen in Settings may not be
+        # one this credential's plan includes.
+        failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
+
+        assert "not be available" in str(failure)
+        assert "Settings" in str(failure)
+
+    def test_it_is_not_classified_as_a_throttle_at_all(self):
+        """The wording said one thing and the kind said another.
+
+        `NOT_ENTITLED` is documented as "a missing OAuth scope *or a model the
+        plan does not include*", which is precisely this. Raised as
+        `RATE_LIMITED`, the sentence advised checking Settings while the kind
+        told every reader downstream to wait — and a screen that classifies by
+        kind, as it must, would repeat the advice the sentence had just ruled
+        out. A real compile stopped here four times.
+        """
+
+        failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
+
+        assert failure is not None
+        assert failure.failure is UpstreamFailure.NOT_ENTITLED
+        assert failure.retry_after is None, "there is nothing to come back after"
+
+    def test_a_throttle_that_says_when_to_come_back_is_still_a_throttle(self):
+        failure = _upstream_failure("extraction", _rate_limited())
+
+        assert failure is not None
+        assert failure.failure is UpstreamFailure.RATE_LIMITED
+        assert failure.retry_after == 12
+        assert "this is a limit, not a fault" in str(failure)
+
+
+# --- reading the provider's own words ---------------------------------------
+
+
+def test_a_batch_that_ended_without_erroring_is_still_reported_by_name() -> None:
+    # `expired` and `canceled` are not errors and carry no `error` object, but
+    # they are still the reason a bank came back empty.
+    result = types.SimpleNamespace(type="expired")
+
+    assert _batch_error(result) == "analyst batch expired"
+
+
+def test_a_rate_limit_with_no_headers_asks_us_to_wait_no_particular_time() -> None:
+    # A guessed delay is worse than none: a client that trusts it retries
+    # straight back into the same limit.
+    assert _retry_after(types.SimpleNamespace()) is None
+    assert _retry_after(types.SimpleNamespace(response=types.SimpleNamespace(headers=None))) is None
+
+
+def test_a_vendor_error_with_no_message_falls_back_to_the_exception() -> None:
+    error = BadRequestError(
+        message="schema rejected",
+        response=httpx.Response(
+            400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        ),
+        body=None,
+    )
+
+    assert "schema rejected" in _vendor_message(error)
+
+
+# --- the two stages no other test drives ------------------------------------
+
+
+class _CreateMessages:
+    """A client for the one stage that returns prose rather than a schema."""
+
+    def __init__(self, blocks: list) -> None:
+        self._blocks = blocks
+        self.calls: list[dict] = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return types.SimpleNamespace(content=self._blocks)
+
+
+async def test_the_conversation_returns_the_blocks_the_api_sent() -> None:
+    """The caller persists these verbatim and replays them as the next turn.
+
+    Flattening them to a string would lose the block structure the next
+    request needs, and the loss would only show up on the second turn.
+    """
+
+    block = types.SimpleNamespace(
+        model_dump=lambda: {"type": "text", "text": "Which four hours?"}
+    )
+    messages = _CreateMessages([block])
+    engines = anthropic_debrief_engines(types.SimpleNamespace(messages=messages))
+
+    turns = [{"role": "user", "content": "What did they commit to?"}]
+    reply = await engines.converse(turns)
+
+    assert reply == [{"type": "text", "text": "Which four hours?"}]
+    assert messages.calls[0]["messages"] == turns
+    # §14.3: the instructions are a cache breakpoint, not part of the turn.
+    assert messages.calls[0]["system"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_structuring_carries_every_candidate_through() -> None:
+    from app.orchestration.anthropic_engines import _StructuringOut
+
+    parsed = _StructuringOut.model_validate(
+        {
+            "candidates": [
+                {
+                    "claim_id": "c1",
+                    "template_section": "performance",
+                    "trigger_types": ["vague_adjective"],
+                    "phrasing": "How fast, in seconds?",
+                    "stub": "How fast?",
+                    "lang": "en",
+                    "priority": 1,
+                }
+            ]
+        }
+    )
+    client = _StubClient([parsed])
+    engines = anthropic_compiler_engines(client)
+
+    output = await engines.structure(
+        "eng-1", [types.SimpleNamespace(id="c1", text="it should be fast")]
+    )
+
+    assert [c.phrasing for c in output.candidates] == ["How fast, in seconds?"]
+    # The candidate stays bound to the claim it was drawn from.
+    assert output.candidates[0].claim_id == "c1"
+    # The claim ids are what the model is asked to structure against.
+    assert "[c1] it should be fast" in client.messages.calls[0]["messages"][0]["content"]
+
+
+# --- one client class per Messages API surface -------------------------------
+#
+# Each reseller differs in request signing and in how model ids are addressed,
+# so pointing the plain client at their endpoint produces authentication
+# failures that read like bad credentials. These pin the mapping.
+
+
+def _inference(**overrides):
+    from app.modules.settings.models import InferenceSettings
+
+    return InferenceSettings(**overrides)
+
+
+def test_bedrock_authenticates_through_the_hosts_own_credential_chain() -> None:
+    from anthropic import AsyncAnthropicBedrockMantle
+
+    from app.modules.settings.models import LlmProvider
+
+    client = build_llm_client(
+        _inference(provider=LlmProvider.BEDROCK, region="us-east-1"), None
+    )
+
+    # No secret is taken from settings: an IAM role beats a pasted key.
+    assert isinstance(client, AsyncAnthropicBedrockMantle)
+
+
+def test_vertex_is_addressed_by_project_and_region() -> None:
+    from anthropic import AsyncAnthropicVertex
+
+    from app.modules.settings.models import LlmProvider
+
+    client = build_llm_client(
+        _inference(provider=LlmProvider.VERTEX, project_id="elicta-prod", region="us-east5"),
+        None,
+    )
+
+    assert isinstance(client, AsyncAnthropicVertex)
+
+
+def test_foundry_takes_a_key_and_a_resource() -> None:
+    from anthropic import AsyncAnthropicFoundry
+
+    from app.modules.settings.models import LlmProvider
+
+    client = build_llm_client(
+        _inference(provider=LlmProvider.FOUNDRY, resource="elicta-eastus"), "foundry-key"
+    )
+
+    assert isinstance(client, AsyncAnthropicFoundry)
+
+
+def test_foundry_without_a_key_fails_closed() -> None:
+    from app.modules.settings.models import LlmProvider
+
+    with pytest.raises(EngineNotConfiguredError, match="Foundry"):
+        build_llm_client(_inference(provider=LlmProvider.FOUNDRY, resource="r"), None)
+
+
+def test_anthropic_direct_without_a_credential_fails_closed() -> None:
+    # An unconfigured deployment must not look like a working one.
+    from app.modules.settings.models import LlmProvider
+
+    with pytest.raises(EngineNotConfiguredError, match="no credential configured"):
+        build_llm_client(_inference(provider=LlmProvider.ANTHROPIC), None)
+
+
+# --- credentials re-read per call --------------------------------------------
+
+
+def test_the_messages_surface_resolves_the_client_on_every_access() -> None:
+    """A key entered in the UI takes effect without a restart.
+
+    Holding a client built at startup is what would make the operator restart
+    the service after saving a key.
+    """
+
+    from app.modules.settings.models import InferenceSettings, SecretKey
+    from app.modules.settings.store import InMemorySettingsStore
+    from app.orchestration.anthropic_engines import SettingsBackedClient
+
+    store = InMemorySettingsStore(read_environment=False)
+    store.set_secret(SecretKey.ANTHROPIC_API_KEY, "sk-ant-first")
+    client = SettingsBackedClient(store)
+
+    assert client.messages is not None
+
+    store.set_secret(SecretKey.ANTHROPIC_API_KEY, "sk-ant-second")
+    store.write_inference(InferenceSettings(model="claude-opus-5"))
+
+    assert client.messages is not None
+    assert client.current_model() == "claude-opus-5"
+
+
+def test_the_model_falls_back_to_the_default_when_none_is_set() -> None:
+    from app.modules.settings.models import SecretKey
+    from app.modules.settings.store import InMemorySettingsStore
+    from app.orchestration.anthropic_engines import SettingsBackedClient
+
+    store = InMemorySettingsStore(read_environment=False)
+    store.set_secret(SecretKey.ANTHROPIC_API_KEY, "sk-ant-first")
+
+    assert SettingsBackedClient(store).current_model() == DEFAULT_MODEL
+
+
+# --- probing a credential -----------------------------------------------------
+
+
+async def test_probing_a_credential_lists_models_rather_than_sending_a_message(
+    monkeypatch,
+) -> None:
+    """Listing costs no tokens and cannot be mistaken for product traffic."""
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [], "has_more": False})
+
+    original = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    await probe_anthropic_credential("sk-ant-the-key")
+
+    assert seen, "the probe made no request"
+    assert seen[0].method == "GET"
+    assert "/v1/models" in str(seen[0].url)
+    assert seen[0].headers["x-api-key"] == "sk-ant-the-key"
+
+
+async def test_probing_an_oauth_token_uses_the_bearer_pairing(monkeypatch) -> None:
+    # A bearer token without the beta flag returns a 401 that reads like a bad
+    # credential rather than a missing header.
+    from app.modules.settings.models import AuthMode
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": [], "has_more": False})
+
+    original = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    await probe_anthropic_credential("oat-the-token", mode=AuthMode.OAUTH_TOKEN)
+
+    assert seen[0].headers["authorization"] == "Bearer oat-the-token"
+    assert "oauth-2025-04-20" in seen[0].headers["anthropic-beta"]
+
+
+async def test_a_probe_that_is_rejected_raises_the_vendors_own_error(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"message": "invalid x-api-key"}})
+
+    original = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    with pytest.raises(AuthenticationError):
+        await probe_anthropic_credential("sk-ant-wrong")
+
+
+async def test_the_direct_analyst_pass_returns_what_a_collected_batch_would() -> None:
+    """The fallback route feeds the same collection the batch route does.
+
+    Returning a different shape here would mean a second implementation of the
+    candidate-count contract and the per-engagement failure handling — the part
+    most worth having only one of.
+    """
+
+    from app.modules.compiler.agent.models import BmadAnalystPassOutput
+
+    parsed = BmadAnalystPassOutput.model_validate(
+        {
+            "candidates": [
+                {
+                    "template_section": "volumes",
+                    "trigger_types": ["unquantified-quantity"],
+                    "phrasing": "How many consignments a month?",
+                    "stub": "How many?",
+                    "lang": "en",
+                    "priority": 1,
+                }
+            ]
+        }
+    )
+    client = _StubClient([parsed])
+    engines = anthropic_compiler_engines(client)
+    pack = types.SimpleNamespace(sector="logistics", project_type="discovery", documents=[])
+
+    (result,) = await engines.run_analyst("eng-1", pack)
+
+    # Attributed under the same `custom_id` convention a batch result carries,
+    # so the collection keys it by engagement the same way.
+    assert result.custom_id == "eng-1"
+    assert result.error is None
+    assert result.output.candidates[0].phrasing == "How many consignments a month?"
+    # §14.4: schema-enforced, and §14.3: the instructions are a cache boundary.
+    assert client.messages.calls[0]["output_format"] is BmadAnalystPassOutput
+    assert client.messages.calls[0]["system"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+class TestTheCompilerAsksForAQuestionBank:
+    """The compiler's Analyst pass was sending the debrief's instructions.
+
+    `_ANALYST_SYSTEM` tells a model to produce "open questions, a decision log,
+    a project brief and a follow-up email" from a *transcript*, citing utterance
+    ids. The compiler runs before any meeting exists: there is no transcript,
+    no utterance to cite, and what it needs is a bank of candidate questions
+    tagged with the template section each one serves.
+
+    The model did as it was told. A live compile over three documents came back
+    with thirteen candidates filed under `open_questions` and `decision_log`,
+    six of which were statements rather than questions — and the count was
+    always going to fall short of a bank, because nothing had asked for one.
+    """
+
+    @staticmethod
+    def _prose() -> str:
+        """The prompt as one line. It is wrapped for reading, and a phrase that
+        straddles a line break is still the phrase."""
+
+        from app.orchestration.anthropic_engines import _COMPILER_ANALYST_SYSTEM
+
+        return " ".join(_COMPILER_ANALYST_SYSTEM.lower().split())
+
+    def test_it_asks_for_candidate_questions_rather_than_meeting_artifacts(self):
+        lowered = self._prose()
+
+        assert "candidate questions" in lowered
+        # The debrief's artifacts are named here only to be ruled out — that is
+        # exactly what the live compile filed its candidates under, so saying
+        # nothing about them is weaker than forbidding them.
+        assert "never file a candidate under a meeting artifact" in lowered
+        assert "follow-up email" not in lowered
+
+    def test_it_never_mentions_a_transcript_it_will_not_be_given(self):
+        lowered = self._prose()
+        assert "transcript" not in lowered
+        assert "utterance" not in lowered
+
+    def test_it_asks_for_the_tagging_the_bank_is_indexed_by(self):
+        """A candidate with no template section cannot be grouped, and one with
+        no trigger type can never be selected at runtime."""
+
+        lowered = self._prose()
+        assert "template_section" in lowered
+        assert "trigger_types" in lowered
+
+    def test_the_debrief_keeps_its_own_instructions(self):
+        """The two passes are different work and must not share a prompt again."""
+
+        from app.orchestration.anthropic_engines import (
+            _ANALYST_SYSTEM,
+            _COMPILER_ANALYST_SYSTEM,
+        )
+
+        assert _ANALYST_SYSTEM != _COMPILER_ANALYST_SYSTEM
+        assert "transcript" in _ANALYST_SYSTEM.lower()
+
+    def test_both_routes_to_the_pass_send_the_same_instructions(self):
+        """The batch and the direct call are one pass asked two ways.
+
+        Written twice they would drift, and a bank drafted by the fallback
+        would quietly stop matching one drafted by the batch.
+        """
+
+        import inspect
+        import re
+
+        from app.orchestration import anthropic_engines
+
+        source = inspect.getsource(anthropic_engines.anthropic_compiler_engines)
+        assert source.count("_COMPILER_ANALYST_SYSTEM") == 2
+        # Word boundary: `_COMPILER_ANALYST_SYSTEM` contains the debrief name
+        # as a substring, so a plain `in` check can never fail.
+        assert not re.search(r"(?<![A-Z_])_ANALYST_SYSTEM\b", source)
+
+
+class TestTheBankIsKeyedToASectionList:
+    """A live compile put 65 of 97 candidates into one section called "Operations".
+
+    Not because the model was careless — because nothing had ever told it which
+    sections exist. The prompt said "use the sections the documents themselves
+    imply — volumes, integrations, performance, compliance, and so on", and
+    "and so on" is an invitation to invent a bin and fill it.
+
+    A bank is meant to be reviewable section by section, and coverage is
+    tracked against the same sections. Both of those need the list to be known
+    in advance rather than discovered per compile — two engagements whose banks
+    are filed under different sections cannot be compared, and a section the
+    coverage meter has never heard of can never be marked covered.
+    """
+
+    def test_the_context_pack_carries_the_sections_to_file_candidates_under(self):
+        from app.modules.compiler.agent.models import AnalystContextPack
+
+        assert "template_sections" in AnalystContextPack.model_fields
+
+    def test_there_is_a_default_taxonomy_to_fall_back_on(self):
+        """An engagement that has not named a template still needs a bank.
+
+        Resolving an engagement's own template name into a section list is a
+        separate, still-open piece of work; until it lands, a stated default is
+        better than each compile inventing its own.
+        """
+
+        from app.modules.compiler.agent.models import DEFAULT_TEMPLATE_SECTIONS
+
+        assert len(DEFAULT_TEMPLATE_SECTIONS) >= 5
+        assert len(set(DEFAULT_TEMPLATE_SECTIONS)) == len(DEFAULT_TEMPLATE_SECTIONS)
+
+    def test_the_prompt_names_the_sections_and_closes_the_list(self):
+        from app.orchestration.anthropic_engines import _COMPILER_ANALYST_SYSTEM
+
+        prose = " ".join(_COMPILER_ANALYST_SYSTEM.lower().split())
+        assert "and so on" not in prose, "an open list is what produced the catch-all"
+        assert "only" in prose and "listed" in prose
+
+    def test_the_prompt_asks_for_spread_rather_than_one_full_bin(self):
+        from app.orchestration.anthropic_engines import _COMPILER_ANALYST_SYSTEM
+
+        prose = " ".join(_COMPILER_ANALYST_SYSTEM.lower().split())
+        assert "every section" in prose
+
+    @pytest.mark.asyncio
+    async def test_the_sections_reach_the_model_in_the_request(self):
+        """Naming them in the system prompt is not enough.
+
+        They vary per engagement and the system prompt is cached across all of
+        them, so a section list baked into the cached half would be the same
+        list for every client Elicta ever works with.
+        """
+
+        from app.modules.compiler.agent.models import (
+            AnalystContextPack,
+            BmadAnalystPassOutput,
+        )
+
+        client = _StubClient([BmadAnalystPassOutput(candidates=[])])
+        engines = anthropic_compiler_engines(client)
+
+        await engines.run_analyst(
+            "eng-1",
+            AnalystContextPack(
+                engagement_id="eng-1",
+                sector="Freight",
+                project_type="discovery",
+                documents=[],
+                template_sections=["Volumes", "Berth allocation"],
+            ),
+        )
+
+        sent = client.messages.calls[0]["messages"][0]["content"]
+        assert "Volumes" in sent
+        assert "Berth allocation" in sent, "the engagement's own sections must travel"
+
+    @pytest.mark.asyncio
+    async def test_an_engagement_with_no_sections_still_gets_a_closed_list(self):
+        from app.modules.compiler.agent.models import (
+            DEFAULT_TEMPLATE_SECTIONS,
+            AnalystContextPack,
+            BmadAnalystPassOutput,
+        )
+
+        client = _StubClient([BmadAnalystPassOutput(candidates=[])])
+        engines = anthropic_compiler_engines(client)
+
+        await engines.run_analyst(
+            "eng-1",
+            AnalystContextPack(
+                engagement_id="eng-1", sector="Freight", project_type="discovery", documents=[]
+            ),
+        )
+
+        sent = client.messages.calls[0]["messages"][0]["content"]
+        for section in DEFAULT_TEMPLATE_SECTIONS:
+            assert section in sent

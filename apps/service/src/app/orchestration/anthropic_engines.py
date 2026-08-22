@@ -48,6 +48,7 @@ from anthropic import (
 from pydantic import BaseModel, Field
 
 from app.modules.compiler.agent.models import (
+    DEFAULT_TEMPLATE_SECTIONS,
     AnalystBatchResult,
     BmadAnalystPassOutput,
     BmadCandidateDraft,
@@ -72,8 +73,10 @@ from .engines import (
     STAGE_CLASSIFY,
     STAGE_CLEAN,
     STAGE_CONVERSE,
+    STAGE_DIARIZE,
     STAGE_EXTRACT,
     STAGE_FETCH_BATCH,
+    STAGE_RUN_ANALYST,
     STAGE_RUN_CHAIN,
     STAGE_STRUCTURE,
     STAGE_SUBMIT_BATCH,
@@ -289,6 +292,52 @@ transcript you were given and never invent one. Mark provenance "stated" only
 when the client actually said it; anything you concluded is "inferred". A
 reviewer's core need is telling those two apart, so do not blur them."""
 
+_COMPILER_ANALYST_SYSTEM = """You are the BMAD Analyst preparing for a requirements
+meeting that has not happened yet.
+
+You are given an engagement's reference documents and the sections of the
+requirements template the answers have to fill. Produce a bank of candidate
+questions an analyst could ask in the room — as many as the material genuinely
+supports, up to 300. Breadth matters: a thin bank leaves gaps nobody notices
+until the meeting is over.
+
+Work through every section in turn and draft for each one before going back to
+deepen any of them. A section the documents say little about is exactly where
+the meeting has most to find out, so it needs questions rather than fewer of
+them; a section carrying most of the bank means the others were skipped.
+
+Tag every candidate:
+
+- `template_section`: the section of the requirements template the answer
+  belongs in. Use **only** the sections listed in the request, spelled exactly
+  as they are given. Do not invent one, and do not add a general or
+  miscellaneous section to hold whatever did not fit — a section that holds
+  most of the bank is a bin rather than a section, and it makes the bank
+  unreviewable. If a question genuinely fits none of the listed sections, it is
+  not a question for this template; leave it out. Never file a candidate under
+  a meeting artifact such as an open-questions list or a decision log; those
+  are written after a meeting, and this is a bank for going into one.
+- `trigger_types`: the conversational conditions that should surface it — an
+  unquantified quantity, a vague adjective, a named system nobody briefed you
+  on, a contradiction with a document, a topic left uncovered.
+- `stub`: the same question at a glance, short enough to read without breaking
+  eye contact.
+- `phrasing`: the exact wording, ready to be read aloud.
+- `priority`: 1 is highest.
+
+Every candidate is a question. A statement of fact belongs in the documents it
+came from, not in a bank of things to ask.
+
+Ground each candidate in what the documents actually say, and set `source_doc`
+to the document id it came from where one applies. A document tagged
+`superseded` is background only: never draft a question that challenges anybody
+using it. A `hypothesis` document is our own assumption rather than the
+client's, so it yields questions that verify rather than questions that assert.
+
+Stay in problem space. Do not ask questions shaped like a solution, or like an
+implementation plan, before the template calls for them."""
+
+
 _DEBRIEF_CONVERSATION_SYSTEM = """You are Elicta, answering an analyst's questions about a \
 requirements meeting that has just finished.
 
@@ -336,6 +385,17 @@ def _retry_after(exc: Any) -> float | None:
         return None
 
 
+def _vendor_message(exc: AnthropicError) -> str:
+    """The provider's own sentence, when it sent one worth repeating."""
+
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+    return str(exc)
+
+
 def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableError | None:
     """A vendor exception as a neutral one, or `None` when the fault is ours.
 
@@ -347,12 +407,35 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
     """
 
     if isinstance(exc, RateLimitError):
+        retry_after = _retry_after(exc)
+        if retry_after is None:
+            # A 429 with no `retry-after` and no rate-limit headers is what
+            # Anthropic returns when the *model* is not one the credential's
+            # plan includes: the body says `rate_limit_error`, and the same
+            # request a second later is refused identically. Promising it
+            # "should succeed shortly" sends an operator away to wait for
+            # something that never happens — which is exactly what it did.
+            #
+            # `NOT_ENTITLED` rather than `RATE_LIMITED`, because that kind is
+            # documented as "a missing OAuth scope or a model the plan does not
+            # include" and this is the second of those. The wording said as
+            # much while the kind still said "throttled", so anything reading
+            # the kind — which is what a screen has to do — repeated the advice
+            # this sentence exists to rule out.
+            return UpstreamUnavailableError(
+                stage,
+                UpstreamFailure.NOT_ENTITLED,
+                "the model provider refused this request as rate limited but "
+                "gave no time to retry after. That usually means the model "
+                "chosen in Settings is one this credential may not be available "
+                "to use — check it there before waiting.",
+            )
         return UpstreamUnavailableError(
             stage,
             UpstreamFailure.RATE_LIMITED,
             "the model provider is rate limiting this deployment. "
             "The same request should succeed shortly — this is a limit, not a fault.",
-            retry_after=_retry_after(exc),
+            retry_after=retry_after,
         )
     # Before `APIConnectionError`, which it subclasses.
     if isinstance(exc, APITimeoutError):
@@ -378,7 +461,19 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
             UpstreamFailure.UNAVAILABLE,
             f"the model provider failed with a server error ({exc.status_code}).",
         )
-    if isinstance(exc, (AuthenticationError, PermissionDeniedError)):
+    if isinstance(exc, PermissionDeniedError):
+        # The credential is good and the request is not allowed — a missing
+        # OAuth scope, most often. The provider names the scopes it wanted, and
+        # that sentence is the only thing here that tells an operator what to
+        # change, so it is carried through verbatim rather than replaced with
+        # "re-enter the credential", which cannot help and was what this said.
+        return UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.NOT_ENTITLED,
+            "the model provider accepted the credential and refused this "
+            f"request: {_vendor_message(exc)}",
+        )
+    if isinstance(exc, AuthenticationError):
         return UpstreamUnavailableError(
             stage,
             UpstreamFailure.CREDENTIAL_REJECTED,
@@ -534,10 +629,17 @@ def anthropic_debrief_engines(
 
 
 async def _no_diarizer(*_args: Any, **_kwargs: Any) -> Any:
-    raise RuntimeError(
-        "diarization is a speech-vendor seam, not a model call — supply "
-        "`diarize` to anthropic_debrief_engines() from the configured ASR "
-        "vendor (architecture §3.3, ADR-011)."
+    """The same refusal as any other unset seam, and typed like one.
+
+    This raised a bare `RuntimeError` for a condition that is neither a bug nor
+    a surprise: diarization is a speech-vendor seam, and no speech vendor is
+    wired. Anything asking why a run stopped then had to tell this apart from a
+    genuine crash by reading its prose, which is how the operator's screen came
+    to show the words "supply `diarize` to anthropic_debrief_engines()".
+    """
+
+    raise EngineNotConfiguredError(
+        STAGE_DIARIZE, "a speech vendor to tell the voices apart"
     )
 
 
@@ -614,12 +716,66 @@ def anthropic_compiler_engines(
             ]
         )
 
-    @_upstream_aware(STAGE_SUBMIT_BATCH)
-    async def submit_batch(engagement_id: str, context_pack: Any) -> str:
+    def _analyst_prompt(context_pack: Any) -> str:
+        """The one place the Analyst request is written.
+
+        Both routes to the same pass read this. Written twice they would drift,
+        and a bank drafted by the fallback would quietly stop matching one
+        drafted by the batch — the kind of difference nobody notices until two
+        engagements disagree for no reason anyone can find.
+        """
+
         documents = "\n\n".join(
             f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
             for d in getattr(context_pack, "documents", [])
         )
+        # In the request rather than the system prompt: the system prompt is
+        # cached across every engagement, and these vary per engagement.
+        sections = list(getattr(context_pack, "template_sections", None) or ())
+        if not sections:
+            sections = list(DEFAULT_TEMPLATE_SECTIONS)
+        listed = "\n".join(f"- {section}" for section in sections)
+        return (
+            f"Sector: {context_pack.sector}\n"
+            f"Project type: {context_pack.project_type}\n\n"
+            f"Template sections — file every candidate under exactly one of "
+            f"these, and cover all of them:\n{listed}\n\n"
+            f"Documents:\n\n{documents}"
+        )
+
+    @_upstream_aware(STAGE_RUN_ANALYST)
+    async def run_analyst(engagement_id: str, context_pack: Any) -> list[AnalystBatchResult]:
+        """The Analyst pass as an ordinary request, for a credential the Batch API refuses.
+
+        The batch is the right default: it is cheaper, and §3.10 budgets
+        minutes for work nobody is waiting on. It is not the only way to ask
+        the question, and a token with no batch scope could otherwise never
+        produce a bank at all — which is what happened.
+
+        Returns the same shape a collected batch does, under the same
+        `custom_id` convention, so the collection that enforces the 150-300
+        candidate contract is shared rather than reimplemented. That contract
+        is also why this is not free: a hundred and fifty drafted questions is
+        a large answer to ask for in one request.
+        """
+
+        # Schema-enforced from the pass's own model rather than the
+        # hand-written batch schema beside it: this route parses its answer
+        # immediately, so the model that has to hold is the one the collection
+        # will read.
+        response = await client.messages.parse(
+            model=model,
+            max_tokens=MAX_TOKENS,
+            system=_cached_system(_COMPILER_ANALYST_SYSTEM),
+            messages=[{"role": "user", "content": _analyst_prompt(context_pack)}],
+            output_format=BmadAnalystPassOutput,
+        )
+        return [
+            AnalystBatchResult(custom_id=engagement_id, output=response.parsed_output)
+        ]
+
+    @_upstream_aware(STAGE_SUBMIT_BATCH)
+    async def submit_batch(engagement_id: str, context_pack: Any) -> str:
         batch = await client.messages.batches.create(
             requests=[
                 {
@@ -637,15 +793,11 @@ def anthropic_compiler_engines(
                                 "schema": _BANK_SCHEMA,
                             }
                         },
-                        "system": _ANALYST_SYSTEM,
+                        "system": _COMPILER_ANALYST_SYSTEM,
                         "messages": [
                             {
                                 "role": "user",
-                                "content": (
-                                    f"Sector: {context_pack.sector}\n"
-                                    f"Project type: {context_pack.project_type}\n\n"
-                                    f"Documents:\n\n{documents}"
-                                ),
+                                "content": _analyst_prompt(context_pack),
                             }
                         ],
                     },
@@ -710,6 +862,7 @@ def anthropic_compiler_engines(
     return CompilerEngines(
         name=model, extract=extract, structure=structure,
         submit_batch=submit_batch, fetch_batch=fetch_batch,
+        run_analyst=run_analyst,
     )
 
 

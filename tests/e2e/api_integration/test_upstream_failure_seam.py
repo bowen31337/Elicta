@@ -25,9 +25,11 @@ from anthropic import (
     BadRequestError,
     InternalServerError,
     OverloadedError,
+    PermissionDeniedError,
     RateLimitError,
 )
 from app.composition import Backend, build_app
+from app.orchestration.engines import UpstreamFailure
 from app.orchestration.anthropic_engines import anthropic_debrief_engines
 from fastapi.testclient import TestClient
 
@@ -103,11 +105,38 @@ def _ask(client: TestClient) -> httpx.Response:
 
 
 def test_a_rate_limit_is_reported_as_a_rate_limit() -> None:
-    response = _ask(_client_raising(_status_error(RateLimitError, 429, "rate limited")))
+    """A throttle that says when to come back. The provider sent a number, so
+    there really is something to come back after, and 429 is the honest answer."""
+
+    response = _ask(
+        _client_raising(
+            _status_error(RateLimitError, 429, "rate limited", **{"retry-after": "30"})
+        )
+    )
 
     assert response.status_code == 429, response.text
     detail = response.json()["detail"].lower()
     assert "rate" in detail, f"the answer does not name the cause: {detail!r}"
+
+
+def test_a_429_with_no_retry_hint_is_not_answered_as_a_retryable_thing() -> None:
+    """The same status code, and not the same situation.
+
+    Anthropic answers 429 with no `retry-after` when the *model* is outside the
+    credential's plan, and the identical request a second later is refused
+    identically. Answering 429 invites a retry that cannot work — it told a
+    real operator to wait out a problem that was never going to clear, and the
+    compile they were watching failed four times.
+
+    503 says "not now, and not your fault" without promising a retry helps.
+    """
+
+    response = _ask(_client_raising(_status_error(RateLimitError, 429, "rate limited")))
+
+    assert response.status_code == 503, response.text
+    assert "retry-after" not in response.headers
+    detail = response.json()["detail"].lower()
+    assert "settings" in detail, f"the answer does not name the fix: {detail!r}"
 
 
 def test_a_rate_limit_passes_on_how_long_to_wait_when_the_provider_says() -> None:
@@ -180,3 +209,78 @@ def test_a_refused_turn_leaves_no_assistant_turn_behind() -> None:
     reopened = client.post(f"/api/meetings/{meeting_id}/debrief/start")
     assert reopened.status_code == 201, reopened.text
     assert reopened.json()["history"] == []
+
+
+# --------------------------------------------------------------------------
+# A refusal that neither waiting nor re-typing the credential can fix.
+#
+# A working OAuth token was reported to an operator as "rate limited — the
+# same request should succeed shortly" and as "the provider rejected the
+# credential. Re-enter it on the Settings screen". Neither was true: the model
+# was one the plan did not include, and the Batch API needed a scope the token
+# did not carry. Both remedies the product suggested were dead ends.
+# --------------------------------------------------------------------------
+
+
+def _scope_error() -> PermissionDeniedError:
+    return PermissionDeniedError(
+        "forbidden",
+        response=httpx.Response(403, request=_REQUEST),
+        body={
+            "type": "error",
+            "error": {
+                "type": "permission_error",
+                "message": (
+                    "OAuth token does not meet scope requirement "
+                    "any_of(user:batch, user:developer, workspace:developer, "
+                    "workspace:inference)"
+                ),
+            },
+        },
+    )
+
+
+def test_a_missing_scope_is_not_answered_as_a_rate_limit() -> None:
+    response = _ask(_client_raising(_scope_error()))
+
+    assert response.status_code != 429, "429 tells the operator to wait for ever"
+    assert response.headers.get("retry-after") is None
+    assert response.status_code == 503, response.text
+
+
+def test_a_missing_scope_answers_with_the_scope_it_wanted() -> None:
+    """The provider names the fix; the answer is worthless without it."""
+
+    response = _ask(_client_raising(_scope_error()))
+
+    assert "user:batch" in response.json()["detail"]
+
+
+def test_a_rate_limit_with_no_retry_hint_does_not_promise_it_will_pass() -> None:
+    """What a model outside the plan returns: 429, and no `retry-after`.
+
+    Answering "should succeed shortly" sent an operator away to wait for
+    something that never happened — the same request is refused identically a
+    second later, and for ever.
+    """
+
+    response = _ask(_client_raising(_status_error(RateLimitError, 429, "rate limited")))
+
+    detail = response.json()["detail"]
+    assert "should succeed shortly" not in detail
+    assert "Settings" in detail, f"nothing tells the operator what to change: {detail!r}"
+
+
+def test_every_upstream_failure_has_an_http_answer() -> None:
+    """A new failure kind must not become a 500 by omission.
+
+    The mapping is a bare dict lookup inside an exception handler, so a member
+    with no entry raises `KeyError` *while handling the error* — the operator
+    gets "Internal Server Error" and the sentence naming the real cause is
+    lost. That is the failure this whole module exists to prevent.
+    """
+
+    from app.composition import upstream_status_for
+
+    for failure in UpstreamFailure:
+        assert upstream_status_for(failure) is not None, failure

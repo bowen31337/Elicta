@@ -22,6 +22,7 @@ the stage that needed a model, rather than silent success or a crash.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -34,21 +35,39 @@ from app.core.agent_permissions import (
     evaluate_filesystem_permission,
 )
 
+#: The phrase every "nothing is set up here" refusal carries.
+#:
+#: A stage record persists its failure as text, so by the time anything asks
+#: *why* a run stopped, the exception type is gone and a sentence is all that
+#: is left. This is the one word-for-word thing a reader may rely on — and it
+#: lives here, beside the message that contains it, so rewording the message
+#: without moving the marker is a test failure rather than a silent
+#: reclassification.
+UNCONFIGURED_MARKER = "and none is configured"
+
 
 class EngineNotConfiguredError(RuntimeError):
-    """Raised when a pipeline stage needs a model and none is configured.
+    """Raised when a pipeline stage needs something that is not set up.
 
     Names the stage and the setting that would enable it, so the persisted
-    `FAILED` record explains itself without a log dive.
+    `FAILED` record explains itself without a log dive. `detail` replaces the
+    model-shaped advice for a stage whose missing piece is not a model — the
+    diarizer wants a speech vendor, and telling its operator to set an
+    Anthropic key would send them somewhere useless.
     """
 
-    def __init__(self, stage: str) -> None:
+    def __init__(self, stage: str, detail: str | None = None) -> None:
         super().__init__(
-            f"{stage} needs an inference engine, and none is configured. "
-            "Set ANTHROPIC_API_KEY (or CLAUDE_CODE_USE_BEDROCK / "
-            "CLAUDE_CODE_USE_VERTEX) and supply a DebriefEngines / "
-            "CompilerEngines implementation backed by the Claude Agent SDK "
-            "(architecture ADR-012, §3.11)."
+            f"{stage} needs {detail or 'an inference engine'}, "
+            f"{UNCONFIGURED_MARKER}. "
+            + (
+                ""
+                if detail
+                else "Set ANTHROPIC_API_KEY (or CLAUDE_CODE_USE_BEDROCK / "
+                "CLAUDE_CODE_USE_VERTEX) and supply a DebriefEngines / "
+                "CompilerEngines implementation backed by the Claude Agent SDK "
+                "(architecture ADR-012, §3.11)."
+            )
         )
         self.stage = stage
 
@@ -72,6 +91,31 @@ class UpstreamFailure(str, Enum):
     CREDENTIAL_REJECTED = "credential_rejected"
     """The provider was reached and refused the configured credential."""
 
+    NOT_ENTITLED = "not_entitled"
+    """Reached, the credential is valid, and this request is not permitted.
+
+    A missing OAuth scope or a model the plan does not include. Distinct from
+    `RATE_LIMITED` because waiting achieves nothing, and from
+    `CREDENTIAL_REJECTED` because re-entering the credential achieves nothing
+    either — the two remedies those imply are both wrong here, and following
+    either one wastes an operator's afternoon."""
+
+
+def upstream_failure_in(text: str) -> UpstreamFailure | None:
+    """The failure kind a recorded stage error was raised with, if it was one.
+
+    The counterpart to the bracketed marker `UpstreamUnavailableError` writes.
+    Returns `None` for anything else — a bug in this codebase is not a provider
+    problem and must never be reported as one.
+    """
+
+    found = re.search(r"\[([a-z_]+)\]:", text)
+    if found is None:
+        return None
+    try:
+        return UpstreamFailure(found.group(1))
+    except ValueError:
+        return None
 
 class UpstreamUnavailableError(RuntimeError):
     """A stage reached its provider and did not get an answer.
@@ -95,7 +139,12 @@ class UpstreamUnavailableError(RuntimeError):
         *,
         retry_after: float | None = None,
     ) -> None:
-        super().__init__(f"{stage}: {detail}")
+        # The kind travels in the text, in brackets, because the text is all
+        # that survives. A stage persists its failure as `str(exc)`, so by the
+        # time a screen asks why a run stopped the exception is gone — and
+        # without this every provider problem reads the same, which sends an
+        # operator to the wrong remedy. `upstream_failure_in` reads it back.
+        super().__init__(f"{stage} [{failure.value}]: {detail}")
         self.stage = stage
         self.failure = failure
         self.detail = detail
@@ -118,6 +167,7 @@ STAGE_EXTRACT = "document claim extraction (§3.10)"
 STAGE_STRUCTURE = "claim structuring (§3.10)"
 STAGE_SUBMIT_BATCH = "BMAD analyst batch submission (§3.10)"
 STAGE_FETCH_BATCH = "BMAD analyst batch collection (§3.10)"
+STAGE_RUN_ANALYST = "BMAD analyst pass, direct (§3.10)"
 
 
 def inference_is_configured() -> bool:
@@ -197,6 +247,13 @@ class CompilerEngines:
     structure: Callable[..., Awaitable[Any]]
     submit_batch: Callable[..., Awaitable[Any]]
     fetch_batch: Callable[..., Awaitable[Any]]
+    #: The Analyst pass as an ordinary request rather than a batch job, for a
+    #: credential the Batch API will not accept. Optional because the batch is
+    #: the right default — it is cheaper and nobody is waiting on it — and this
+    #: costs more; it exists so that "cannot submit a batch" stops meaning
+    #: "cannot draft a bank at all". Returns the same `AnalystBatchResult`
+    #: shape a collected batch does, so everything downstream is shared.
+    run_analyst: Callable[..., Awaitable[Any]] | None = None
 
     @classmethod
     def unconfigured(cls) -> CompilerEngines:
