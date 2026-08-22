@@ -127,6 +127,44 @@ export function incompleteNotice(
   return `The write-up stopped while ${stage}.${because} Nothing below is missing on purpose.`;
 }
 
+/** Said when the screen has nothing on it, and the run never started. */
+const NEVER_RUN =
+  'No write-up has been produced for this meeting yet — one runs on its own once the recording has been transcribed.';
+
+/** Said when the run finished and still produced nothing. */
+const FINISHED_EMPTY = 'The write-up finished without producing any of these.';
+
+/**
+ * Why the screen is empty, when it is.
+ *
+ * An empty debrief means two things an operator acts on differently: no
+ * write-up has been made yet, or one was made and found nothing. Both rendered
+ * as two bare headings, which reads as the second — the same mistake the
+ * recording review used to make when it reported an agreement it had never
+ * measured.
+ *
+ * Three cases stay silent. A screen with artifacts on it explains itself; a
+ * stopped run is already covered by `incompleteNotice`, which ends "Nothing
+ * below is missing on purpose"; and a run still in flight has not earned
+ * either sentence yet.
+ */
+export function emptyNotice(
+  hasArtifacts: boolean,
+  incomplete: string | null,
+  settled: boolean,
+  completionStatus: ResourceStatus,
+  completion: WireCompletion | null,
+): string | null {
+  if (hasArtifacts || incomplete !== null || !settled) return null;
+  if (completionStatus === 'missing') return NEVER_RUN;
+  return completion?.complete === true ? FINISHED_EMPTY : null;
+}
+
+/** A resource that has answered, either with a body or with a 404. */
+function settledStatus(status: ResourceStatus): boolean {
+  return status === 'ready' || status === 'missing';
+}
+
 export interface DebriefData extends DebriefScreenProps {
   readonly status: ResourceStatus;
   readonly error: string | null;
@@ -151,38 +189,60 @@ export function useDebrief(): DebriefData {
     id === null ? null : `/api/meetings/${encodeURIComponent(id)}/debrief/completion`,
   );
 
+  const incomplete = incompleteNotice(completion.data);
+
+  const openQuestions = useMemo(
+    (): readonly Claim[] =>
+      (questions.data ?? []).map((question) => ({
+        id: `question-${question.impact_rank}`,
+        text: question.text,
+        provenance: provenanceOf(question.provenance),
+        citation: citationOf(question.citations),
+      })),
+    [questions.data],
+  );
+  const decisions_ = useMemo(
+    (): readonly Claim[] =>
+      (decisions.data ?? []).map((decision, index) => ({
+        id: `decision-${index}`,
+        text: decision.text,
+        provenance: provenanceOf(decision.provenance),
+        citation: citationOf(decision.citations),
+      })),
+    [decisions.data],
+  );
+  const brief_ =
+    brief.data === null || brief.data === undefined
+      ? null
+      : {
+          id: 'brief',
+          text: brief.data.body,
+          provenance: provenanceOf(brief.data.provenance),
+          citation: citationOf(brief.data.citations),
+        };
+
+  // Every read has to have answered before the screen may call itself empty:
+  // a notice that flashes while the artifacts are still arriving is one people
+  // learn to read past.
+  const settled =
+    settledStatus(questions.status) &&
+    settledStatus(decisions.status) &&
+    settledStatus(brief.status) &&
+    settledStatus(completion.status);
+
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
-    incomplete: incompleteNotice(completion.data),
-    openQuestions: useMemo(
-      (): readonly Claim[] =>
-        (questions.data ?? []).map((question) => ({
-          id: `question-${question.impact_rank}`,
-          text: question.text,
-          provenance: provenanceOf(question.provenance),
-          citation: citationOf(question.citations),
-        })),
-      [questions.data],
+    incomplete,
+    empty: emptyNotice(
+      brief_ !== null || openQuestions.length > 0 || decisions_.length > 0,
+      incomplete,
+      settled,
+      completion.status,
+      completion.data,
     ),
-    decisions: useMemo(
-      (): readonly Claim[] =>
-        (decisions.data ?? []).map((decision, index) => ({
-          id: `decision-${index}`,
-          text: decision.text,
-          provenance: provenanceOf(decision.provenance),
-          citation: citationOf(decision.citations),
-        })),
-      [decisions.data],
-    ),
-    brief:
-      brief.data === null || brief.data === undefined
-        ? null
-        : {
-            id: 'brief',
-            text: brief.data.body,
-            provenance: provenanceOf(brief.data.provenance),
-            citation: citationOf(brief.data.citations),
-          },
+    openQuestions,
+    decisions: decisions_,
+    brief: brief_,
     // All three 404 for a meeting that has not been debriefed, and that is
     // content: the screen renders with nothing in it rather than claiming a
     // fault. Only the selection reads decide whether it can render at all.

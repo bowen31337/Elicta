@@ -26,6 +26,8 @@ export interface DebriefScreenProps {
   readonly brief: Claim | null;
   /** Why the write-up is short, when it is. See `incompleteNotice`. */
   readonly incomplete?: string | null;
+  /** Why there is nothing here at all, when there is nothing. See `emptyNotice`. */
+  readonly empty?: string | null;
 }
 
 function ClaimRow({ claim }: { claim: Claim }) {
@@ -52,6 +54,7 @@ export function DebriefScreen({
   decisions,
   brief,
   incomplete = null,
+  empty = null,
 }: DebriefScreenProps) {
   return (
     <main className="screen" aria-labelledby="debrief-title">
@@ -71,6 +74,12 @@ export function DebriefScreen({
           {incomplete}
         </p>
       ) : null}
+
+      {/* Not a `status`: nothing has gone wrong, and a meeting whose write-up
+          is simply still to come would otherwise raise an alert on every
+          visit. The headings below stay, so it reads as "these are not filled
+          in yet" rather than "these came back empty". */}
+      {empty ? <p className="t-footnote hint">{empty}</p> : null}
 
       {brief ? (
         <section aria-labelledby="brief-title">
@@ -111,11 +120,13 @@ export function DebriefScreen({
 /**
  * The mounted screen, over the service.
  *
- * A meeting that has not been debriefed 404s on all three artifacts, and that
- * is content rather than failure — the screen renders with nothing in it. What
- * it must never do is render a claim without saying which kind it is, so the
- * provenance mapping fails toward `inferred`: an operator wrongly told "the
- * client said this" cannot un-hear it.
+ * A meeting that has not been debriefed 404s on all four routes behind this
+ * screen, and that is content rather than failure. It is not, however,
+ * self-explanatory: the screen used to render two bare headings, which reads
+ * as a meeting where nothing was decided. `emptyNotice` says which of the two
+ * it is. What the screen must never do is render a claim without saying which
+ * kind it is, so the provenance mapping fails toward `inferred`: an operator
+ * wrongly told "the client said this" cannot un-hear it.
  */
 export default function DebriefRoute() {
   const debrief = useDebrief();
@@ -138,6 +149,7 @@ export default function DebriefRoute() {
       decisions={debrief.decisions}
       brief={debrief.brief}
       incomplete={debrief.incomplete}
+      empty={debrief.empty}
     />
   );
 }

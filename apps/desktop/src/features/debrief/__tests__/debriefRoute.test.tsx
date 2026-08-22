@@ -277,6 +277,77 @@ describe('a debrief that could not finish', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('says why it is empty when no write-up has been run', async () => {
+    /**
+     * The four routes behind this screen 404 for a meeting nobody has
+     * debriefed, which is correct — and left the screen as two empty headings
+     * and nothing else. An operator cannot tell that from a meeting where
+     * nothing was decided, and the Recording screen one click away already
+     * says which of the two it is looking at.
+     */
+    stubService({ ...BASE });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByText(/no write-up has been produced/i)).toBeInTheDocument();
+  });
+
+  it('does not blame the operator for a write-up nothing asks them to start', async () => {
+    // It runs on its own once the recording is transcribed. Telling somebody
+    // to press a button that does not exist is worse than saying nothing.
+    stubService({ ...BASE });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByText(/once the recording has been transcribed/i)).toBeInTheDocument();
+  });
+
+  it('tells a write-up that finished empty from one never run', async () => {
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': {
+        session_id: 'meeting-7',
+        complete: true,
+        stages_completed: ['diarization'],
+        stopped_at: null,
+        reason: null,
+        cause: null,
+      },
+    });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByText(/finished without producing/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no write-up has been produced/i)).not.toBeInTheDocument();
+  });
+
+  it('says it once: a stopped run explains itself without a second notice', async () => {
+    // `incompleteNotice` already ends "Nothing below is missing on purpose."
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': STOPPED,
+    });
+    render(<DebriefRoute />);
+
+    await screen.findByRole('status');
+    expect(screen.queryByText(/no write-up has been produced/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/finished without producing/i)).not.toBeInTheDocument();
+  });
+
+  it('stays quiet about emptiness while the artifacts are still loading', async () => {
+    // A notice that flashes before the answer arrives trains people to ignore
+    // it. Nothing here resolves, so nothing may claim the screen is empty.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string) => {
+        const body = BASE[path];
+        if (body !== undefined) return { ok: true, status: 200, json: async () => body } as Response;
+        return new Promise<Response>(() => {});
+      }),
+    );
+    render(<DebriefRoute />);
+
+    await screen.findByText('Open questions');
+    expect(screen.queryByText(/no write-up has been produced/i)).not.toBeInTheDocument();
+  });
+
   it('names a stage it has no plain name for, rather than saying nothing', async () => {
     // A stage added to the pipeline later has no entry in the wording table.
     // Falling silent would hide the notice exactly when it is least expected.

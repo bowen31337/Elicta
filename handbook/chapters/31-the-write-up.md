@@ -81,6 +81,13 @@ never left looking like a meeting where little was decided. That sentence is
 written for you; the step's own record, which is written for whoever maintains
 the software, is deliberately kept off the screen.
 
+Before any run has happened at all, it says that too. A meeting whose write-up
+has not been made yet used to show two empty headings and nothing under them,
+which reads exactly like a meeting where nothing was agreed — and those are
+worth telling apart. The screen now says which of the two you are looking at,
+and that the write-up follows the recording on its own rather than waiting to
+be asked for.
+
 <!-- HANDBOOK-NAV -->
 
 ---
