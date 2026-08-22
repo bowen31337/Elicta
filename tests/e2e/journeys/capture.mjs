@@ -15,6 +15,12 @@
  * Usage:
  *   pnpm --filter elicta-desktop dev      # in another shell
  *   node tests/e2e/journeys/capture.mjs
+ *   node tests/e2e/journeys/capture.mjs settings-   # just these
+ *
+ * A trailing argument keeps only the screenshots whose name starts with it.
+ * Regenerating all of them to fix one is not free: every rewritten file is a
+ * diff a person has to read, and a chapter showing an unrelated screen gets
+ * asked for a re-read it does not need.
  */
 
 import { spawn } from 'node:child_process';
@@ -32,6 +38,16 @@ const CHROME =
 /** The panel ships in a 420x720 window; capturing at that size keeps the
  *  screenshots honest about how much actually fits on screen. */
 const PANEL = { width: 420, height: 720 };
+/**
+ * Settings is taller than any window it is read in, so its screenshots show
+ * the top and `stopAfter` decides where they end.
+ *
+ * A fixed height is what broke here: the box stayed 1000 while the screen
+ * grew credentials, storage, documents, speech, capture and consent, so the
+ * picture came to end partway down a card with a floating Save bar across it
+ * — which reads as a broken screen rather than a cropped one. A boundary
+ * named in words survives the next section being added; a number does not.
+ */
 const SETTINGS = { width: 480, height: 1000 };
 /** The review screens are read at desk width, not in the meeting panel. */
 const SCREEN = { width: 820, height: 1100 };
@@ -70,9 +86,12 @@ const SCENES = [
   { scene: 'capture-acoustic', name: 'capture-acoustic-warning', ...SCREEN },
   { scene: 'about-managed', name: 'about-managed', ...SCREEN },
   { scene: 'about-unmanaged', name: 'about-unmanaged', ...SCREEN },
-  { scene: 'settings-first-run', name: 'settings-first-run', ...SETTINGS },
-  { scene: 'settings-configured', name: 'settings-configured', ...SETTINGS },
-  { scene: 'settings-compatible', name: 'settings-compatible-endpoint', ...SETTINGS },
+  { scene: 'settings-first-run', name: 'settings-first-run', ...SETTINGS,
+    stopAfter: 'Where the data is kept' },
+  { scene: 'settings-configured', name: 'settings-configured', ...SETTINGS,
+    stopAfter: 'Where the data is kept' },
+  { scene: 'settings-compatible', name: 'settings-compatible-endpoint', ...SETTINGS,
+    stopAfter: 'Where the data is kept' },
   {
     scene: 'settings-configured',
     name: 'settings-speech-vendors',
@@ -153,6 +172,14 @@ class Cdp {
 }
 
 async function main() {
+  const only = process.argv.slice(2);
+  const wanted = only.length
+    ? SCENES.filter((entry) => only.some((prefix) => entry.name.startsWith(prefix)))
+    : SCENES;
+  if (!wanted.length) {
+    throw new Error(`no screenshot name starts with: ${only.join(', ')}`);
+  }
+
   await waitForApp();
   mkdirSync(OUT, { recursive: true });
 
@@ -166,7 +193,7 @@ async function main() {
   await cdp.send('Runtime.enable');
 
   let captured = 0;
-  for (const { scene, name, width, height, action } of SCENES) {
+  for (const { scene, name, width, height, action, stopAfter } of wanted) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width,
       height,
@@ -179,6 +206,54 @@ async function main() {
     if (action) {
       await cdp.send('Runtime.evaluate', { expression: action });
       await sleep(400);
+    }
+
+    if (stopAfter) {
+      // Measure where that section actually ends and re-size the window to
+      // it, so the cut lands in the gap between sections rather than through
+      // one. Falls back to the declared height when the section is not found
+      // — a renamed heading should leave the screenshot as it was, not
+      // silently produce a one-pixel image.
+      const { result } = await cdp.send('Runtime.evaluate', {
+        expression: `(() => {
+          const heading = [...document.querySelectorAll('h2')]
+            .find((node) => node.textContent.trim() === ${JSON.stringify(stopAfter)});
+          if (!heading) return 0;
+          const section = heading.closest('section') ?? heading.parentElement;
+          const end = section.getBoundingClientRect().bottom + window.scrollY + 18;
+
+          // A bottom-anchored sticky bar — Settings has one carrying Save —
+          // floats over the foot of whatever window it is given, so cutting
+          // at the section boundary puts it straight across the last card.
+          // Leaving its full footprint below the boundary is what makes the
+          // shot look like the screen rather than like a broken render.
+          // Anchored at the bottom is the test: a sticky *header* resolves
+          // \`bottom\` to 'auto' and must not be counted.
+          const overlay = [...document.querySelectorAll('body *')].reduce((tallest, node) => {
+            const style = getComputedStyle(node);
+            if (style.position !== 'sticky' && style.position !== 'fixed') return tallest;
+            const offset = parseFloat(style.bottom);
+            if (!Number.isFinite(offset)) return tallest;
+            const box = node.getBoundingClientRect();
+            return box.height > 0 ? Math.max(tallest, box.height + offset) : tallest;
+          }, 0);
+
+          return Math.ceil(end + overlay);
+        })()`,
+        returnByValue: true,
+      });
+      const measured = Number(result?.value) || 0;
+      if (measured > 0) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width,
+          height: measured,
+          deviceScaleFactor: 2,
+          mobile: false,
+        });
+        await sleep(350);
+      } else {
+        console.warn(`  ! ${name}: no section titled ${JSON.stringify(stopAfter)}; kept height ${height}`);
+      }
     }
 
     const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
