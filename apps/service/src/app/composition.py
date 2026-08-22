@@ -535,14 +535,34 @@ def _audited_compiler_engines(
 def _audited_debrief_engines(
     backend: Backend, engagement_id: str, engines: DebriefEngines
 ) -> DebriefEngines:
-    """The §7 debrief seams, audited. See `_audited_compiler_engines`."""
+    """The §7 debrief seams, audited. See `_audited_compiler_engines`.
+
+    `diarize` is attributed to whoever it actually calls, which is not
+    `engines.name`. That name is the inference model's, and five of these six
+    seams are model calls; the diarizer is a speech vendor's, passed through
+    `anthropic_debrief_engines` untouched. Auditing it under the set's name
+    had the egress log — the record of what left the machine and to whom —
+    saying a meeting's raw audio went to Anthropic. `_audited_record_engine`
+    resolves attribution per call for the same reason; here the seam itself
+    carries the answer, because unlike the record engines there is no
+    per-call id to resolve it from.
+
+    The reachability observer comes off it for the same reason: `_lane_status`
+    reports on the *model*, and a speech vendor answering is not evidence the
+    model is reachable.
+    """
 
     if not engines.is_configured:
         return engines
     seam = partial(_audit_seam, backend, engagement_id, name=engines.name, observe=True)
     return DebriefEngines(
         name=engines.name,
-        diarize=seam(engines.diarize),
+        diarize=_audit_seam(
+            backend,
+            engagement_id,
+            engines.diarize,
+            getattr(engines.diarize, "processor_name", engines.name),
+        ),
         clean=seam(engines.clean),
         translate=seam(engines.translate),
         classify=seam(engines.classify),
@@ -1673,9 +1693,13 @@ def build_app(
                     secret, base_url=inference.base_url, mode=mode
                 )
 
-        # The speech vendors have real probes now, chosen by whichever vendor
-        # the connector settings name. A custom vendor still has none — we do
-        # not know its API — so it reports "configured, not verified".
+        # The speech vendors have real probes now, each key tested against its
+        # own vendor: the two record-path keys against Deepgram and AssemblyAI
+        # by which key they are, and only the live-path key against whichever
+        # vendor `connectors.live_vendor` names, because that setting is
+        # genuinely what it authenticates against. A custom vendor still has
+        # no probe — we do not know its API — so it reports "configured, not
+        # verified".
         if probe is None:
             vendor_probe = _vendor_probe_for(key, settings_store)
             if vendor_probe is not None:

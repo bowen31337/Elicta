@@ -213,6 +213,95 @@ async def test_the_gate_counts_the_engines_the_app_was_built_with() -> None:
 
 
 # --------------------------------------------------------------------------
+# The egress log is the record of what left the machine and to whom, so the
+# processor it names has to be the one that received the bytes.
+# --------------------------------------------------------------------------
+
+
+def _debrief_engines_with(diarize) -> object:
+    """A configured `DebriefEngines` whose only real seam is the diarizer."""
+
+    from app.orchestration.engines import DebriefEngines
+
+    async def unused(*_args, **_kwargs):
+        raise AssertionError("this seam is not called in this test")
+
+    return DebriefEngines(
+        name="claude-test-model",
+        diarize=diarize,
+        clean=unused,
+        translate=unused,
+        classify=unused,
+        run_chain=unused,
+        converse=unused,
+    )
+
+
+async def test_the_diarizer_is_audited_against_the_speech_vendor() -> None:
+    """The audio went to Deepgram, and the row has to say Deepgram.
+
+    Five of the six debrief seams are model calls and share the model's name;
+    the diarizer is a speech vendor's, passed through the Anthropic engines
+    untouched. Audited under the set's name, the egress log recorded that a
+    meeting's raw audio was sent to an Anthropic model — the one record that
+    exists to answer "what left the machine, and to whom", saying the wrong
+    recipient about the most sensitive thing this system handles.
+    """
+
+    from app.composition import _audited_debrief_engines
+    from app.orchestration.deepgram_engines import deepgram_diarizer
+
+    backend = Backend()
+    diarize = deepgram_diarizer(
+        lambda _session: b"",  # no audio held: this fails before any network
+        _NoSecrets(),
+    )
+
+    audited = _audited_debrief_engines(backend, "engagement-1", _debrief_engines_with(diarize))
+
+    with pytest.raises(Exception):
+        await audited.diarize(SESSION, AUDIO_REF)
+
+    assert backend.egress_rows, "the diarize call left no audit row"
+    assert [row.processor_name for row in backend.egress_rows] == ["deepgram"]
+    assert [row.engagement_id for row in backend.egress_rows] == ["engagement-1"]
+
+
+async def test_the_diarizer_does_not_speak_for_the_model_lane() -> None:
+    """A speech vendor answering is not evidence the model is reachable.
+
+    `_lane_status` reports on the debrief *engines*, and the panel's badge is
+    what an operator acts on. A successful Deepgram call clearing a recorded
+    model failure would send them to look at a lane that is still down.
+    """
+
+    from app.composition import _audited_debrief_engines
+    from app.orchestration.engines import UpstreamFailure
+
+    backend = Backend()
+    backend.lane_reachability.observe_failure(UpstreamFailure.RATE_LIMITED)
+
+    async def diarize(session_id: str, audio_ref: str) -> str:
+        return "turns"
+
+    diarize.processor_name = "deepgram"  # type: ignore[attr-defined]
+
+    audited = _audited_debrief_engines(backend, "engagement-1", _debrief_engines_with(diarize))
+    await audited.diarize(SESSION, AUDIO_REF)
+
+    assert not backend.lane_reachability.status(configured=True).model_reachable, (
+        "a speech vendor's success cleared the model lane's recorded failure"
+    )
+
+
+class _NoSecrets:
+    """A settings store with nothing in it, for a call that never gets that far."""
+
+    def get_secret(self, _key):
+        return None
+
+
+# --------------------------------------------------------------------------
 # Pipeline stages that are triggered by an HTTP request. Each of these was
 # implemented and unit-tested but never invoked; the tests below assert the
 # invocation, over the real API surface, rather than the stage in isolation.

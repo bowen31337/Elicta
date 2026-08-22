@@ -178,6 +178,12 @@ def deepgram_diarizer(
         payload = await _listen(read_audio, store, session_id, model, [], timeout, transport)
         return to_speaker_turns(payload, name)
 
+    # Who this call actually goes to. `DebriefEngines` carries one `name` for
+    # the whole set and it is the inference model's, which is right for the
+    # five stages that are model calls and wrong for this one — it had the
+    # egress log recording that a meeting's raw audio went to Anthropic. The
+    # audit wrapper reads this to attribute the row to the vendor instead.
+    diarize.processor_name = name  # type: ignore[attr-defined]
     return diarize
 
 
