@@ -241,3 +241,83 @@ async def test_no_credential_raises_before_any_request() -> None:
         await engine("session_123", "audio_ref_unused", [])
 
     assert call_count[0] == 0, "transport was called when credential was missing"
+
+
+def test_consecutive_utterances_by_one_speaker_become_one_turn() -> None:
+    """A `SpeakerTurn` is a continuous stretch attributed to one speaker, so
+    two adjacent utterances from the same person are one turn, not two."""
+
+    from app.orchestration.deepgram_engines import to_speaker_turns
+
+    payload = {
+        "results": {
+            "channels": [{"alternatives": [{"transcript": "..."}]}],
+            "utterances": [
+                {"start": 0.0, "end": 2.0, "speaker": 0, "transcript": "a"},
+                {"start": 2.0, "end": 4.0, "speaker": 0, "transcript": "b"},
+                {"start": 4.0, "end": 6.0, "speaker": 1, "transcript": "c"},
+            ],
+        }
+    }
+
+    output = to_speaker_turns(payload, "deepgram")
+
+    assert output.engine == "deepgram"
+    assert [(t.start_seconds, t.end_seconds, t.speaker_tag) for t in output.turns] == [
+        (0.0, 4.0, "0"),
+        (4.0, 6.0, "1"),
+    ]
+
+
+def test_a_speaker_returning_later_starts_a_new_turn() -> None:
+    """Merging by speaker alone would collapse a conversation into two turns."""
+
+    from app.orchestration.deepgram_engines import to_speaker_turns
+
+    payload = {
+        "results": {
+            "channels": [{"alternatives": [{"transcript": "..."}]}],
+            "utterances": [
+                {"start": 0.0, "end": 1.0, "speaker": 0, "transcript": "a"},
+                {"start": 1.0, "end": 2.0, "speaker": 1, "transcript": "b"},
+                {"start": 2.0, "end": 3.0, "speaker": 0, "transcript": "c"},
+            ],
+        }
+    }
+
+    output = to_speaker_turns(payload, "deepgram")
+
+    assert [t.speaker_tag for t in output.turns] == ["0", "1", "0"]
+
+
+@pytest.mark.asyncio
+async def test_deepgram_diarizer_returns_merged_turns_from_the_mocked_response() -> None:
+    """End-to-end: `deepgram_diarizer` is actually wired to `to_speaker_turns`,
+    not just a same-shaped copy tested by nothing."""
+
+    from app.orchestration.deepgram_engines import deepgram_diarizer
+
+    def mock_read_audio(session_id: str) -> bytes:
+        return b"mock audio data"
+
+    class MockStore:
+        def get_secret(self, key):
+            from app.modules.settings.models import SecretValue
+            return SecretValue("test_key")
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json=RESPONSE)
+    )
+
+    diarize = deepgram_diarizer(
+        mock_read_audio,
+        MockStore(),
+        transport=transport,
+    )
+    output = await diarize("session_123", "audio_ref_unused")
+
+    assert output.engine == "deepgram"
+    assert [(t.start_seconds, t.end_seconds, t.speaker_tag) for t in output.turns] == [
+        (0.0, 3.84, "0"),
+        (3.9, 6.2, "1"),
+    ]
