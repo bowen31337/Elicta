@@ -16,20 +16,29 @@ out of sync with.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
 
-from app.composition import Backend, attach_state_store, build_app
+from app.composition import (
+    Backend,
+    attach_state_store,
+    build_app,
+    build_bank_collector,
+)
 from app.module_loader import MountedRouter, load_modules
+from app.modules.settings.models import SecretKey
 from app.modules.settings.sqlite_store import SqliteSettingsStore
 from app.modules.settings.store import SettingsStore
 from app.orchestration.anthropic_engines import engines_from_settings
+from app.orchestration.bank_collector import DEFAULT_INTERVAL_SECONDS
 from app.persistence import open_state_store
+from app.persistence.store import redact_database_url, resolve_database_url
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,8 +90,14 @@ def create_app(
     # attaching storage underneath them would silently share state between
     # tests that each expect to start empty.
     if backend is None:
-        backend = attach_state_store(Backend(), open_state_store())
-        logger.info("startup: engagement state is durable")
+        # Which database, decided the same way every other setting is: a URL
+        # saved on the Settings screen wins, then `DATABASE_URL`, then the
+        # SQLite file. Read before the store opens, because this chooses which
+        # store to open.
+        configured = store.get_secret(SecretKey.STATE_DATABASE_URL)
+        database_url = resolve_database_url(configured.reveal() if configured else None)
+        backend = attach_state_store(Backend(), open_state_store(database_url))
+        logger.info("startup: state is durable in %s", redact_database_url(database_url))
 
     app = build_app(
         backend,
@@ -114,7 +129,33 @@ def create_app(
             len(mounted) + len(api_routes),
             len(api_routes),
         )
-        yield
+
+        # The Analyst pass is submitted as a batch and finishes minutes later.
+        # Without something going back for it, `POST /bank/compile` answers 202,
+        # every stage reports success and the question bank stays empty for
+        # ever. This is the something. It belongs to the process rather than to
+        # `build_app`, so a `TestClient` in the suites never starts a loop that
+        # polls a provider nobody asked it to.
+        collector = build_bank_collector(backend, compiler_engines)
+
+        async def collect_forever() -> None:
+            await collector.run(
+                interval=DEFAULT_INTERVAL_SECONDS,
+                sleep=asyncio.sleep,
+                keep_going=lambda: True,
+            )
+
+        sweeper = asyncio.create_task(collect_forever(), name="bank-collector")
+        logger.info(
+            "startup: collecting analyst batches every %ss",
+            int(DEFAULT_INTERVAL_SECONDS),
+        )
+        try:
+            yield
+        finally:
+            sweeper.cancel()
+            with suppress(asyncio.CancelledError):
+                await sweeper
 
     app.router.lifespan_context = lifespan
     return app

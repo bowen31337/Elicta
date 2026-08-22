@@ -214,3 +214,24 @@ def test_a_stored_value_wins_over_the_environment(
     store.set_secret(SecretKey.ANTHROPIC_API_KEY, REAL_KEY)
 
     assert store.get_secret(SecretKey.ANTHROPIC_API_KEY).reveal() == REAL_KEY
+
+
+def test_the_document_source_survives_a_restart(tmp_path):
+    """The whole point of the durable store: a connector configured once stays
+    configured. A section the SQLite store forgets to persist looks identical
+    to one nobody filled in."""
+    from app.modules.settings.models import DocumentSourceSettings, SecretKey
+    from app.modules.settings.sqlite_store import SqliteSettingsStore
+
+    path = tmp_path / "settings.db"
+    first = SqliteSettingsStore(path, read_environment=False)
+    first.write_documents(DocumentSourceSettings(tenant_id="t-1", client_id="c-1"))
+    first.set_secret(SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET, "shhh")
+
+    reopened = SqliteSettingsStore(path, read_environment=False)
+
+    assert reopened.read().documents.tenant_id == "t-1"
+    assert reopened.read().documents.client_id == "c-1"
+    secret = reopened.get_secret(SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET)
+    assert secret is not None
+    assert secret.reveal() == "shhh"

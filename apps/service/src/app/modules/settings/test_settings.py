@@ -490,3 +490,272 @@ class TestManagedSecretStore:
         reopened = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
         secret = reopened.get_secret(SecretKey.ANTHROPIC_API_KEY)
         assert secret is not None and secret.reveal() == "sk-ant-secret"
+
+
+class TestTheDocumentSourceConnector:
+    """Where a linked SharePoint or OneDrive document is read from.
+
+    The connector is useless without somewhere to put the tenant, the app
+    registration and its secret, and the convention here is that a credential
+    lives in the settings store rather than only in the environment — so a key
+    entered in the UI takes effect without a restart.
+    """
+
+    def test_the_client_secret_is_one_of_the_secrets_an_operator_can_set(self):
+        from app.modules.settings.models import SecretKey
+
+        assert SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET.value == (
+            "microsoft_graph_client_secret"
+        )
+
+    def test_the_tenant_and_client_id_are_not_secrets(self):
+        from app.modules.settings.models import DocumentSourceSettings
+
+        settings = DocumentSourceSettings(tenant_id="t-1", client_id="c-1")
+
+        assert settings.tenant_id == "t-1"
+        assert settings.client_id == "c-1"
+
+    def test_they_default_to_unconfigured_rather_than_to_a_guess(self):
+        from app.modules.settings.models import DocumentSourceSettings
+
+        settings = DocumentSourceSettings()
+
+        assert settings.tenant_id is None
+        assert settings.client_id is None
+
+    def test_the_section_round_trips_through_the_store(self):
+        from app.modules.settings.models import DocumentSourceSettings
+        from app.modules.settings.store import InMemorySettingsStore
+
+        store = InMemorySettingsStore(read_environment=False)
+        store.write_documents(DocumentSourceSettings(tenant_id="t-1", client_id="c-1"))
+
+        assert store.read().documents.tenant_id == "t-1"
+        assert store.read().documents.client_id == "c-1"
+
+    def test_the_client_secret_round_trips_and_reads_back_as_a_hint_only(self):
+        from app.modules.settings.models import SecretKey
+        from app.modules.settings.store import InMemorySettingsStore
+
+        store = InMemorySettingsStore(read_environment=False)
+        store.set_secret(SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET, "super-secret-value")
+
+        status = {s.key: s for s in store.read().secrets}[
+            SecretKey.MICROSOFT_GRAPH_CLIENT_SECRET
+        ]
+        assert status.configured is True
+        assert status.hint == "alue"
+        assert "super-secret-value" not in store.read().model_dump_json()
+
+    async def test_an_update_request_can_carry_the_section(self):
+        from app.modules.settings.models import (
+            DocumentSourceSettings,
+            SettingsUpdateRequest,
+        )
+        from app.modules.settings.service import apply_settings_update
+        from app.modules.settings.store import InMemorySettingsStore
+
+        store = InMemorySettingsStore(read_environment=False)
+        await apply_settings_update(
+            store,
+            SettingsUpdateRequest(
+                documents=DocumentSourceSettings(tenant_id="t-9", client_id="c-9")
+            ),
+        )
+
+        assert store.read().documents.tenant_id == "t-9"
+
+
+class TestTheHeadlessFallbackForTheConnector:
+    """A deployment with no operator at a screen still has to be configurable.
+
+    The convention here is that the environment is a fallback a UI-set value
+    overrides — so the tenant and client id need one too, not just the secret.
+    Documenting a variable nothing reads is how a runbook starts lying.
+    """
+
+    def test_the_tenant_and_client_id_come_from_the_environment_when_unset(
+        self, monkeypatch
+    ):
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ELICTA_GRAPH_TENANT_ID", "tenant-from-env")
+        monkeypatch.setenv("ELICTA_GRAPH_CLIENT_ID", "client-from-env")
+
+        documents = InMemorySettingsStore().read().documents
+
+        assert documents.tenant_id == "tenant-from-env"
+        assert documents.client_id == "client-from-env"
+
+    def test_a_value_set_in_the_ui_wins_over_the_environment(self, monkeypatch):
+        from app.modules.settings.models import DocumentSourceSettings
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ELICTA_GRAPH_TENANT_ID", "tenant-from-env")
+        store = InMemorySettingsStore()
+        store.write_documents(DocumentSourceSettings(tenant_id="tenant-from-ui"))
+
+        assert store.read().documents.tenant_id == "tenant-from-ui"
+
+    def test_the_environment_is_ignored_when_the_store_is_told_to(self, monkeypatch):
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ELICTA_GRAPH_TENANT_ID", "tenant-from-env")
+
+        assert InMemorySettingsStore(read_environment=False).read().documents.tenant_id is None
+
+
+class TestTheModelEnvironmentFallback:
+    """`ELICTA_INFERENCE_MODEL` has to actually choose the model.
+
+    It was consulted only when the settings carried no model — and the field
+    defaults to `claude-opus-5`, so it never did. An operator whose credential
+    cannot reach that model set the documented variable, watched every call
+    return 429, and had no way to tell that the variable was being ignored.
+
+    Same contract as every other environment value here: it fills a setting
+    nobody has chosen, and anything chosen in the UI wins.
+    """
+
+    def test_an_unwritten_model_comes_from_the_environment(self, monkeypatch):
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ELICTA_INFERENCE_MODEL", "claude-haiku-4-5-20251001")
+
+        assert InMemorySettingsStore().read().inference.model == (
+            "claude-haiku-4-5-20251001"
+        )
+
+    def test_a_model_chosen_in_the_ui_wins(self, monkeypatch):
+        from app.modules.settings.models import InferenceSettings
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ELICTA_INFERENCE_MODEL", "claude-haiku-4-5-20251001")
+        store = InMemorySettingsStore()
+        store.write_inference(InferenceSettings(model="claude-opus-5"))
+
+        assert store.read().inference.model == "claude-opus-5"
+
+    def test_with_no_variable_the_built_in_default_still_applies(self, monkeypatch):
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("ELICTA_INFERENCE_MODEL", raising=False)
+
+        assert InMemorySettingsStore().read().inference.model == "claude-opus-5"
+
+    def test_the_durable_store_reads_it_too(self, monkeypatch, tmp_path):
+        from app.modules.settings.sqlite_store import SqliteSettingsStore
+
+        monkeypatch.setenv("ELICTA_INFERENCE_MODEL", "claude-haiku-4-5-20251001")
+
+        assert SqliteSettingsStore(tmp_path / "s.db").read().inference.model == (
+            "claude-haiku-4-5-20251001"
+        )
+
+
+class TestTheAuthModeFallback:
+    """A headless deployment has to be able to use the credential it was given.
+
+    `.env.example` says either credential works and "the Settings screen
+    selects which is live" — which leaves a service with no operator at a
+    screen unable to select anything. `auth_mode` defaults to `api_key`, so a
+    deployment given only `ANTHROPIC_AUTH_TOKEN` fails closed with "no api key
+    configured for anthropic" while holding a perfectly good token.
+
+    A default that contradicts the only credential present is not a choice.
+    """
+
+    def test_only_an_oauth_token_configured_selects_oauth(self, monkeypatch):
+        from app.modules.settings.models import AuthMode
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat01-whatever")
+
+        assert InMemorySettingsStore().read().inference.auth_mode is AuthMode.OAUTH_TOKEN
+
+    def test_an_api_key_keeps_the_default(self, monkeypatch):
+        from app.modules.settings.models import AuthMode
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-whatever")
+        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+
+        assert InMemorySettingsStore().read().inference.auth_mode is AuthMode.API_KEY
+
+    def test_both_configured_leaves_the_default_alone(self, monkeypatch):
+        """With both present there is a real choice to make, and it is not ours."""
+        from app.modules.settings.models import AuthMode
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api-whatever")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat01-whatever")
+
+        assert InMemorySettingsStore().read().inference.auth_mode is AuthMode.API_KEY
+
+    def test_a_mode_chosen_in_the_ui_wins(self, monkeypatch):
+        from app.modules.settings.models import AuthMode, InferenceSettings
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat01-whatever")
+        store = InMemorySettingsStore()
+        store.write_inference(InferenceSettings(auth_mode=AuthMode.API_KEY))
+
+        assert store.read().inference.auth_mode is AuthMode.API_KEY
+
+
+class TestWhereTheDataIsKept:
+    """SQLite by default; anything else is opted into from the Settings screen.
+
+    A PostgreSQL URL carries a password, so the URL itself is a secret and is
+    write-only like every other one. What comes back is the same URL with the
+    password removed — enough to see which server a deployment is pointed at,
+    and not enough to connect to it.
+    """
+
+    def test_the_url_is_one_of_the_secrets_an_operator_can_set(self):
+        from app.modules.settings.models import SecretKey
+
+        assert SecretKey.STATE_DATABASE_URL.value == "state_database_url"
+
+    def test_with_nothing_set_the_settings_say_sqlite(self, monkeypatch, tmp_path):
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        monkeypatch.setenv("ELICTA_STATE_DIR", str(tmp_path))
+
+        assert InMemorySettingsStore().read().storage.database.startswith("sqlite:///")
+
+    def test_a_configured_url_is_shown_back_without_its_password(self, monkeypatch):
+        from app.modules.settings.models import SecretKey
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        store = InMemorySettingsStore()
+        store.set_secret(
+            SecretKey.STATE_DATABASE_URL, "postgresql://elicta:hunter2@db.internal:5432/elicta"
+        )
+
+        shown = store.read().storage.database
+
+        assert "hunter2" not in shown
+        assert "db.internal" in shown
+
+    def test_the_raw_url_never_leaves_over_the_api(self, monkeypatch):
+        from app.modules.settings.models import SecretKey
+        from app.modules.settings.store import InMemorySettingsStore
+
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+        store = InMemorySettingsStore()
+        store.set_secret(
+            SecretKey.STATE_DATABASE_URL, "postgresql://elicta:hunter2@db.internal:5432/elicta"
+        )
+
+        assert "hunter2" not in store.read().model_dump_json()
+
+    def test_the_settings_say_a_restart_is_needed_rather_than_implying_otherwise(self):
+        from app.modules.settings.models import StorageSettings
+
+        assert StorageSettings.model_fields["applies_on_restart"].default is True

@@ -461,3 +461,173 @@ describe('reading the screen at a glance', () => {
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
   });
 });
+
+describe('the Microsoft 365 document connector', () => {
+  /**
+   * Reading a linked SharePoint or OneDrive document needs an app registration.
+   * Without somewhere to enter it, the only way to configure it is an
+   * environment variable — and journey 1 tells the operator to do it in
+   * Settings, which would be a screen that does not exist.
+   */
+  const WITH_DOCUMENTS: ServiceSettings = {
+    ...CONFIGURED,
+    documents: { tenant_id: null, client_id: null },
+    secrets: [
+      ...CONFIGURED.secrets,
+      { key: 'microsoft_graph_client_secret', configured: false, hint: null },
+    ],
+  } as ServiceSettings;
+
+  function documentsController(overrides: Partial<UseSettingsResult> = {}) {
+    return controller({ settings: WITH_DOCUMENTS, ...overrides });
+  }
+
+  it('offers the tenant and the app registration', () => {
+    render(<SettingsPanel controller={documentsController()} />);
+
+    expect(screen.getByLabelText(/directory \(tenant\) id/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/application \(client\) id/i)).toBeInTheDocument();
+  });
+
+  it('keeps the client secret write-only, like every other secret here', () => {
+    render(<SettingsPanel controller={documentsController()} />);
+
+    const field = screen.getByLabelText(/client secret/i) as HTMLInputElement;
+
+    expect(field.value).toBe('');
+    expect(field.type).toBe('password');
+  });
+
+  it('saves what was typed into the connector', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={documentsController({ save })} />);
+
+    await userEvent.type(screen.getByLabelText(/directory \(tenant\) id/i), 'tenant-1');
+    await userEvent.type(screen.getByLabelText(/application \(client\) id/i), 'client-1');
+    await userEvent.type(screen.getByLabelText(/client secret/i), 'shhh');
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const draft = save.mock.calls[0][0];
+    expect(draft.documents).toEqual({ tenant_id: 'tenant-1', client_id: 'client-1' });
+    expect(draft.secrets).toContainEqual({
+      key: 'microsoft_graph_client_secret',
+      value: 'shhh',
+    });
+  });
+
+  it('says plainly that uploading needs none of this', () => {
+    render(<SettingsPanel controller={documentsController()} />);
+
+    expect(screen.getByText(/dropp?ing a file|uploaded|upload/i)).toBeInTheDocument();
+  });
+});
+
+describe('where the data is kept', () => {
+  /**
+   * SQLite by default; anything else is opted into here. The URL carries a
+   * password, so it is a secret like the others and what comes back has the
+   * password removed.
+   */
+  const WITH_STORAGE: ServiceSettings = {
+    ...CONFIGURED,
+    storage: {
+      database: 'sqlite:////home/ubuntu/.elicta/state.db',
+      applies_on_restart: true,
+    },
+    secrets: [
+      ...CONFIGURED.secrets,
+      { key: 'state_database_url', configured: false, hint: null },
+    ],
+  } as ServiceSettings;
+
+  function storageController(overrides: Partial<UseSettingsResult> = {}) {
+    return controller({ settings: WITH_STORAGE, ...overrides });
+  }
+
+  it('says which database the data is in', () => {
+    render(<SettingsPanel controller={storageController()} />);
+
+    expect(screen.getByText(/sqlite:\/\/\/\/home\/ubuntu\/\.elicta\/state\.db/)).toBeInTheDocument();
+  });
+
+  it('keeps the connection URL write-only, because it carries a password', () => {
+    render(<SettingsPanel controller={storageController()} />);
+
+    const field = screen.getByLabelText(/database connection url/i) as HTMLInputElement;
+
+    expect(field.value).toBe('');
+    expect(field.type).toBe('password');
+  });
+
+  it('says a restart is needed rather than implying the move is immediate', () => {
+    render(<SettingsPanel controller={storageController()} />);
+
+    expect(screen.getByText(/restart/i)).toBeInTheDocument();
+  });
+
+  it('saves the url as a secret', async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={storageController({ save })} />);
+
+    await userEvent.type(
+      screen.getByLabelText(/database connection url/i),
+      'postgresql://elicta:pw@db.internal/elicta',
+    );
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].secrets).toContainEqual({
+      key: 'state_database_url',
+      value: 'postgresql://elicta:pw@db.internal/elicta',
+    });
+  });
+});
+
+describe('the storage badge', () => {
+  /**
+   * A badge is read before the words under it, so it must not assert something
+   * it does not know. With no storage reported, "External database" told every
+   * reader — and every documentation screenshot — that a default install keeps
+   * its data on a server somewhere. It does not.
+   */
+  function withStorage(database: string | undefined): UseSettingsResult {
+    const settings = {
+      ...CONFIGURED,
+      ...(database === undefined ? {} : { storage: { database, applies_on_restart: true } }),
+      secrets: [
+        ...CONFIGURED.secrets,
+        { key: 'state_database_url', configured: false, hint: null },
+      ],
+    } as ServiceSettings;
+    return controller({ settings });
+  }
+
+  it('says the data is on this machine when it is a local file', () => {
+    render(<SettingsPanel controller={withStorage('sqlite:////home/x/.elicta/state.db')} />);
+
+    expect(screen.getByText('On this machine')).toBeInTheDocument();
+  });
+
+  it('says external only when it really is external', () => {
+    render(<SettingsPanel controller={withStorage('postgresql://elicta@db/elicta')} />);
+
+    expect(screen.getByText('External database')).toBeInTheDocument();
+  });
+
+  it('falls back to a file on this machine, which is the default', () => {
+    // Not "unknown": a deployment that has not been pointed anywhere keeps its
+    // data in a local file, so that is what an unreported storage means. The
+    // badge saying "External database" told every reader the opposite.
+    render(<SettingsPanel controller={withStorage(undefined)} />);
+
+    expect(screen.getByText('On this machine')).toBeInTheDocument();
+    expect(screen.queryByText('External database')).not.toBeInTheDocument();
+  });
+
+  it('names the default in words rather than inventing a path for it', () => {
+    render(<SettingsPanel controller={withStorage(undefined)} />);
+
+    expect(screen.getByText(/a file on this machine/i)).toBeInTheDocument();
+  });
+});

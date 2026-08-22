@@ -41,6 +41,8 @@ class SecretKey(str, Enum):
     ANTHROPIC_OAUTH_TOKEN = "anthropic_oauth_token"
     ASR_VENDOR_API_KEY = "asr_vendor_api_key"
     CAPTURE_VENDOR_API_KEY = "capture_vendor_api_key"
+    MICROSOFT_GRAPH_CLIENT_SECRET = "microsoft_graph_client_secret"
+    STATE_DATABASE_URL = "state_database_url"
 
 
 class SecretValue:
@@ -348,6 +350,66 @@ class ConnectorSettings(BaseModel):
         return value
 
 
+class DocumentSourceSettings(BaseModel):
+    """Where a linked reference document is read from (FR-3.2).
+
+    An Entra ID app registration with application permissions, rather than a
+    pasted access token: a token expires within the hour, and a connector that
+    stops working over lunch is one nobody trusts. The secret half lives in the
+    secret store under `microsoft_graph_client_secret`; these two are
+    identifiers, not credentials, and are shown back to the operator so they
+    can confirm which tenant is wired up.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str | None = Field(
+        default=None,
+        description=(
+            "Entra ID directory (tenant) id the documents live in. Unset means "
+            "the connector is off and a linked document contributes nothing."
+        ),
+    )
+    client_id: str | None = Field(
+        default=None,
+        description=(
+            "Application (client) id of the registration Elicta reads as. It "
+            "needs Files.Read.All, and Sites.Read.All for team sites."
+        ),
+    )
+
+
+class StorageSettings(BaseModel):
+    """Where an engagement's memory is kept (PRD G4).
+
+    SQLite by default, because the desktop product ships to people with no
+    database server and should not need one. A deployment that wants PostgreSQL
+    opts in by saving a URL, which is a secret — it carries a password — so what
+    is shown back has the password removed and everything identifying the server
+    left in.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    database: str = Field(
+        default="",
+        description=(
+            "The database this deployment reads and writes, with any password "
+            "removed. Read-only: set it by saving the `state_database_url` "
+            "secret."
+        ),
+    )
+    applies_on_restart: bool = Field(
+        default=True,
+        description=(
+            "Whether a change here takes effect only after a restart. It does: "
+            "the collections are opened once at startup and bound into the "
+            "backend, so a save that claimed to move a live deployment would "
+            "be describing something that did not happen."
+        ),
+    )
+
+
 class ServiceSettings(BaseModel):
     """Everything an operator can administer, with no secret values in it."""
 
@@ -356,6 +418,8 @@ class ServiceSettings(BaseModel):
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
     vendors: VendorSettings = Field(default_factory=VendorSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
+    documents: DocumentSourceSettings = Field(default_factory=DocumentSourceSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
     secrets: list[SecretStatus] = Field(default_factory=list)
     durable: bool = Field(
         default=False,
@@ -395,6 +459,7 @@ class SettingsUpdateRequest(BaseModel):
     inference: InferenceSettings | None = None
     vendors: VendorSettings | None = None
     connectors: ConnectorSettings | None = None
+    documents: DocumentSourceSettings | None = None
     secrets: list[SecretUpdate] = Field(default_factory=list)
 
 

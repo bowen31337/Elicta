@@ -6,7 +6,9 @@ export type SecretKey =
   | 'anthropic_api_key'
   | 'anthropic_oauth_token'
   | 'asr_vendor_api_key'
-  | 'capture_vendor_api_key';
+  | 'capture_vendor_api_key'
+  | 'microsoft_graph_client_secret'
+  | 'state_database_url';
 
 /**
  * Which credential the service authenticates Claude calls with. Both are
@@ -62,10 +64,33 @@ export interface ConnectorSettings {
   readonly region: string | null;
 }
 
+/**
+ * The app registration a linked SharePoint or OneDrive document is read
+ * through. Identifiers, not credentials — the secret half is
+ * `microsoft_graph_client_secret`, and is write-only like every other secret
+ * here.
+ */
+export interface DocumentSourceSettings {
+  readonly tenant_id: string | null;
+  readonly client_id: string | null;
+}
+
+/**
+ * Where an engagement's memory is kept. `database` is read-only and already
+ * has any password stripped out of it; moving a deployment means saving the
+ * `state_database_url` secret, which is write-only like every other one.
+ */
+export interface StorageSettings {
+  readonly database: string;
+  readonly applies_on_restart: boolean;
+}
+
 export interface ServiceSettings {
   readonly inference: InferenceSettings;
   readonly vendors: { asr_base_url: string | null; capture_base_url: string | null };
   readonly connectors: ConnectorSettings;
+  readonly documents?: DocumentSourceSettings;
+  readonly storage?: StorageSettings;
   readonly secrets: readonly SecretStatus[];
   readonly durable: boolean;
 }
@@ -80,6 +105,7 @@ export interface SettingsDraft {
    * receives the stored one -- it only ever sees a four-character hint.
    */
   readonly connectors?: ConnectorSettings;
+  readonly documents?: DocumentSourceSettings;
   readonly secrets?: readonly { key: SecretKey; value: string }[];
 }
 

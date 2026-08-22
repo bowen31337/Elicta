@@ -25,6 +25,12 @@ const BASE: ServiceSettings = {
     disable_vendor_retention: true,
     region: 'eu',
   },
+  // A default install keeps everything in one file on the machine. Without
+  // this the screenshots showed a badge claiming otherwise.
+  storage: {
+    database: 'sqlite:////home/you/.elicta/state.db',
+    applies_on_restart: true,
+  },
   secrets: [
     { key: 'anthropic_api_key', configured: true, hint: 'x7q2' },
     { key: 'anthropic_oauth_token', configured: false, hint: null },

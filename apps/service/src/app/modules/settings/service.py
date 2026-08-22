@@ -33,6 +33,8 @@ async def apply_settings_update(
         store.write_vendors(payload.vendors)
     if payload.connectors is not None:
         store.write_connectors(payload.connectors)
+    if payload.documents is not None:
+        store.write_documents(payload.documents)
     for update in payload.secrets:
         store.set_secret(update.key, update.value)
 

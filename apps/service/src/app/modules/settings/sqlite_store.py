@@ -41,6 +41,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .models import (
     ConnectorSettings,
+    DocumentSourceSettings,
     InferenceSettings,
     SecretKey,
     SecretStatus,
@@ -214,6 +215,9 @@ class SqliteSettingsStore:
     def write_connectors(self, connectors: ConnectorSettings) -> None:
         self._write_json("connectors", connectors.model_dump(mode="json"))
 
+    def write_documents(self, documents: DocumentSourceSettings) -> None:
+        self._write_json("documents", documents.model_dump(mode="json"))
+
     # -- secrets -----------------------------------------------------------
 
     def set_secret(self, key: SecretKey, value: str) -> None:
@@ -263,9 +267,19 @@ class SqliteSettingsStore:
     # -- assembled view ----------------------------------------------------
 
     def read(self) -> ServiceSettings:
+        # Imported here for the same reason `_ENV_FALLBACK` is: `store` owns
+        # the environment-fallback contract, and importing it at module scope
+        # would make the two stores import each other.
+        from .store import (
+            _documents_with_environment,
+            _inference_with_environment,
+            _storage_view,
+        )
+
         inference = self._read_json("inference")
         vendors = self._read_json("vendors")
         connectors = self._read_json("connectors")
+        documents = self._read_json("documents")
 
         with self._connect() as connection:
             updated = connection.execute(
@@ -291,9 +305,20 @@ class SqliteSettingsStore:
             )
 
         return ServiceSettings(
-            inference=InferenceSettings(**inference) if inference else InferenceSettings(),
+            inference=_inference_with_environment(
+                InferenceSettings(**inference) if inference else InferenceSettings(),
+                self._read_environment,
+                # `None` from `_read_json` is the honest "nobody has saved this
+                # section", which the in-memory store has to track by hand.
+                written=inference is not None,
+            ),
             vendors=VendorSettings(**vendors) if vendors else VendorSettings(),
             connectors=ConnectorSettings(**connectors) if connectors else ConnectorSettings(),
+            storage=_storage_view(self.get_secret(SecretKey.STATE_DATABASE_URL)),
+            documents=_documents_with_environment(
+                DocumentSourceSettings(**documents) if documents else DocumentSourceSettings(),
+                self._read_environment,
+            ),
             secrets=statuses,
             durable=True,
             updated_at=datetime.fromisoformat(updated) if updated else None,

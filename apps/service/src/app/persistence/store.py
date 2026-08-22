@@ -29,8 +29,10 @@ import json
 import os
 import threading
 from collections.abc import Callable, Iterator, MutableMapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
 from sqlalchemy import Engine, create_engine
@@ -44,7 +46,7 @@ DEFAULT_STATE_DIR = Path.home() / ".elicta"
 DEFAULT_DB_NAME = "state.db"
 
 
-def default_database_url() -> str:
+def default_database_url() -> str:  # noqa: D401 - kept for callers that predate resolve
     """Where state lives when nothing says otherwise.
 
     `DATABASE_URL` wins, so a deployment can point at PostgreSQL without a
@@ -63,6 +65,60 @@ def default_database_url() -> str:
     return f"sqlite:///{state_dir / DEFAULT_DB_NAME}"
 
 
+def resolve_database_url(configured: str | None = None) -> str:
+    """Which database this deployment keeps its state in.
+
+    The order is the one every other setting here follows: a value somebody
+    chose beats a fallback. `configured` comes from the settings store, so an
+    operator can move a deployment onto PostgreSQL from the Settings screen;
+    `DATABASE_URL` remains the headless route; and with neither, state lives in
+    a SQLite file, because the desktop product ships to people who have no
+    database server and should not need one.
+
+    Changing it takes effect on restart, not immediately: the collections are
+    opened once, at startup, and bound into the `Backend` the app is built
+    with.
+    """
+
+    chosen = (configured or "").strip() or os.environ.get("DATABASE_URL") or ""
+    if chosen:
+        # The migration chain is written for asyncpg; these collections are
+        # synchronous, so strip the async driver marker if one is present.
+        return chosen.replace("+asyncpg", "").replace("+aiosqlite", "")
+
+    state_dir = Path(os.environ.get("ELICTA_STATE_DIR") or DEFAULT_STATE_DIR)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{state_dir / DEFAULT_DB_NAME}"
+
+
+def redact_database_url(url: str) -> str:
+    """A database URL safe to show back, with any password removed.
+
+    A PostgreSQL URL embeds its password, so this is a credential and the
+    settings API never returns one of those. It is still worth showing which
+    server a deployment is pointed at, so the host, user and database survive
+    and only the password goes. Anything that will not parse is described
+    rather than echoed, since an unparseable string may still contain one.
+    """
+
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "(unreadable)"
+    if not parts.scheme:
+        return "(unreadable)"
+    if parts.password is None:
+        return url
+
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    user = f"{parts.username}@" if parts.username else ""
+    return urlunsplit((parts.scheme, f"{user}{host}", parts.path, parts.query, parts.fragment))
+
+
 def create_state_engine(url: str | None = None) -> Engine:
     """An engine for the state database, with the tables created if absent.
 
@@ -76,7 +132,37 @@ def create_state_engine(url: str | None = None) -> Engine:
     connect_args = {"check_same_thread": False} if resolved.startswith("sqlite") else {}
     engine = create_engine(resolved, connect_args=connect_args, future=True)
     metadata.create_all(engine)
+    _add_missing_columns(engine)
     return engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Catch an existing database up with columns the models have gained.
+
+    `metadata.create_all` creates missing *tables* and never missing *columns*,
+    so adding one to a model left every existing `state.db` failing on its
+    first query with the operator's engagements still in the file, unreadable.
+    Alembic covers the PostgreSQL deployment; the file the desktop product
+    makes for itself has no migration step to run, so it catches up here.
+
+    Deliberately additive only, and only for nullable columns: this exists to
+    stop an upgrade losing data, and a schema fixer that can drop or retype a
+    column is a much more dangerous thing than the problem it solves.
+    """
+
+    inspector = sa.inspect(engine)
+    for table in metadata.tables.values():
+        if not inspector.has_table(table.name):
+            continue
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present or not column.nullable:
+                continue
+            kind = column.type.compile(engine.dialect)
+            with engine.begin() as connection:
+                connection.execute(
+                    sa.text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {kind}')
+                )
 
 
 class DurableMapping(MutableMapping[K, V]):
@@ -181,6 +267,24 @@ class StateStore:
         with self._engine.begin() as connection:
             connection.execute(sa.delete(table).where(table.c[key_column] == key))
 
+    def soft_delete(self, table_name: str, key: str) -> bool:
+        """Mark one row deleted. Returns whether there was a live row to mark."""
+
+        table = metadata.tables[table_name]
+        # Deliberately does not take `self._lock`. This is reached as a
+        # `DurableMapping`'s `forget`, which already holds that lock, and
+        # `threading.Lock` is not reentrant — taking it here deadlocked the
+        # process rather than raising. The write is one transaction, and the
+        # in-memory half the lock guards belongs to the caller.
+        with self._engine.begin() as connection:
+            marked = connection.execute(
+                table.update()
+                .where(table.c.id == key)
+                .where(table.c.deleted_at.is_(None))
+                .values(deleted_at=datetime.now(UTC).replace(tzinfo=None))
+            )
+            return bool(marked.rowcount)
+
     def _replace_children(
         self, table: sa.Table, key_column: str, key: Any, rows: list[dict[str, Any]]
     ) -> None:
@@ -193,13 +297,19 @@ class StateStore:
         """
 
         with self._engine.begin() as connection:
-            connection.execute(sa.delete(table).where(table.c[key_column] == key))
+            removal = sa.delete(table).where(table.c[key_column] == key)
+            if "deleted_at" in table.c:
+                # A soft-deleted row has to survive the next rewrite of its
+                # list, or the mark lasts exactly one write: delete a document,
+                # upload another, and the deleted one is erased on the way past.
+                removal = removal.where(table.c.deleted_at.is_(None))
+            connection.execute(removal)
             if rows:
                 connection.execute(sa.insert(table), rows)
 
     # -- the five continuity collections ---------------------------------
 
-    def engagements(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
+    def engagements(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:  # noqa: D401
         """Engagement client context, keyed by engagement id (FR-3.1)."""
 
         table = metadata.tables["engagements"]
@@ -212,6 +322,7 @@ class StateStore:
                 }
             )
             for row in self._rows(table)
+            if row.deleted_at is None
         }
 
         def persist(key: str, value: Any) -> None:
@@ -230,7 +341,39 @@ class StateStore:
         return DurableMapping(
             loaded=loaded,
             persist=persist,
-            forget=lambda key: self._delete(table, "id", key),
+            # Marked, not erased: `del backend.engagements[id]` is how the
+            # product removes one, and it should stay recoverable.
+            forget=lambda key: self.soft_delete("engagements", key),
+            lock=self._lock,
+        )
+
+    def expected_languages(self) -> DurableMapping[str, list[str]]:
+        """The languages an engagement expects in the room (FR-2.14).
+
+        The same `engagements` row the two collections above read, and the
+        column has been in the schema since its first revision — it was simply
+        never written. Derived once, when the engagement is created, and never
+        recomputed, so holding it in memory meant the panel's language strip
+        went quiet for every existing engagement after a restart.
+        """
+
+        table = metadata.tables["engagements"]
+        loaded: dict[str, list[str]] = {
+            row.id: list(row.expected_languages or [])
+            for row in self._rows(table)
+            if row.deleted_at is None and row.expected_languages
+        }
+
+        def persist(key: str, value: Any) -> None:
+            # Accepts the model the deriver returns or a plain list, because
+            # the composition root holds one and the row stores the other.
+            languages = list(getattr(value, "languages", None) or value or [])
+            self._upsert(table, "id", key, {"expected_languages": languages})
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self.soft_delete("engagements", key),
             lock=self._lock,
         )
 
@@ -256,6 +399,7 @@ class StateStore:
                 }
             )
             for row in self._rows(table)
+            if row.deleted_at is None
         }
 
         def persist(key: str, value: Any) -> None:
@@ -274,7 +418,9 @@ class StateStore:
         return DurableMapping(
             loaded=loaded,
             persist=persist,
-            forget=lambda key: self._delete(table, "id", key),
+            # The same row `engagements()` reads, so the same soft mark: a
+            # hard delete here would erase a record the other view only hid.
+            forget=lambda key: self.soft_delete("engagements", key),
             lock=self._lock,
         )
 
@@ -383,6 +529,147 @@ class StateStore:
                     "impact_rank": item["impact_rank"],
                 }
                 for item in (dump(entry) for entry in value)
+            ]
+            self._replace_children(table, "engagement_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "engagement_id", key),
+            lock=self._lock,
+        )
+
+    def reference_documents(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """An engagement's attached documents, in the order they were added."""
+
+        table = metadata.tables["reference_documents"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.engagement_id, r.ordinal)):
+            # A row with no engagement is a text-first write whose list has not
+            # landed yet; it carries the content but not the name the list is
+            # keyed on, and decoding it would fail validation on an empty name.
+            if not row.engagement_id or row.deleted_at is not None:
+                continue
+            loaded.setdefault(row.engagement_id, []).append(
+                decode({"document_id": row.id, "name": row.name, "status": row.status})
+            )
+
+        def persist(key: str, value: Any) -> None:
+            existing = {
+                row.id: row
+                for row in self._rows(table)
+                if row.engagement_id == key
+            }
+            rows = [
+                {
+                    "id": item["document_id"],
+                    "engagement_id": key,
+                    "name": item["name"],
+                    "status": item["status"],
+                    # Carried through rather than recomputed: the text was
+                    # extracted once on intake, and the row is rewritten
+                    # whenever any document in the list changes — a retag must
+                    # not silently blank the content the compiler reads.
+                    "source_uri": getattr(existing.get(item["document_id"]), "source_uri", "") or "",
+                    "extracted_text": getattr(
+                        existing.get(item["document_id"]), "extracted_text", ""
+                    )
+                    or "",
+                    "ordinal": ordinal,
+                }
+                for ordinal, item in enumerate(dump(entry) for entry in value)
+            ]
+            self._replace_children(table, "engagement_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "engagement_id", key),
+            lock=self._lock,
+        )
+
+    def document_texts(self) -> DurableMapping[str, str]:
+        """The text read out of each document, keyed by document id.
+
+        Stored on the document's own row rather than in a table of its own:
+        one document, one row, and no way for the two to drift.
+        """
+
+        table = metadata.tables["reference_documents"]
+        loaded: dict[str, str] = {
+            row.id: row.extracted_text or ""
+            for row in self._rows(table)
+            # A deleted document must stop shaping the questions, not merely
+            # stop being listed.
+            if row.deleted_at is None
+        }
+
+        def persist(key: str, value: Any) -> None:
+            with self._engine.begin() as connection:
+                updated = connection.execute(
+                    table.update().where(table.c.id == key).values(extracted_text=value)
+                )
+                if updated.rowcount:
+                    return
+                # The text can arrive before the document is listed, depending
+                # on which write the composition root makes first; the row is
+                # completed when the list is written.
+                connection.execute(
+                    table.insert().values(
+                        id=key,
+                        engagement_id="",
+                        name="",
+                        status="hypothesis",
+                        source_uri="",
+                        extracted_text=value,
+                        ordinal=0,
+                    )
+                )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            # Marked, not erased: removing a document's text is how the product
+            # removes the document, and the row stays for an audit.
+            forget=lambda key: self.soft_delete("reference_documents", key),
+            lock=self._lock,
+        )
+
+    def vocabulary_terms(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """An engagement's keyterms, in the order they were added (FR-3.6)."""
+
+        table = metadata.tables["vocabulary_terms"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.engagement_id, r.ordinal)):
+            if row.deleted_at is not None:
+                continue
+            loaded.setdefault(row.engagement_id, []).append(
+                decode(
+                    {
+                        "term_id": row.id,
+                        "engagement_id": row.engagement_id,
+                        "term": row.term,
+                        "term_type": row.term_type,
+                        "pronunciation_hint": row.pronunciation_hint,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            rows = [
+                {
+                    "id": item["term_id"],
+                    "engagement_id": key,
+                    "term": item["term"],
+                    "term_type": item["term_type"],
+                    "pronunciation_hint": item.get("pronunciation_hint"),
+                    "ordinal": ordinal,
+                }
+                for ordinal, item in enumerate(dump(entry) for entry in value)
             ]
             self._replace_children(table, "engagement_id", key, rows)
 

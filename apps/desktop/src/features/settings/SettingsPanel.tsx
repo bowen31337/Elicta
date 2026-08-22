@@ -7,6 +7,8 @@ import {
   useSettings,
   type AuthMode,
   type ConnectorSettings,
+  type DocumentSourceSettings,
+  type StorageSettings,
   type InferenceSettings,
   type LlmProvider,
   type SpeechVendor,
@@ -252,6 +254,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const [inference, setInference] = useState<InferenceSettings | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [connectors, setConnectors] = useState<ConnectorSettings | null>(null);
+  const [documents, setDocuments] = useState<DocumentSourceSettings | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<SecretKey, string>>>({});
   const [saved, setSaved] = useState(false);
 
@@ -273,6 +276,23 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const activeSecret = AUTH_MODE_SECRET[currentAuthMode];
   const idleSecret = AUTH_MODE_SECRET[currentAuthMode === 'api_key' ? 'oauth_token' : 'api_key'];
   const currentConnectors = connectors ?? settings.connectors;
+  const currentDocuments: DocumentSourceSettings =
+    documents ?? settings.documents ?? { tenant_id: null, client_id: null };
+  const storage: StorageSettings =
+    settings.storage ?? { database: '', applies_on_restart: true };
+  const databaseStatus = settings.secrets.find(
+    (secret) => secret.key === 'state_database_url',
+  );
+  const graphStatus = settings.secrets.find(
+    (secret) => secret.key === 'microsoft_graph_client_secret',
+  );
+  const documentsReadiness: Readiness =
+    currentDocuments.tenant_id && currentDocuments.client_id && graphStatus?.configured
+      ? { tone: 'ok', text: 'Connected' }
+      // Not a warning: an engagement whose documents are all uploaded needs no
+      // connector, and a badge that scolds an operator for a choice they made
+      // deliberately teaches them to ignore badges.
+      : { tone: 'idle', text: 'Links off' };
 
   const secretOf = (key: SecretKey): SecretStatus | undefined =>
     settings.secrets.find((secret) => secret.key === key);
@@ -316,6 +336,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
         auth_mode: currentAuthMode,
       },
       connectors: currentConnectors,
+      documents: currentDocuments,
       ...(secrets.length > 0 ? { secrets } : {}),
     });
 
@@ -329,6 +350,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
       setInference(null);
       setAuthMode(null);
       setConnectors(null);
+      setDocuments(null);
       setSaved(true);
     }
   };
@@ -546,6 +568,100 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
             onChange={(event) => setModel(event.target.value)}
           />
         </div>
+      </Section>
+
+      <Section
+        id="storage"
+        title="Where the data is kept"
+        summary="Engagements, their meetings, the documents you attach and the words you add. A single file on this machine unless you point it somewhere else."
+        // SQLite is the default, so an unreported storage means a local file —
+        // not "unknown". This badge said "External database" whenever the
+        // service had not mentioned storage, which told every reader, and every
+        // documentation screenshot, the opposite of what a default install does.
+        status={
+          storage.database === '' || storage.database.startsWith('sqlite')
+            ? { tone: 'ok', text: 'On this machine' }
+            : { tone: 'ok', text: 'External database' }
+        }
+      >
+        <div className="settings-field">
+          <span className="settings-pseudo-label">In use now</span>
+          <p className="settings-help">
+            Read from the service, with any password removed.
+          </p>
+          <p className="settings-state">
+            {storage.database || 'A file on this machine'}
+          </p>
+        </div>
+
+        {databaseStatus ? (
+          <SecretField
+            {...secretProps(databaseStatus)}
+            label="Database connection URL"
+            help={
+              'Leave unset to keep everything in the file above, which needs no ' +
+              'database server. A PostgreSQL URL carries a password, so it is ' +
+              'stored write-only and never shown back. ' +
+              (storage.applies_on_restart
+                ? 'A change here takes effect when the service restarts, not straight away.'
+                : '')
+            }
+          />
+        ) : null}
+      </Section>
+
+      <Section
+        id="documents"
+        title="Reference documents"
+        summary="Where a linked SharePoint, OneDrive or Teams document is read from. Dropping a file onto the preparation screen needs none of this — it is only links that have to be fetched."
+        status={documentsReadiness}
+      >
+        <div className="settings-field">
+          <label htmlFor="graph-tenant">Directory (tenant) id</label>
+          <p className="settings-help">
+            The Microsoft 365 tenant the documents live in.
+          </p>
+          <input
+            id="graph-tenant"
+            type="text"
+            value={currentDocuments.tenant_id ?? ''}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            onChange={(event) =>
+              setDocuments({
+                ...currentDocuments,
+                tenant_id: event.target.value === '' ? null : event.target.value,
+              })
+            }
+          />
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="graph-client">Application (client) id</label>
+          <p className="settings-help">
+            An app registration Elicta reads as. It needs the Files.Read.All
+            permission, and Sites.Read.All to reach a team site.
+          </p>
+          <input
+            id="graph-client"
+            type="text"
+            value={currentDocuments.client_id ?? ''}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            onChange={(event) =>
+              setDocuments({
+                ...currentDocuments,
+                client_id: event.target.value === '' ? null : event.target.value,
+              })
+            }
+          />
+        </div>
+
+        {graphStatus ? (
+          <SecretField
+            {...secretProps(graphStatus)}
+            label="Client secret"
+            help="The registration's own secret. Until all three are set, attaching a link is refused with a message saying so — rather than recording a document nothing can read."
+          />
+        ) : null}
       </Section>
 
       <Section
