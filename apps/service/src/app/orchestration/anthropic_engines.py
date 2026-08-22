@@ -61,6 +61,7 @@ from app.modules.compiler.citations.models import (
     ExtractedClaimDraft,
 )
 from app.modules.debrief.pipeline.models import (
+    UNCLASSIFIED_SECTION_KEY,
     BmadAnalystChainOutput,
     BmadDecisionDraft,
     BmadFollowUpEmailDraft,
@@ -159,15 +160,26 @@ def _cached_system(text: str) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 
-class _CleanedTranscript(BaseModel):
-    """One cleaned line per input utterance, in the same order."""
-
-    cleaned_text: list[str] = Field(
-        description="Cleaned text for each utterance, same length and order as the input."
+#: Every per-utterance schema below carries the number of the utterance it
+#: describes. That is the whole mechanism: results are matched by what they
+#: say they are for, not by where they happen to land, so a model that returns
+#: one entry too few or too many can no longer shift a citation onto the wrong
+#: utterance — and no longer costs a finished meeting its documents either.
+class _UtteranceLine(BaseModel):
+    utterance: int = Field(
+        description="The number of the utterance this entry is for, exactly as numbered in the input."
     )
 
 
-class _TranslatedLine(BaseModel):
+class _CleanedLine(_UtteranceLine):
+    cleaned_text: str = Field(description="The cleaned text of that utterance.")
+
+
+class _CleanedTranscript(BaseModel):
+    lines: list[_CleanedLine]
+
+
+class _TranslatedLine(_UtteranceLine):
     original_language: str = Field(description="BCP-47 code of the language actually spoken.")
     translated_text: str | None = Field(
         default=None,
@@ -179,10 +191,12 @@ class _TranslatedTranscript(BaseModel):
     lines: list[_TranslatedLine]
 
 
+class _ClassifiedLine(_UtteranceLine):
+    section_key: str = Field(description="Key of the section that utterance belongs to.")
+
+
 class _ClassifiedTranscript(BaseModel):
-    section_keys: list[str] = Field(
-        description="Template section key for each utterance, same length and order as the input."
-    )
+    lines: list[_ClassifiedLine]
 
 
 class _OpenQuestionOut(BaseModel):
@@ -258,8 +272,10 @@ Remove disfluencies (um, uh, false starts, repeated words) and add sentence
 punctuation. Correct obvious transcription errors in domain vocabulary.
 
 Never change meaning, never summarise, never merge or drop an utterance.
-Return exactly one cleaned line per input utterance, in the same order. A
-line that needs no change is returned unchanged."""
+A line that needs no change is returned unchanged.
+
+Each input utterance is numbered. Give every line the number of the utterance
+it is for. Cover every utterance."""
 
 _TRANSLATION_SYSTEM = """You translate meeting transcripts for a requirements analyst.
 
@@ -272,14 +288,16 @@ translate literally: preserve hedges, vagueness and ambiguity exactly as
 spoken. Do not resolve an ambiguity the speaker left open — that ambiguity is
 the signal the analyst is looking for.
 
-Return exactly one entry per input utterance, in the same order."""
+Each input utterance is numbered. Give every entry the number of the utterance
+it is for. Cover every utterance."""
 
 _CLASSIFICATION_SYSTEM = """You map meeting utterances onto requirements template sections.
 
 You are given the section list and the transcript. Assign each utterance the
 key of the section it belongs to. Use only keys from the supplied list.
 
-Return exactly one key per input utterance, in the same order."""
+Each input utterance is numbered. Give every entry the number of the utterance
+it is for. Cover every utterance."""
 
 _ANALYST_SYSTEM = """You are the BMAD Analyst producing planning artifacts from a client
 requirements meeting.
@@ -542,7 +560,16 @@ def anthropic_debrief_engines(
             "Clean these utterances:\n\n" + _numbered([u.text for u in utterances]),
             _CleanedTranscript,
         )
-        return _same_length(parsed.cleaned_text, utterances, "cleaning")
+        # An utterance the model skipped keeps its own words: not cleaned,
+        # rather than cleaned into somebody else's.
+        return [
+            line.cleaned_text if line is not None else utterance.text
+            for line, utterance in zip(
+                _by_utterance(parsed.lines, len(utterances), "cleaning"),
+                utterances,
+                strict=True,
+            )
+        ]
 
     @_upstream_aware(STAGE_TRANSLATE)
     async def translate(
@@ -554,13 +581,17 @@ def anthropic_debrief_engines(
             + _numbered([u.cleaned_text for u in utterances]),
             _TranslatedTranscript,
         )
-        lines = _same_length(parsed.lines, utterances, "translation")
+        # A gap retains the original untranslated, which is what FR-2.19 asks
+        # for anyway: the original is authoritative, and claiming a language
+        # nobody identified would be worse than claiming none.
         return [
             TranslationOutcome(
-                original_language=line.original_language,
-                translated_text=line.translated_text,
+                original_language=(
+                    line.original_language if line is not None else document_language
+                ),
+                translated_text=line.translated_text if line is not None else None,
             )
-            for line in lines
+            for line in _by_utterance(parsed.lines, len(utterances), "translation")
         ]
 
     @_upstream_aware(STAGE_CLASSIFY)
@@ -574,7 +605,13 @@ def anthropic_debrief_engines(
             + _numbered([u.cleaned_text for u in utterances]),
             _ClassifiedTranscript,
         )
-        return _same_length(parsed.section_keys, utterances, "classification")
+        # A gap is marked unclassified rather than borrowing its neighbour's
+        # section: an utterance in the wrong slot fills a coverage slot that
+        # nothing was actually said about.
+        return [
+            line.section_key if line is not None else UNCLASSIFIED_SECTION_KEY
+            for line in _by_utterance(parsed.lines, len(utterances), "classification")
+        ]
 
     @_upstream_aware(STAGE_RUN_CHAIN)
     async def run_chain(session_id: str, utterances: list[Any]) -> BmadAnalystChainOutput:
@@ -643,21 +680,40 @@ async def _no_diarizer(*_args: Any, **_kwargs: Any) -> Any:
     )
 
 
-def _same_length(produced: list[Any], expected: list[Any], stage: str) -> list[Any]:
-    """Reject a per-utterance result that does not line up with its input.
+def _by_utterance(lines: list[Any], count: int, stage: str) -> list[Any | None]:
+    """One slot per utterance, filled from whichever line claims it.
 
-    Every stage here is positional: entry *n* of the output describes
-    utterance *n*. A length mismatch silently shifts every downstream
-    citation onto the wrong utterance, which is the one failure mode that
-    would corrupt artifacts while still looking well-formed.
+    Entry *n* of a per-utterance result describes utterance *n*, and getting
+    that wrong is the one failure that corrupts artifacts while still looking
+    well-formed: every later claim binds to the wrong words. The old guard
+    protected against it by refusing any result whose length did not match,
+    which was correct and expensive — measured against a live model over a
+    37-utterance meeting, two runs in three came back one entry out and the
+    whole finished meeting's documents were discarded.
+
+    Matching on the number each line carries keeps the safety property and
+    drops the cost. A line for an utterance that does not exist is ignored
+    rather than appended; two lines for the same utterance keep the first;
+    an utterance no line claims comes back `None`, for the caller to fill
+    with something honest.
+
+    A result that claims *nothing* is still refused. Filling every slot would
+    report a stage that did no work as a success, which is the failure this
+    whole module exists to avoid.
     """
 
-    if len(produced) != len(expected):
+    slots: list[Any | None] = [None] * count
+    matched = 0
+    for line in lines:
+        index = getattr(line, "utterance", 0) - 1
+        if 0 <= index < count and slots[index] is None:
+            slots[index] = line
+            matched += 1
+    if matched == 0 and count > 0:
         raise ValueError(
-            f"{stage} returned {len(produced)} entries for {len(expected)} "
-            "utterances; results are positional and must line up"
+            f"{stage} returned nothing for any of {count} utterances"
         )
-    return produced
+    return slots
 
 
 def anthropic_compiler_engines(

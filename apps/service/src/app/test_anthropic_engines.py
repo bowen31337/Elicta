@@ -28,7 +28,9 @@ from app.orchestration.anthropic_engines import (
     _AnalystArtifacts,
     _batch_error,
     _BriefOut,
+    _ClassifiedLine,
     _ClassifiedTranscript,
+    _CleanedLine,
     _CleanedTranscript,
     _DecisionOut,
     _EmailOut,
@@ -77,7 +79,12 @@ def _utterance(text: str, index: int = 1):
 
 
 async def test_cleaning_returns_one_line_per_utterance() -> None:
-    client = _StubClient([_CleanedTranscript(cleaned_text=["we need it fast", "by Q3"])])
+    client = _StubClient([
+        _CleanedTranscript(lines=[
+            _CleanedLine(utterance=1, cleaned_text="we need it fast"),
+            _CleanedLine(utterance=2, cleaned_text="by Q3"),
+        ])
+    ])
     engines = anthropic_debrief_engines(client)
 
     cleaned = await engines.clean("s1", [_utterance("um, we need it fast", 1), _utterance("by Q3", 2)])
@@ -85,24 +92,37 @@ async def test_cleaning_returns_one_line_per_utterance() -> None:
     assert cleaned == ["we need it fast", "by Q3"]
 
 
-async def test_a_stage_that_drops_an_utterance_is_rejected() -> None:
-    """Positional results must line up, or every downstream citation shifts.
+async def test_a_short_result_never_binds_a_claim_to_the_wrong_utterance() -> None:
+    """The property the old length check defended, kept by a stronger means.
 
-    A short result would silently bind claims to the wrong utterance while
-    still looking well-formed — the one failure that corrupts artifacts
-    without looking like a failure.
+    A result read positionally would put "only one" against utterance 1 and
+    leave the rest to shift; refusing the whole batch prevented that at the
+    cost of the meeting's documents. Now the line says which utterance it is
+    for, so the answer lands where it belongs and the utterance nobody
+    answered for keeps its own words.
     """
 
-    client = _StubClient([_CleanedTranscript(cleaned_text=["only one"])])
+    client = _StubClient([
+        _CleanedTranscript(lines=[_CleanedLine(utterance=2, cleaned_text="only one")])
+    ])
     engines = anthropic_debrief_engines(client)
 
-    with pytest.raises(ValueError, match="positional"):
-        await engines.clean("s1", [_utterance("a", 1), _utterance("b", 2)])
+    cleaned = await engines.clean("s1", [_utterance("a", 1), _utterance("b", 2)])
+
+    assert cleaned == ["a", "only one"]
 
 
 async def test_translation_leaves_same_language_utterances_untranslated() -> None:
     client = _StubClient(
-        [_TranslatedTranscript(lines=[_TranslatedLine(original_language="en", translated_text=None)])]
+        [
+            _TranslatedTranscript(
+                lines=[
+                    _TranslatedLine(
+                        utterance=1, original_language="en", translated_text=None
+                    )
+                ]
+            )
+        ]
     )
     engines = anthropic_debrief_engines(client)
 
@@ -113,7 +133,9 @@ async def test_translation_leaves_same_language_utterances_untranslated() -> Non
 
 
 async def test_classification_is_given_the_section_keys_to_choose_from() -> None:
-    client = _StubClient([_ClassifiedTranscript(section_keys=["performance"])])
+    client = _StubClient([
+        _ClassifiedTranscript(lines=[_ClassifiedLine(utterance=1, section_key="performance")])
+    ])
     engines = anthropic_debrief_engines(client)
     sections = [types.SimpleNamespace(key="performance", title="Performance")]
 
@@ -193,7 +215,9 @@ async def test_the_transcript_given_to_the_analyst_carries_utterance_ids() -> No
 async def test_every_stage_caches_its_instructions_and_uses_the_configured_model() -> None:
     """§14.3: the stable half of the prompt belongs in the cached prefix."""
 
-    client = _StubClient([_CleanedTranscript(cleaned_text=["x"])])
+    client = _StubClient([
+        _CleanedTranscript(lines=[_CleanedLine(utterance=1, cleaned_text="x")])
+    ])
     engines = anthropic_debrief_engines(client, model=DEFAULT_MODEL)
 
     await engines.clean("s1", [_utterance("x")])
@@ -1302,3 +1326,111 @@ class TestTheBankIsKeyedToASectionList:
         sent = client.messages.calls[0]["messages"][0]["content"]
         for section in DEFAULT_TEMPLATE_SECTIONS:
             assert section in sent
+
+
+# --------------------------------------------------------------------------
+# Results that line up because they say what they are for, not because the
+# model counted correctly.
+# --------------------------------------------------------------------------
+
+
+async def test_a_dropped_line_no_longer_shifts_every_later_utterance() -> None:
+    """The model answers 1 and 3 of 3. Entry 2 must still be utterance 2.
+
+    Measured against a live model over a 37-utterance meeting, two runs in
+    three came back one entry short or one entry long and the whole write-up
+    was thrown away. Rejecting the batch protected the citations — a short
+    result read positionally binds every later claim to the wrong utterance —
+    but it made a finished meeting's documents a coin flip.
+
+    So the result no longer has to be counted: each line says which utterance
+    it is for, and the reassembly puts it there. An utterance the model
+    skipped keeps its own verbatim text, which is honest — not cleaned, rather
+    than cleaned into somebody else's words.
+    """
+
+    client = _StubClient([
+        _CleanedTranscript(lines=[
+            _CleanedLine(utterance=3, cleaned_text="by Q3"),
+            _CleanedLine(utterance=1, cleaned_text="we need it fast"),
+        ])
+    ])
+    engines = anthropic_debrief_engines(client)
+
+    cleaned = await engines.clean(
+        "s1",
+        [
+            _utterance("um, we need it fast", 1),
+            _utterance("er, sorry, go on", 2),
+            _utterance("by Q3", 3),
+        ],
+    )
+
+    assert cleaned == ["we need it fast", "er, sorry, go on", "by Q3"]
+
+
+async def test_a_line_for_an_utterance_that_does_not_exist_is_dropped() -> None:
+    """An extra entry must not lengthen the result or displace a real one."""
+
+    client = _StubClient([
+        _CleanedTranscript(lines=[
+            _CleanedLine(utterance=1, cleaned_text="we need it fast"),
+            _CleanedLine(utterance=9, cleaned_text="something nobody said"),
+        ])
+    ])
+    engines = anthropic_debrief_engines(client)
+
+    cleaned = await engines.clean("s1", [_utterance("um, we need it fast", 1)])
+
+    assert cleaned == ["we need it fast"]
+
+
+async def test_a_stage_that_answers_nothing_usable_is_still_rejected() -> None:
+    """Filling every gap would report a stage that did nothing as a success."""
+
+    client = _StubClient([_CleanedTranscript(lines=[])])
+    engines = anthropic_debrief_engines(client)
+
+    with pytest.raises(ValueError, match="nothing"):
+        await engines.clean("s1", [_utterance("a", 1), _utterance("b", 2)])
+
+
+async def test_an_untranslated_utterance_keeps_its_original(monkeypatch) -> None:
+    """A gap in translation retains the original, which is what FR-2.19 wants anyway."""
+
+    client = _StubClient([
+        _TranslatedTranscript(lines=[
+            _TranslatedLine(utterance=2, original_language="cmn", translated_text="in English"),
+        ])
+    ])
+    engines = anthropic_debrief_engines(client)
+
+    outcomes = await engines.translate(
+        "s1", [_utterance("a", 1), _utterance("b", 2)], "en"
+    )
+
+    assert len(outcomes) == 2
+    assert outcomes[0].translated_text is None
+    assert outcomes[0].original_language == "en"
+    assert outcomes[1].translated_text == "in English"
+
+
+async def test_an_unclassified_utterance_is_marked_so_rather_than_guessed() -> None:
+    """A gap in classification must not borrow the next utterance's section."""
+
+    from app.modules.debrief.pipeline.models import UNCLASSIFIED_SECTION_KEY
+
+    client = _StubClient([
+        _ClassifiedTranscript(lines=[
+            _ClassifiedLine(utterance=2, section_key="performance"),
+        ])
+    ])
+    engines = anthropic_debrief_engines(client)
+
+    keys = await engines.classify(
+        "s1",
+        [_utterance("a", 1), _utterance("b", 2)],
+        [types.SimpleNamespace(key="performance", title="Performance")],
+    )
+
+    assert keys == [UNCLASSIFIED_SECTION_KEY, "performance"]
