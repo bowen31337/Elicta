@@ -251,8 +251,13 @@ body: raw linear16 PCM
 - `keyterm` is repeated once per term and is Nova-3-only; multi-word phrases are
   percent-encoded. This is the path the engagement vocabulary travels, which the
   handbook calls the single most effective thing an operator can do for accuracy.
-- `mip_opt_out=true` is Deepgram's zero-retention parameter, already named in
-  `core/egress/retention.py`, and matches the `disable_vendor_retention` setting.
+- `mip_opt_out` is Deepgram's zero-retention parameter, already named in
+  `core/egress/retention.py`. It carries the `disable_vendor_retention` setting
+  rather than a constant: that switch is on the Settings screen, and one an
+  operator can toggle while the request ignores it is worse than one not
+  offered. It defaults to on, so the opt-out is what an untouched deployment
+  sends. `keyterm_prompting` governs the vocabulary on the same terms — off,
+  no `keyterm` is sent.
 - Credentials are read **per call** from the settings store, matching
   `SettingsBackedClient`, so a key changed in the UI takes effect without a
   restart.
@@ -296,11 +301,20 @@ DELETE /v2/transcript/{id}         remove the vendor-side copy
   `/v2/upload`). A 90-minute meeting is ~173 MB. There is no synchronous
   processing ceiling to hit, because it is a polling API by construction.
 - `word_boost` carries the engagement vocabulary, the counterpart to Deepgram's
-  `keyterm`.
+  `keyterm`, and is governed by the same `keyterm_prompting` setting.
+  `disable_vendor_retention` has no counterpart here: this API takes no
+  retention parameter, and the mandatory `DELETE` below is the whole of this
+  vendor's retention control.
 - **The `DELETE` is mandatory, not optional.** It is the only reason this
   vendor's flow is acceptable under the audio promise: Deepgram takes the bytes
   in the transcription request and keeps nothing, whereas AssemblyAI stores a
-  copy until it is removed. A verified deletion is a stronger claim than a
+  copy until it is removed. One path cannot honour it: an upload that never
+  became a transcript has no handle to delete it by, because
+  `DELETE /v2/transcript/{id}` removes the audio *through* its transcript and
+  the API exposes no other deletion. That copy is therefore made discoverable
+  instead — logged at ERROR and named, with its URL, in the failure the
+  recording screen shows — and the vendor's own retention removes it within 48
+  hours. A verified deletion is a stronger claim than a
   retention flag — it is the same standard NFR-2.4 already holds our own audio
   to, *"the deletion is itself recorded, so the destruction can be shown rather
   than asserted"* — but only if it actually runs. It is recorded in the egress
@@ -400,11 +414,16 @@ TDD throughout: every behaviour below gets a failing test first.
 - Two `COMPLETE` transcripts produce a `SessionAlignment`; one does not.
 - The engagement vocabulary reaches each vendor in its own dialect —
   `keyterm` repeated per term for Deepgram, `word_boost` for AssemblyAI.
-- `mip_opt_out=true` on every Deepgram request; `DELETE` issued on every
-  AssemblyAI transcript, including after a failed poll.
+- `mip_opt_out` on every Deepgram request follows `disable_vendor_retention`,
+  and the vocabulary on both vendors follows `keyterm_prompting`; `DELETE`
+  issued on every AssemblyAI transcript, including after a failed poll, and an
+  upload that never became one reported by name.
 - Each vendor's key is resolved and tested against **its own** vendor, not
   against `live_vendor`.
-- A selected vendor with no credential is refused at startup, named.
+- A selected vendor with no credential, and one with no client at all, each
+  fail closed by name on the call. Neither stops the service starting — the
+  vendor list comes from a form, and a form entry that bricks a boot also
+  takes away the screen it would be corrected on.
 - One egress row per vendor call, success or failure.
 - Audio is destroyed once both stages report done, and the deletion recorded.
 

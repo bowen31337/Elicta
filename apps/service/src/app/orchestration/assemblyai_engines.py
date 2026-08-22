@@ -142,6 +142,14 @@ def assemblyai_record_engine(
         if secret is None:
             raise AssemblyAIUnavailable("no AssemblyAI credential is configured")
 
+        # Read per call, like the credential: a switch an operator flips must
+        # not wait for a restart. `disable_vendor_retention` has no lever
+        # here — this API takes no retention parameter, and the mandatory
+        # DELETE below is the whole of this vendor's retention control, which
+        # is why it runs whatever that setting says.
+        if not store.read().connectors.keyterm_prompting:
+            keyterms = []
+
         headers = {"authorization": secret.reveal()}
 
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:

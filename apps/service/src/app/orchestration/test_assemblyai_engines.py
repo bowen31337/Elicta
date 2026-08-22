@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import wave
+from typing import Any
 
 import httpx
 import pytest
@@ -42,13 +43,29 @@ RESPONSE = {
 
 
 class MockStore:
-    """A settings store that always has the credential, unless told not to."""
+    """A settings store that always has the credential, unless told not to.
 
-    def __init__(self, secret: SecretValue | None = SecretValue("test_key")) -> None:
+    `read` answers with the default settings: the engine reads `connectors`
+    per call now, because `keyterm_prompting` is an operator-facing switch and
+    what it is set to has to reach the request.
+    """
+
+    def __init__(
+        self,
+        secret: SecretValue | None = SecretValue("test_key"),
+        *,
+        settings: Any = None,
+    ) -> None:
         self._secret = secret
+        self._settings = settings
 
     def get_secret(self, key):
         return self._secret
+
+    def read(self):
+        from app.modules.settings.models import ServiceSettings
+
+        return self._settings or ServiceSettings()
 
 
 def mock_read_audio(session_id: str) -> bytes:
@@ -538,3 +555,42 @@ async def test_an_upload_that_never_became_a_transcript_is_reported_not_hidden()
     )
     assert "500" in message, "the reason the submit failed is part of the record"
     assert deletes[0] == 0, "there is no transcript to delete, and no other handle"
+
+
+@pytest.mark.asyncio
+async def test_keyterm_prompting_switched_off_sends_no_word_boost() -> None:
+    """`word_boost` is this vendor's counterpart to Deepgram's `keyterm`, and
+    the same Settings switch governs both. Read nowhere in the repo before
+    this, so an operator could turn the vocabulary off and every request still
+    carried it."""
+
+    from app.modules.settings.models import ConnectorSettings, ServiceSettings
+
+    submitted_bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v2/upload":
+            return httpx.Response(200, json={"upload_url": "https://cdn.assemblyai.com/upload/xyz"})
+        if request.method == "POST" and request.url.path == "/v2/transcript":
+            submitted_bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "abc123"})
+        if request.method == "GET" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json=RESPONSE)
+        if request.method == "DELETE" and request.url.path == "/v2/transcript/abc123":
+            return httpx.Response(200, json={"status": "deleted"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    engine = assemblyai_record_engine(
+        mock_read_audio,
+        MockStore(
+            settings=ServiceSettings(
+                connectors=ConnectorSettings(keyterm_prompting=False)
+            )
+        ),
+        transport=httpx.MockTransport(handler),
+        poll_seconds=0.01,
+    )
+
+    await engine("session_123", "audio_ref_unused", ["FROSTLINE"])
+
+    assert submitted_bodies[0]["word_boost"] == []

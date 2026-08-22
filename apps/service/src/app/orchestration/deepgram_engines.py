@@ -35,12 +35,18 @@ class DeepgramUnavailable(Exception):
     """Deepgram could not be reached, or refused the request."""
 
 
-def deepgram_listen_url(model: str, keyterms: list[str]) -> str:
+def deepgram_listen_url(
+    model: str, keyterms: list[str], *, opt_out_of_retention: bool = True
+) -> str:
     """The request URL, including the vocabulary and the retention opt-out.
 
     `keyterm` is repeated once per term and is Nova-3 only; multi-word phrases
     are encoded by `urlencode`. This is the path the engagement's vocabulary
     travels, which is the single most effective preparation an operator does.
+
+    `opt_out_of_retention` defaults to on and is the `disable_vendor_retention`
+    setting — an operator-facing switch on the Settings screen, so what it is
+    set to has to be what goes on the wire.
     """
 
     params = [
@@ -53,7 +59,7 @@ def deepgram_listen_url(model: str, keyterms: list[str]) -> str:
         ("channels", "1"),
         # NFR-2.3: vendor-side retention is set per request, not left to the
         # contract alone, so an audit can see it on the wire.
-        ("mip_opt_out", "true"),
+        ("mip_opt_out", "true" if opt_out_of_retention else "false"),
         *(("keyterm", term) for term in keyterms),
     ]
     return f"{LISTEN_URL}?{urlencode(params)}"
@@ -212,9 +218,20 @@ async def _listen(
     if secret is None:
         raise DeepgramUnavailable("no Deepgram credential is configured")
 
+    # Both switches are on the Settings screen, so both have to reach the
+    # request. Read per call for the same reason the credential is: a toggle
+    # an operator flips must not wait for a restart to mean anything.
+    connectors = store.read().connectors
+    if not connectors.keyterm_prompting:
+        keyterms = []
+
     async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
         response = await client.post(
-            deepgram_listen_url(model, keyterms),
+            deepgram_listen_url(
+                model,
+                keyterms,
+                opt_out_of_retention=connectors.disable_vendor_retention,
+            ),
             headers={
                 "Authorization": f"Token {secret.reveal()}",
                 "Content-Type": "application/octet-stream",

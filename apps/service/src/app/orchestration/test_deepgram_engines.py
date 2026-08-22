@@ -41,6 +41,21 @@ RESPONSE = {
 }
 
 
+class _DefaultSettings:
+    """The settings half of a store double: everything at its default.
+
+    Both engines read `connectors` per call now — `keyterm_prompting` and
+    `disable_vendor_retention` are operator-facing switches, so what they are
+    set to has to reach the request — and every double below only ever cared
+    about the credential.
+    """
+
+    def read(self):
+        from app.modules.settings.models import ServiceSettings
+
+        return ServiceSettings()
+
+
 def test_every_utterance_becomes_a_timed_segment() -> None:
     output = to_batch_transcription(RESPONSE, "deepgram")
 
@@ -106,7 +121,7 @@ async def test_a_successful_call_returns_batch_transcription_output() -> None:
     def mock_read_audio(session_id: str) -> bytes:
         return b"mock audio data"
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             from app.modules.settings.models import SecretValue
             return SecretValue("test_key")
@@ -135,7 +150,7 @@ async def test_a_504_response_raises_deepgram_unavailable_with_timeout_message()
     def mock_read_audio(session_id: str) -> bytes:
         return b"mock audio"
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             from app.modules.settings.models import SecretValue
             return SecretValue("test_key")
@@ -161,7 +176,7 @@ async def test_a_401_response_raises_deepgram_unavailable_with_status_code() -> 
     def mock_read_audio(session_id: str) -> bytes:
         return b"mock audio"
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             from app.modules.settings.models import SecretValue
             return SecretValue("test_key")
@@ -189,7 +204,7 @@ async def test_no_audio_raises_before_any_request() -> None:
     def mock_read_audio(session_id: str) -> bytes:
         return b""
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             from app.modules.settings.models import SecretValue
             return SecretValue("test_key")
@@ -221,7 +236,7 @@ async def test_no_credential_raises_before_any_request() -> None:
     def mock_read_audio(session_id: str) -> bytes:
         return b"mock audio"
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             return None
 
@@ -300,7 +315,7 @@ async def test_deepgram_diarizer_returns_merged_turns_from_the_mocked_response()
     def mock_read_audio(session_id: str) -> bytes:
         return b"mock audio data"
 
-    class MockStore:
+    class MockStore(_DefaultSettings):
         def get_secret(self, key):
             from app.modules.settings.models import SecretValue
             return SecretValue("test_key")
@@ -321,3 +336,89 @@ async def test_deepgram_diarizer_returns_merged_turns_from_the_mocked_response()
         (0.0, 3.84, "0"),
         (3.9, 6.2, "1"),
     ]
+
+
+def _store_with(**connector_options):
+    """A real settings store with these connector switches set."""
+
+    from app.modules.settings.models import ConnectorSettings, SecretKey
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore()
+    store.write_connectors(ConnectorSettings(**connector_options))
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg")
+    return store
+
+
+@pytest.mark.asyncio
+async def test_keyterm_prompting_switched_off_sends_no_keyterms() -> None:
+    """The switch is on the Settings screen, so it has to reach the request.
+
+    It was read nowhere in the repo: an operator could toggle it, save it, see
+    it saved, and every request still carried the vocabulary. A switch that
+    does nothing is worse than one that is not offered.
+    """
+
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, json=RESPONSE)
+
+    engine = deepgram_record_engine(
+        lambda _session: b"mock audio data",
+        _store_with(keyterm_prompting=False),
+        transport=httpx.MockTransport(handler),
+    )
+
+    await engine("session_123", "audio_ref_unused", ["FROSTLINE"])
+
+    assert "keyterm=" not in urls[0]
+
+
+@pytest.mark.asyncio
+async def test_keyterm_prompting_left_on_sends_them() -> None:
+    """The default, and the case the accuracy of a real meeting rests on."""
+
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, json=RESPONSE)
+
+    engine = deepgram_record_engine(
+        lambda _session: b"mock audio data",
+        _store_with(),
+        transport=httpx.MockTransport(handler),
+    )
+
+    await engine("session_123", "audio_ref_unused", ["FROSTLINE"])
+
+    assert "keyterm=FROSTLINE" in urls[0]
+
+
+@pytest.mark.asyncio
+async def test_the_retention_switch_reaches_the_request() -> None:
+    """`disable_vendor_retention` is what `mip_opt_out` says on the wire.
+
+    Hardcoding the opt-out on would be defensible; hardcoding it while
+    offering the operator a switch that changes nothing is not — the audit
+    §14.1 asks for reads the request, and the request would have disagreed
+    with the screen.
+    """
+
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, json=RESPONSE)
+
+    engine = deepgram_record_engine(
+        lambda _session: b"mock audio data",
+        _store_with(disable_vendor_retention=False),
+        transport=httpx.MockTransport(handler),
+    )
+
+    await engine("session_123", "audio_ref_unused", [])
+
+    assert "mip_opt_out=false" in urls[0]
