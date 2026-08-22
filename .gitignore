@@ -71,6 +71,12 @@ handbook/preview/
 # PDF would build without pictures.
 docs/journeys/live-run/**/*.png
 
+# The state database one fixture-driven end-to-end run writes for itself
+# (tests/e2e/fixture_run/run.py). Scratch by design: the run builds the whole
+# engagement from the fixtures every time, so a committed copy could only ever
+# be a stale duplicate of what the code already says.
+tests/e2e/fixture_run/.state/
+
 # Autonomous agent loop state (scripts/ralph). prd.json and the scripts are
 # the inputs and are committed; progress.txt, handoff.json and the archives
 # are per-run scratch written by the loop itself.
