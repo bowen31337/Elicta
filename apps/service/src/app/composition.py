@@ -811,6 +811,27 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     return backend
 
 
+def _vendor_probe_for(key: SecretKey, settings_store: SettingsStore) -> Any:
+    """The probe for one speech credential, chosen by the vendor it belongs to.
+
+    This used to read `connectors.live_vendor` for every speech key, which was
+    tolerable while there was one. With a key per record vendor it is simply
+    the wrong endpoint, and a working key reported as broken is worse than an
+    unverified one — an operator acts on it.
+
+    The live-path key keeps following `live_vendor`, because that setting is
+    genuinely what it authenticates against.
+    """
+
+    if key is SecretKey.DEEPGRAM_API_KEY:
+        return probe_for_vendor("deepgram")
+    if key is SecretKey.ASSEMBLYAI_API_KEY:
+        return probe_for_vendor("assemblyai")
+    if key is SecretKey.ASR_VENDOR_API_KEY:
+        return probe_for_vendor(settings_store.read().connectors.live_vendor.value)
+    return None
+
+
 def build_app(
     backend: Backend,
     *,
@@ -1592,10 +1613,8 @@ def build_app(
         # The speech vendors have real probes now, chosen by whichever vendor
         # the connector settings name. A custom vendor still has none — we do
         # not know its API — so it reports "configured, not verified".
-        if probe is None and key is SecretKey.ASR_VENDOR_API_KEY:
-            vendor_probe = probe_for_vendor(
-                settings_store.read().connectors.live_vendor.value
-            )
+        if probe is None:
+            vendor_probe = _vendor_probe_for(key, settings_store)
             if vendor_probe is not None:
 
                 async def probe(secret: str, call=vendor_probe) -> None:

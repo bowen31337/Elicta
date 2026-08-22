@@ -57,3 +57,38 @@ def test_a_headless_deployment_can_supply_the_key_by_environment(
     from app.modules.settings.store import _ENV_FALLBACK
 
     assert variable in _ENV_FALLBACK[key]
+
+
+def test_each_vendor_key_is_probed_against_its_own_vendor() -> None:
+    """Not against whichever vendor the live path happens to name.
+
+    The single ASR key was probed against `connectors.live_vendor`. With a key
+    per vendor that is simply the wrong endpoint: an AssemblyAI key checked
+    against Deepgram returns 401 and the screen calls a working key broken.
+    """
+
+    from app.composition import _vendor_probe_for
+    from app.modules.settings.probes import probe_assemblyai, probe_deepgram
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore()
+
+    assert _vendor_probe_for(SecretKey.DEEPGRAM_API_KEY, store) is probe_deepgram
+    assert _vendor_probe_for(SecretKey.ASSEMBLYAI_API_KEY, store) is probe_assemblyai
+
+
+def test_the_live_path_key_still_follows_the_live_vendor_setting() -> None:
+    """Unchanged behaviour for the credential this task does not own."""
+
+    from app.composition import _vendor_probe_for
+    from app.modules.settings.models import ConnectorSettings, SpeechVendor
+    from app.modules.settings.probes import probe_deepgram
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore()
+    # Through the store's own writer, not by mutating what `read()` returned:
+    # `read()` builds a fresh `ServiceSettings` each call and only happens to
+    # reuse the nested `connectors` instance.
+    store.write_connectors(ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM))
+
+    assert _vendor_probe_for(SecretKey.ASR_VENDOR_API_KEY, store) is probe_deepgram
