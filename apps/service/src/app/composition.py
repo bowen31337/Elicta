@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial, wraps
@@ -578,6 +578,19 @@ def upstream_status_for(failure: UpstreamFailure) -> int:
     return _UPSTREAM_STATUS.get(failure, 503)
 
 
+def _engagement_of_meeting(backend: Backend, meeting_id: str) -> str | None:
+    """Which engagement a meeting belongs to, or `None` if nothing knows.
+
+    `meeting_engagement_ids` is in-memory, so after a restart it knows nothing
+    about a meeting created by the process before it. The durable record of the
+    same fact is the meeting's own row, which is why both are consulted.
+    """
+
+    return backend.meeting_engagement_ids.get(meeting_id) or getattr(
+        backend.meeting_details.get(meeting_id), "engagement_id", None
+    )
+
+
 def _expected_languages_for_meeting(backend: Backend, meeting_id: str) -> list[str]:
     """The engagement's expected languages, for the meeting's panel.
 
@@ -585,12 +598,7 @@ def _expected_languages_for_meeting(backend: Backend, meeting_id: str) -> list[s
     ran: an empty strip is honest, and a confident wrong one is not.
     """
 
-    # `meeting_engagement_ids` is in-memory, so after a restart it knows
-    # nothing about a meeting created by the process before it. The durable
-    # record of the same fact is the meeting's own row.
-    engagement_id = backend.meeting_engagement_ids.get(meeting_id) or getattr(
-        backend.meeting_details.get(meeting_id), "engagement_id", None
-    )
+    engagement_id = _engagement_of_meeting(backend, meeting_id)
     if engagement_id is None:
         return []
     expected = backend.expected_languages.get(engagement_id)
@@ -810,6 +818,7 @@ def build_app(
     compiler_engines: CompilerEngines | None = None,
     settings_store: SettingsStore | None = None,
     document_transport: HttpTransport | None = None,
+    record_path_engines: Sequence[tuple[str, Any]] | None = None,
 ) -> FastAPI:
     """Mount every documented router onto one app, backed by `backend`."""
 
@@ -1183,12 +1192,45 @@ def build_app(
 
     app.include_router(build_engagement_meetings_router(list_engagement_meetings))
 
-    engines = [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
+    # FR-2.6 wants two independent engines; which two is not this module's
+    # business. The pair below are stand-ins that answer a fixed string, and
+    # they were the only pair there was — so nothing could supply a real vendor
+    # and nothing could supply a recorded transcript either, which left every
+    # stage downstream of transcription working from "hello there". Injected
+    # for the same reason `debrief_engines` is: the seam is where a vendor, or
+    # a fixture standing in for one, substitutes.
+    engines = (
+        list(record_path_engines)
+        if record_path_engines is not None
+        else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
+    )
 
     async def get_vocabulary(session_or_meeting_id: str) -> list[str]:
+        """The engagement's vocabulary, for a caller holding a meeting id (FR-2.9).
+
+        The record path keys everything by the meeting and calls it a session,
+        while the vocabulary is keyed by the engagement that owns it — so this
+        looked up a meeting id in an engagement-keyed mapping and missed every
+        time. Both engines were handed an empty keyterm list on every real
+        meeting, silently: the transcript still came back, just wronger, and
+        the preparation step the guide calls the most effective thing an
+        operator can do reached nothing at all.
+
+        Still accepts either id. A live session resolves through the meeting;
+        an engagement id passed directly is returned as it always was, which is
+        what the vocabulary routes' own tests hand it.
+        """
+
+        engagement_id = (
+            session_or_meeting_id
+            if session_or_meeting_id in backend.engagement_vocabulary
+            else _engagement_of_meeting(backend, session_or_meeting_id)
+        )
+        if engagement_id is None:
+            return []
         return [
             entry.term
-            for entry in backend.engagement_vocabulary.get(session_or_meeting_id, [])
+            for entry in backend.engagement_vocabulary.get(engagement_id, [])
         ]
 
     audio_lifecycle = _install_audio_lifecycle(backend)
@@ -2335,15 +2377,28 @@ async def _run_debrief_when_record_path_completes(
     if session_id in backend.debrief_runs:
         return backend.debrief_runs[session_id]
 
+    # One engine's timeline, not both concatenated (FR-2.6/2.8). Two engines
+    # are a confidence signal — the alignment scores the second against the
+    # first and surfaces where they disagree — not two transcripts to merge.
+    # Building spans from every COMPLETE transcript put every utterance into
+    # the write-up twice, once as each engine heard it, including the one that
+    # misheard; with two stand-ins returning the same single segment, twice and
+    # once looked identical. The reference is `align_completed_transcripts`'s
+    # reference, so what an operator reviews as a divergence and what the
+    # documents are drafted from agree about which reading is the basis.
+    complete = [
+        transcript
+        for transcript in transcripts
+        if transcript.status is TranscriptionStatus.COMPLETE
+    ]
+    reference = complete[0] if complete else None
     spans = [
         _pipeline_models.TranscriptSpan(
             start_seconds=segment.start_seconds,
             end_seconds=segment.end_seconds,
             text=segment.text,
         )
-        for transcript in transcripts
-        if transcript.status is TranscriptionStatus.COMPLETE
-        for segment in transcript.segments
+        for segment in (reference.segments if reference is not None else [])
     ]
 
     # The record path keys everything by the meeting id, and calls it a
