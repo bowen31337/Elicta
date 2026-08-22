@@ -50,7 +50,9 @@ on trust, and this is not a product that asks for trust.
 
 | | |
 |---|---|
-| ✅ Ready | The whole sequence — cleaning up the transcript, translating while keeping the original, sorting statements into template sections, drafting the documents, and attaching every source |
+| ✅ Ready | The whole sequence is built — cleaning up the transcript, translating while keeping the original, sorting statements into template sections, drafting the documents, and attaching every source |
 | ✅ Ready | If any step fails, the sequence stops there and says so, rather than passing invented material to the next step |
-| ✅ Ready | Asking follow-up questions in your own words now has a screen. You can query the meeting, ask for a paragraph to be drafted, and every answer names the moment it rests on |
-| ⏳ Not yet | Needs an AI provider with capacity. The connection has been tested against the live service and works; the account used for testing was rate limited, so a complete run has not been produced yet |
+| ✅ Ready | **And now it says so where you can see it.** A run that stops leaves the screen with fewer documents on it, which reads exactly like a meeting where little was decided. The screen names the step it stopped at and whether something was not set up or a call did not get through. That sentence is written for you: the step's own record, which is written for whoever maintains the pipeline, is kept out of it |
+| ✅ Ready | Asking follow-up questions in your own words works, live and against a real provider. You can query the meeting, ask for a paragraph to be drafted, and every answer names the moment it rests on — proven in a live run, not just in principle |
+| ⏳ Not yet | **The documents themselves, and the reason is the first step, not capacity.** This page used to say the account was rate limited. A live run against a working provider produced no documents either, and the new notice named the cause in one line: the sequence stops at *telling the voices apart*, which needs a speech service, and none is connected. Everything after that step is waiting on the same missing piece as journeys 3, 4 and 6 |
+| ⏳ Not yet | The four documents, the artifact list and the citations on screen all follow from the step above. They are built and tested; none of them has been produced from a real meeting |

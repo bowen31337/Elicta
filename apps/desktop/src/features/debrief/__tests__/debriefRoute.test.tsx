@@ -177,3 +177,134 @@ describe('the debrief conversation', () => {
     expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
   });
 });
+
+describe('a debrief that could not finish', () => {
+  /**
+   * Journey 5's other half. The pipeline fails closed, so a stage that cannot
+   * reach a model halts the chain and the screen simply renders fewer
+   * artifacts — indistinguishable from a meeting where nothing was decided.
+   *
+   * The service has always recorded which stage stopped and why. Until this
+   * screen says so, "recorded" and "visible afterwards" were different claims.
+   */
+  const STOPPED = {
+    session_id: 'meeting-7',
+    complete: false,
+    stages_completed: ['diarization', 'cleaning'],
+    stopped_at: 'translation',
+    reason: 'The AI provider could not be reached.',
+    cause: 'failed',
+  };
+
+  it('says which stage stopped, and why, rather than looking empty', async () => {
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': STOPPED,
+    });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/translating/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/did not get through/i);
+  });
+
+  it('never puts the pipeline\'s own words on the operator\'s screen', async () => {
+    /**
+     * A live run rendered this, verbatim, to whoever was reading the debrief:
+     * "supply `diarize` to anthropic_debrief_engines() from the configured ASR
+     * vendor (architecture §3.3, ADR-011)". True, and addressed to somebody
+     * else. The stage records are written for whoever is debugging the
+     * pipeline; the screen composes its own sentence from the kind of failure.
+     */
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': {
+        ...STOPPED,
+        stopped_at: 'diarization',
+        cause: 'not_configured',
+        reason:
+          'diarization needs a speech vendor to tell the voices apart, and none is configured.',
+      },
+    });
+    render(<DebriefRoute />);
+
+    const notice = await screen.findByRole('status');
+    expect(notice).toHaveTextContent(/telling the voices apart/i);
+    expect(notice).toHaveTextContent(/not set up/i);
+    expect(notice.textContent).not.toMatch(/anthropic_debrief_engines|ADR-|§/);
+  });
+
+  it('says a stage failed without claiming to know why, when it does not', async () => {
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': {
+        ...STOPPED,
+        cause: 'unknown',
+        reason: null,
+      },
+    });
+    render(<DebriefRoute />);
+
+    const notice = await screen.findByRole('status');
+    expect(notice).toHaveTextContent(/translating/i);
+    expect(notice).not.toHaveTextContent(/not set up/i);
+  });
+
+  it('says nothing when the write-up finished', async () => {
+    stubService({
+      ...BASE,
+      ...ARTIFACTS,
+      '/api/meetings/meeting-7/debrief/completion': {
+        session_id: 'meeting-7',
+        complete: true,
+        stages_completed: ['diarization'],
+        stopped_at: null,
+        reason: null,
+      },
+    });
+    render(<DebriefRoute />);
+
+    await screen.findByText('A depot scheduling rebuild.');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('says nothing when no debrief has been run at all', async () => {
+    // The route 404s, which means "not asked for yet" — not a failure, and a
+    // notice here would appear on every meeting whose write-up is still to come.
+    stubService({ ...BASE });
+    render(<DebriefRoute />);
+
+    await screen.findByText('Open questions');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('names a stage it has no plain name for, rather than saying nothing', async () => {
+    // A stage added to the pipeline later has no entry in the wording table.
+    // Falling silent would hide the notice exactly when it is least expected.
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': {
+        ...STOPPED,
+        stopped_at: 'some-new-stage',
+      },
+    });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/some new stage/i);
+  });
+
+  it('names the stage even when the reason is missing', async () => {
+    // A stage refused before it was attempted records no error. The stage name
+    // alone is still enough to act on, and dropping the notice would hide it.
+    stubService({
+      ...BASE,
+      '/api/meetings/meeting-7/debrief/completion': {
+        ...STOPPED,
+        reason: null,
+        cause: 'unknown',
+      },
+    });
+    render(<DebriefRoute />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/translating/i);
+  });
+});

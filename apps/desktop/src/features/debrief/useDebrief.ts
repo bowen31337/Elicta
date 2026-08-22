@@ -45,6 +45,31 @@ interface WireDecision {
   readonly citations: readonly WireCitation[];
 }
 
+/** What the §7 run managed, and what stopped it (NFR-4.1). */
+interface WireCompletion {
+  readonly complete: boolean;
+  readonly stopped_at: string | null;
+  /** Written for whoever is debugging the pipeline. Never rendered. */
+  readonly reason: string | null;
+  readonly cause: 'not_configured' | 'failed' | 'unknown' | null;
+}
+
+/**
+ * What each stage is doing, in the words of someone who does not work here.
+ *
+ * A stage with no entry falls back to its own name with the hyphens taken out,
+ * which reads acceptably ("state merge") and — crucially — still shows the
+ * notice. Falling silent on an unrecognised stage would hide the warning in
+ * exactly the case nobody anticipated.
+ */
+const STAGE_IN_PLAIN_WORDS: Record<string, string> = {
+  diarization: 'telling the voices apart',
+  cleaning: 'tidying up the transcript',
+  translation: 'translating the transcript',
+  classification: 'sorting what was said into sections',
+  'analyst-chain': 'drafting the documents',
+};
+
 interface WireBrief {
   readonly body: string;
   readonly provenance: WireProvenance;
@@ -72,6 +97,36 @@ function citationOf(citations: readonly WireCitation[]): Claim['citation'] {
   };
 }
 
+/**
+ * The sentence the screen shows when the write-up stopped early.
+ *
+ * `null` covers both "it finished" and "it was never run": a notice on the
+ * second would appear on every meeting whose debrief is simply still to come,
+ * which is how a warning becomes wallpaper. The stage name carries the notice
+ * on its own — a stage refused before it was attempted records no reason, and
+ * withholding the notice for want of one would hide the very case where the
+ * operator has least to go on.
+ */
+export function incompleteNotice(
+  completion: WireCompletion | null | undefined,
+): string | null {
+  if (!completion || completion.complete || completion.stopped_at === null) return null;
+
+  const stage = STAGE_IN_PLAIN_WORDS[completion.stopped_at] ?? completion.stopped_at.replace(/-/g, ' ');
+  // `reason` is deliberately not rendered. A live run put a stage record's own
+  // text on this screen — "supply `diarize` to anthropic_debrief_engines()
+  // (architecture §3.3, ADR-011)" — which is true, and is addressed to
+  // somebody else. The service classifies the kind of failure; the sentence is
+  // composed here, where the reader is.
+  const because =
+    completion.cause === 'not_configured'
+      ? ' Something it needs is not set up yet.'
+      : completion.cause === 'failed'
+        ? ' The call it needed did not get through.'
+        : '';
+  return `The write-up stopped while ${stage}.${because} Nothing below is missing on purpose.`;
+}
+
 export interface DebriefData extends DebriefScreenProps {
   readonly status: ResourceStatus;
   readonly error: string | null;
@@ -90,9 +145,15 @@ export function useDebrief(): DebriefData {
   const questions = useResource<readonly WireOpenQuestion[]>(scoped('open-questions'));
   const decisions = useResource<readonly WireDecision[]>(scoped('decision-log'));
   const brief = useResource<WireBrief>(scoped('project-brief'));
+  // Keyed by meeting rather than session: this one is about the pipeline run,
+  // not about an artifact the record path filed under a session id.
+  const completion = useResource<WireCompletion>(
+    id === null ? null : `/api/meetings/${encodeURIComponent(id)}/debrief/completion`,
+  );
 
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
+    incomplete: incompleteNotice(completion.data),
     openQuestions: useMemo(
       (): readonly Claim[] =>
         (questions.data ?? []).map((question) => ({
@@ -129,6 +190,9 @@ export function useDebrief(): DebriefData {
       id === null
         ? selectionStatus(combineStatus(engagement.status, meeting.status), id)
         : combineStatus(engagement.status, meeting.status),
+    // `completion.error` is deliberately absent: a 404 there is the ordinary
+    // case, and letting it decide the screen's error would replace a rendered
+    // debrief with a failure message on every meeting that finished cleanly.
     error: engagement.error ?? meeting.error ?? questions.error ?? decisions.error ?? brief.error,
     meetingId: id,
     idleHint: meetingIdleHint(engagement, 'Artifacts appear after one has been debriefed.'),

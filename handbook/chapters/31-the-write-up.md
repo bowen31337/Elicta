@@ -64,11 +64,22 @@ a complete-looking document with a fabricated section in it, which is not.
 
 ## Where this is honest about itself
 
-The whole sequence works, and so does asking follow-up questions in your own
-words. Producing a complete run needs one of the outside services with enough
-capacity; the connection has been tested against the live service and works, but
-the account used for testing was rate limited, so a full run has not yet been
-produced end to end.
+Asking follow-up questions in your own words works, against the real service,
+and was watched doing it.
+
+The documents are a different matter. The write-up is built in stages, each one
+feeding the next, and a stage that cannot do its job stops there rather than
+guessing at the rest. The first stage is telling the voices apart, and that
+needs a transcription service Elicta is not yet connected to — so the sequence
+halts at the first step and none of the documents is produced. Everything after
+it is finished and waiting on that one piece, which is the same piece missing
+from the live suggestions and the recording review.
+
+When a run stops, the screen tells you which step it stopped at and whether
+something was not set up or a call did not get through, so a short write-up is
+never left looking like a meeting where little was decided. That sentence is
+written for you; the step's own record, which is written for whoever maintains
+the software, is deliberately kept off the screen.
 
 <!-- HANDBOOK-NAV -->
 

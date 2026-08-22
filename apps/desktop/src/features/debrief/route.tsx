@@ -24,6 +24,8 @@ export interface DebriefScreenProps {
   readonly openQuestions: readonly Claim[];
   readonly decisions: readonly Claim[];
   readonly brief: Claim | null;
+  /** Why the write-up is short, when it is. See `incompleteNotice`. */
+  readonly incomplete?: string | null;
 }
 
 function ClaimRow({ claim }: { claim: Claim }) {
@@ -49,6 +51,7 @@ export function DebriefScreen({
   openQuestions,
   decisions,
   brief,
+  incomplete = null,
 }: DebriefScreenProps) {
   return (
     <main className="screen" aria-labelledby="debrief-title">
@@ -62,6 +65,12 @@ export function DebriefScreen({
           without one.
         </p>
       </header>
+
+      {incomplete ? (
+        <p className="degraded-note t-footnote" role="status">
+          {incomplete}
+        </p>
+      ) : null}
 
       {brief ? (
         <section aria-labelledby="brief-title">
@@ -128,6 +137,7 @@ export default function DebriefRoute() {
       openQuestions={debrief.openQuestions}
       decisions={debrief.decisions}
       brief={debrief.brief}
+      incomplete={debrief.incomplete}
     />
   );
 }
