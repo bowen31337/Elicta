@@ -53,6 +53,7 @@ UpdateEngagement = Callable[
 GetEngagement = Callable[[str], Awaitable[EngagementRecord | None]]
 GetDocumentCount = Callable[[str], Awaitable[int]]
 ListEngagements = Callable[[int, int], Awaitable[tuple[list[EngagementSummary], int]]]
+DeleteEngagement = Callable[[str], Awaitable[bool]]
 
 
 def build_engagement_router(
@@ -61,6 +62,7 @@ def build_engagement_router(
     get_engagement: GetEngagement | None = None,
     get_document_count: GetDocumentCount | None = None,
     list_engagements: ListEngagements | None = None,
+    delete_engagement: DeleteEngagement | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/engagements", tags=["engagements"])
 
@@ -93,6 +95,21 @@ def build_engagement_router(
     ) -> EngagementCreateResponse:
         engagement_id = await create_engagement(payload)
         return EngagementCreateResponse(engagement_id=engagement_id)
+
+    if delete_engagement is not None:
+
+        @router.delete("/{engagement_id}", status_code=204)
+        async def delete_engagement_endpoint(engagement_id: str) -> None:
+            """Take an engagement out of view (soft).
+
+            The row stays, marked, and so does everything hanging off it. A
+            removal here is about a list an operator has to read, not about
+            erasing a client — and in a product that records client meetings,
+            those two should not be the same button.
+            """
+
+            if not await delete_engagement(engagement_id):
+                raise HTTPException(status_code=404, detail="engagement not found")
 
     @router.patch(
         "/{engagement_id}",

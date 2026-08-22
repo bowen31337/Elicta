@@ -53,8 +53,12 @@ describe('prep', () => {
     const { container } = render(<PrepScreen {...PREP} />);
 
     // Scoped to the tags themselves: the explanatory text below the list also
-    // contains the words "ground truth".
-    const tags = [...container.querySelectorAll('.pill')].map((pill) => pill.textContent);
+    // contains the words "ground truth". The tag is a select rather than a
+    // pill now — journey 1 says the operator chooses it — and its value is
+    // still the tag, visible without opening anything.
+    const tags = [...container.querySelectorAll<HTMLSelectElement>('[id^="tag-"]')].map(
+      (select) => select.value,
+    );
     expect(tags.filter((tag) => tag === 'ground truth')).toHaveLength(2);
     expect(tags).toContain('hypothesis');
     expect(tags).toContain('superseded');
@@ -160,8 +164,8 @@ describe('replay', () => {
     render(<ReplayScreen {...REPLAY} />);
 
     expect(screen.getByText('82%')).toBeInTheDocument();
-    expect(screen.getByText('M1 needs 70%')).toBeInTheDocument();
-    expect(screen.getByText('M2 needs zero')).toBeInTheDocument();
+    expect(screen.getByText(/36 of 44 rated · M1 needs 70%/)).toBeInTheDocument();
+    expect(screen.getByText(/of 44 rated · M2 needs zero/)).toBeInTheDocument();
   });
 
   it('marks a failing run as failing', () => {
@@ -287,5 +291,36 @@ describe('provenance the OS could not establish', () => {
     expect(
       screen.getByText(/management state of this machine could not be read/),
     ).toBeInTheDocument();
+  });
+});
+
+describe('the About screen with nothing to report about permissions', () => {
+  /**
+   * A live run rendered the Permissions heading with nothing under it, and the
+   * check "the OS permissions this build holds are listed" failed on zero rows.
+   * The list is passed in empty and always has been: nothing asks the operating
+   * system what this build was granted, and outside the installed application
+   * there is no operating system to ask.
+   *
+   * A bare heading reads as "no permissions are needed", which is the opposite
+   * of true — capture needs the microphone. Saying nothing is the one answer
+   * that misleads.
+   */
+  it('explains an empty permission list rather than showing a bare heading', () => {
+    render(<AboutScreen {...ABOUT_MANAGED} permissions={[]} />);
+
+    expect(screen.getByText(/cannot be read here/i)).toBeInTheDocument();
+  });
+
+  it('says nothing extra once there is something to list', () => {
+    render(
+      <AboutScreen
+        {...ABOUT_MANAGED}
+        permissions={[{ name: 'Microphone', why: 'Recording the meeting', granted: true }]}
+      />,
+    );
+
+    expect(screen.queryByText(/cannot be read here/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Microphone')).toBeInTheDocument();
   });
 });

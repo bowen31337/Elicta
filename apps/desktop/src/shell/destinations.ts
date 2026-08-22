@@ -42,6 +42,18 @@ export interface Destination {
 
 export const DESTINATIONS: readonly Destination[] = [
   {
+    // First, because it is the first question: which client is this? The arc
+    // below it is about one engagement, and until now nothing in the
+    // navigation chose which — so creating and removing clients had ended up
+    // at the foot of Preparation, on a page headed with a different client's
+    // name.
+    feature: 'engagements',
+    title: 'Engagements',
+    caption: 'Your clients, and which one you are working on',
+    glyph: 'clients',
+    section: 'before',
+  },
+  {
     feature: 'prep',
     title: 'Preparation',
     caption: 'What you know going in, and the questions worth asking',

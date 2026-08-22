@@ -107,3 +107,31 @@ describe('journey scenes', () => {
     expect(fixtures).not.toMatch(/oat-[A-Za-z0-9-]{10,}/);
   });
 });
+
+describe('what the degraded banner says', () => {
+  /**
+   * The panel has four reasons it can be running on the fast path only, and
+   * they do not share a remedy: waiting out a throttle, re-entering a rejected
+   * key, changing a plan, and waiting for a network. Showing "the model is
+   * unreachable" for all four spends the operator's attention on the wrong one.
+   */
+  it('names the reason the service gave', () => {
+    render(
+      <OperatorPanel
+        initial={{
+          ...NUDGE_SURFACED,
+          modelReachable: false,
+          degradedReason: 'The AI provider refused the configured credential.',
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/refused the configured credential/i)).toBeInTheDocument();
+  });
+
+  it('falls back to a plain sentence when no reason was given', () => {
+    render(<OperatorPanel initial={{ ...NUDGE_SURFACED, modelReachable: false }} />);
+
+    expect(screen.getByText(/model is unreachable/i)).toBeInTheDocument();
+  });
+});

@@ -10,6 +10,7 @@
  * reader that announced these too would read each destination twice.
  */
 export type GlyphName =
+  | 'clients'
   | 'doc'
   | 'seal'
   | 'waveform'
@@ -25,6 +26,13 @@ export type GlyphName =
   | 'default';
 
 const PATHS: Record<GlyphName, JSX.Element> = {
+  // A folder of clients: the one thing every other screen hangs off.
+  clients: (
+    <>
+      <path d="M3.75 7.25a1 1 0 0 1 1-1h4l1.75 2h8.75a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-14.5a1 1 0 0 1-1-1Z" />
+      <path d="M7.5 13h9" />
+    </>
+  ),
   doc: (
     <>
       <path d="M6 3.75h6.5L18 9.25v11a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.75a1 1 0 0 1 1-1Z" />

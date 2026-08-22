@@ -1,3 +1,5 @@
+import { useCallback } from 'react';
+
 import {
   meetingIdleHint,
   meetingTitle,
@@ -6,7 +8,8 @@ import {
   useCurrentMeeting,
 } from '../../services/selection';
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
-import type { ConsentScreenProps } from './route';
+import { confirmConsent, startSession, type SessionStarted } from './consentActions';
+import type { ConsentGateStatus, ConsentScreenProps } from './route';
 
 /**
  * What the consent screen shows, read from the service (PRD L1/L2, D3).
@@ -22,10 +25,16 @@ import type { ConsentScreenProps } from './route';
  * defaulting to either answer: showing "confirmed" would be unsafe and showing
  * "required" would be a lie about a meeting that may well have consent.
  */
-type GateStatus = 'not_required' | 'awaiting_confirmation' | 'confirmed';
+interface WirePrompt {
+  readonly title: string;
+  readonly body: string;
+  readonly legal_basis: string;
+}
 
 interface WireGate {
-  readonly status: GateStatus;
+  readonly status: ConsentGateStatus;
+  /** Sent only while confirmation is outstanding; the screen shows it then. */
+  readonly prompt?: WirePrompt | null;
 }
 
 interface WireConsentRecord {
@@ -66,7 +75,48 @@ export function useConsent(): ConsentData {
       : `/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-record`,
   );
 
-  const gateStatus = gate.data?.status ?? null;
+  // Until the gate has answered, the safe assumption is the one that asks:
+  // a screen that guessed `confirmed` would open capture on a meeting that
+  // may have no consent at all. `status` keeps this off screen anyway —
+  // `ConsentRoute` renders `ScreenState` until the read completes — but the
+  // default is chosen so that a future caller reaching past that cannot be
+  // let through by an absent answer.
+  const gateStatus: ConsentGateStatus = gate.data?.status ?? 'awaiting_confirmation';
+  const wirePrompt = gate.data?.prompt ?? null;
+
+  const { meetingId } = meeting;
+  const { reload: reloadGate } = gate;
+  const { reload: reloadRecord } = record;
+
+  /**
+   * Confirming re-reads both halves rather than assuming what the write did.
+   * The gate is the service's decision and the record is its attribution;
+   * writing one and inferring the other locally is the shape of the bug that
+   * left consent recorded and read back as never given.
+   */
+  const confirm = useCallback(
+    async (confirmedBy: string) => {
+      if (meetingId === null) {
+        throw new Error('No meeting is selected, so there is nothing to confirm consent for.');
+      }
+      await confirmConsent(meetingId, confirmedBy);
+      reloadGate();
+      reloadRecord();
+    },
+    [meetingId, reloadGate, reloadRecord],
+  );
+
+  /**
+   * The service asks its own gate before allocating anything, so a start
+   * refused for want of consent comes back as a 403 naming consent rather
+   * than as a screen that quietly did nothing.
+   */
+  const start = useCallback(async (): Promise<SessionStarted> => {
+    if (meetingId === null) {
+      throw new Error('No meeting is selected, so there is nothing to start.');
+    }
+    return await startSession(meetingId);
+  }, [meetingId]);
 
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
@@ -74,6 +124,16 @@ export function useConsent(): ConsentData {
     // it is what decides `not_required`: consent captured once for the whole
     // engagement is why this meeting is not being asked again.
     consentModel: gateStatus === 'not_required' ? 'standing for the engagement' : 'per meeting',
+    gateStatus,
+    prompt:
+      wirePrompt === null || wirePrompt === undefined
+        ? null
+        : {
+            title: wirePrompt.title,
+            body: wirePrompt.body,
+            legalBasis: wirePrompt.legal_basis,
+          },
+    actions: { confirm, start },
     confirmedBy: record.data?.confirmed_by ?? null,
     confirmedAt:
       record.data === null || record.data === undefined

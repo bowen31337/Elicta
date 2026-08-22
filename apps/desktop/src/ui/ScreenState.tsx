@@ -1,5 +1,7 @@
 import '../features/prep/screens.css';
 
+import type { ReactNode } from 'react';
+
 import { ScreenEyebrow } from './Mark';
 import type { ResourceStatus } from '../services/useResource';
 
@@ -35,6 +37,13 @@ export interface ScreenStateProps {
   /** What the operator would have to do for this screen to have something. */
   readonly idleHint?: string;
   readonly onRetry?: () => void;
+  /**
+   * What the operator can do about it, when there is something. `idle` on the
+   * preparation screen is not a dead end — there is no engagement, and making
+   * one is the first step of journey 1 — so the screen puts the form here
+   * rather than describing a control that lives somewhere else.
+   */
+  readonly children?: ReactNode;
 }
 
 const TITLE: Record<ScreenStateProps['status'], string> = {
@@ -43,7 +52,14 @@ const TITLE: Record<ScreenStateProps['status'], string> = {
   idle: 'Nothing selected yet',
 };
 
-export function ScreenState({ eyebrow, status, error, idleHint, onRetry }: ScreenStateProps) {
+export function ScreenState({
+  eyebrow,
+  status,
+  error,
+  idleHint,
+  onRetry,
+  children,
+}: ScreenStateProps) {
   return (
     <main className="screen" aria-labelledby="screen-state-title">
       <header className="screen-head">
@@ -82,6 +98,8 @@ export function ScreenState({ eyebrow, status, error, idleHint, onRetry }: Scree
       {status === 'idle' && idleHint ? (
         <p className="t-body hint">{idleHint}</p>
       ) : null}
+
+      {children}
     </main>
   );
 }

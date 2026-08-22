@@ -23,6 +23,19 @@ const apiProxy = {
   },
 };
 
+// Serving over TLS, when `start.sh --https` has generated a certificate and
+// pointed us at it. This is not about eavesdropping on a LAN: browsers hand
+// out `navigator.mediaDevices` only in a *secure context*, so on a plain-HTTP
+// address that is not `localhost` the microphone API is not merely blocked,
+// it is absent — there is nothing to grant. A self-signed certificate is
+// enough to make the context secure, which is what the capture screen needs.
+const certFile = process.env.ELICTA_HTTPS_CERT;
+const keyFile = process.env.ELICTA_HTTPS_KEY;
+const https =
+  certFile && keyFile
+    ? { cert: readFileSync(certFile), key: readFileSync(keyFile) }
+    : undefined;
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -40,6 +53,7 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     proxy: apiProxy,
+    https,
     hmr: host
       ? {
           protocol: "ws",
@@ -53,5 +67,6 @@ export default defineConfig({
   },
   preview: {
     proxy: apiProxy,
+    https,
   },
 });

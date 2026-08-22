@@ -18,12 +18,36 @@ import type { ArcScreenProps } from '../features/arc/route';
 import type { CaptureScreenProps } from '../features/capture/route';
 import type { ConsentScreenProps } from '../features/consent/route';
 import type { DebriefScreenProps } from '../features/debrief/route';
+import type { EngagementsScreenProps } from '../features/engagements/route';
 import type { PrepScreenProps } from '../features/prep/route';
 import type { RecordingScreenProps } from '../features/recording/route';
 import type { ReplayScreenProps } from '../features/replay/route';
 
 export const CLIENT = 'Northwind Logistics';
 export const MEETING = 'Discovery 3 — integrations and volumes';
+
+export const ENGAGEMENTS: EngagementsScreenProps = {
+  engagements: [
+    {
+      id: 'eng-1',
+      clientOrganisation: CLIENT,
+      sector: 'Freight and logistics',
+      commercialContext: 'Fixed-price discovery, three meetings',
+    },
+    {
+      id: 'eng-2',
+      clientOrganisation: 'Calder & Rowe',
+      sector: 'Professional services',
+      commercialContext: 'Matter-management replacement',
+    },
+  ],
+  currentId: 'eng-1',
+  actions: {
+    open: () => undefined,
+    create: async () => undefined,
+    remove: async () => undefined,
+  },
+};
 
 export const PREP: PrepScreenProps = {
   clientOrganisation: CLIENT,
@@ -33,7 +57,22 @@ export const PREP: PrepScreenProps = {
     { id: 'doc-3', name: 'Proposed integration approach', status: 'hypothesis' },
     { id: 'doc-4', name: 'Original RFP response', status: 'superseded' },
   ],
-  vocabulary: ['Northwind', 'Zephyr WMS', 'Consignment', 'Cross-dock', 'SLA-4'],
+  meetings: [
+    {
+      id: 'meeting-1',
+      purpose: 'Discovery 3 — integrations and volumes',
+      captureMode: 'line-in',
+      state: 'scheduled',
+      scheduledAt: '2026-08-25T09:00:00Z',
+    },
+  ],
+  vocabulary: [
+    { id: 'term-1', term: 'Northwind' },
+    { id: 'term-2', term: 'Zephyr WMS' },
+    { id: 'term-3', term: 'Consignment' },
+    { id: 'term-4', term: 'Cross-dock' },
+    { id: 'term-5', term: 'SLA-4' },
+  ],
   bank: {
     sections: [
       {
@@ -78,21 +117,80 @@ export const PREP: PrepScreenProps = {
       },
     ],
   },
+  // A screenshot is taken with no service behind it, so the writes resolve
+  // without going anywhere. This is the one place in the codebase where an
+  // inert control is correct: the harness is photographing the screen, not
+  // operating it. The shipped route supplies calls that reach the service.
+  actions: {
+    prune: async () => undefined,
+    move: async () => undefined,
+    compile: async () => undefined,
+    addTerm: async () => undefined,
+    attach: async () => undefined,
+    upload: async () => undefined,
+    removeDocument: async () => undefined,
+    removeTerm: async () => undefined,
+    addMeeting: async () => undefined,
+    retag: async () => undefined,
+  },
+};
+
+/**
+ * One meeting, before and after consent is confirmed.
+ *
+ * These two were not the same scenario: the pending one overrode
+ * `consentModel` to 'per meeting' while the confirmed one said 'standing for
+ * the engagement', so read in sequence — which is how journey 2 presents them
+ * — confirming consent appeared to change how the engagement captures it.
+ * Worse, the confirmed fixture described a screen the product cannot produce:
+ * 'standing for the engagement' is what the screen says when the gate answers
+ * `not_required`, and that state records no confirmation, so it can never
+ * carry a named confirmer. Both now run the one per-meeting scenario the
+ * journey narrates.
+ */
+export const CONSENT_PENDING: ConsentScreenProps = {
+  meetingTitle: MEETING,
+  consentModel: 'per meeting',
+  gateStatus: 'awaiting_confirmation',
+  prompt: {
+    title: 'Recording consent required',
+    body:
+      'This meeting will be recorded and transcribed. Continuing confirms that ' +
+      'every participant has been informed and has consented to being recorded.',
+    legalBasis: 'NSW Surveillance Devices Act — all-party consent',
+  },
+  confirmedBy: null,
+  confirmedAt: null,
+  captureMode: 'Line-in from the meeting machine',
+  actions: {
+    confirm: async () => undefined,
+    start: async () => ({ sessionId: 'session-4', startedAt: '2026-08-18T09:59:00Z' }),
+  },
 };
 
 export const CONSENT_CONFIRMED: ConsentScreenProps = {
-  meetingTitle: MEETING,
-  consentModel: 'standing for the engagement',
+  ...CONSENT_PENDING,
+  gateStatus: 'confirmed',
+  prompt: null,
   confirmedBy: 'Priya Raman (delivery lead)',
   confirmedAt: '18 Aug 2026, 09:58',
-  captureMode: 'Line-in from the meeting machine',
 };
 
-export const CONSENT_PENDING: ConsentScreenProps = {
-  ...CONSENT_CONFIRMED,
-  consentModel: 'per meeting',
-  confirmedBy: null,
-  confirmedAt: null,
+/**
+ * The state every engagement is in at this stage.
+ *
+ * `DEFAULT_CONSENT_MODEL` is engagement-level, so an engagement nobody has
+ * configured never asks for a per-meeting confirmation and the gate answers
+ * `not_required`. The two fixtures above show the asking model, which is real
+ * and supported but reached only by configuring it — so without this one the
+ * handbook would illustrate the consent screen exclusively in a state no
+ * reader of this build will see.
+ */
+export const CONSENT_NOT_REQUIRED: ConsentScreenProps = {
+  ...CONSENT_PENDING,
+  consentModel: 'standing for the engagement',
+  gateStatus: 'not_required',
+  prompt: null,
 };
 
 export const RECORDING: RecordingScreenProps = {
@@ -258,6 +356,10 @@ export const REPLAY: ReplayScreenProps = {
   precisionPercent: 82,
   precisionThreshold: 70,
   embarrassmentCount: 0,
+  // A rate is unreadable without what it was taken over: 82% of 4 ratings and
+  // 82% of 400 do not mean the same thing to somebody deciding on a release.
+  ratedCount: 44,
+  usefulCount: 36,
   suggestions: [
     {
       id: 's-1',
@@ -296,6 +398,8 @@ export const REPLAY_FAILING: ReplayScreenProps = {
   runLabel: 'Discovery 3 — replay 2',
   precisionPercent: 64,
   embarrassmentCount: 1,
+  ratedCount: 44,
+  usefulCount: 28,
   suggestions: [
     ...REPLAY.suggestions.slice(0, 3),
     {

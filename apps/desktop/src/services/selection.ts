@@ -119,6 +119,8 @@ export interface CurrentEngagement {
   readonly status: ResourceStatus;
   readonly error: string | null;
   readonly select: (engagementId: string) => void;
+  /** Re-reads the engagement list — what a screen calls after creating one. */
+  readonly reload: () => void;
 }
 
 /**
@@ -156,6 +158,7 @@ export function useCurrentEngagement(): CurrentEngagement {
     status: list.status,
     error: list.error,
     select: saveSelectedEngagementId,
+    reload: list.reload,
   };
 }
 

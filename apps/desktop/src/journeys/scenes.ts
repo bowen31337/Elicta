@@ -26,7 +26,13 @@ export const BEFORE_MEETING: PanelState = {
     ],
     timeRemainingMs: 45 * 60 * 1000,
   },
-  languages: [],
+  // Before anyone speaks, the strip shows what Elicta is *listening for* —
+  // derived from the client background when the engagement was made. Nothing
+  // has been heard, so nothing carries a support badge.
+  languages: [
+    { language: 'en', tier: null, heard: false },
+    { language: 'zh', tier: null, heard: false },
+  ],
 };
 
 export const NUDGE_SURFACED: PanelState = {
@@ -47,7 +53,7 @@ export const NUDGE_SURFACED: PanelState = {
     ],
     timeRemainingMs: 22 * 60 * 1000,
   },
-  languages: [{ language: 'en', tier: 'tier-1', confidence: 0.97 }],
+  languages: [{ language: 'en', tier: 'tier-1', heard: true, confidence: 0.97 }],
 };
 
 export const CODE_SWITCHED: PanelState = {
@@ -61,8 +67,8 @@ export const CODE_SWITCHED: PanelState = {
   history: [NUDGE_SURFACED.active!],
   coverage: NUDGE_SURFACED.coverage,
   languages: [
-    { language: 'en', tier: 'tier-1', confidence: 0.94 },
-    { language: 'zh', tier: 'tier-1', confidence: 0.89 },
+    { language: 'en', tier: 'tier-1', heard: true, confidence: 0.94 },
+    { language: 'zh', tier: 'tier-1', heard: true, confidence: 0.89 },
   ],
   activeTier: 'tier-1',
 };
@@ -71,6 +77,10 @@ export const CODE_SWITCHED: PanelState = {
 export const DEGRADED: PanelState = {
   ...NUDGE_SURFACED,
   modelReachable: false,
+  // A refused credential rather than a bare outage, because it is the reason
+  // an operator can do something about — and the one a banner reading only
+  // "the model is unreachable" would send them looking for the wrong fix.
+  degradedReason: 'The AI provider refused the configured credential. Re-enter it in Settings.',
 };
 
 export const SCENES: Record<string, PanelState> = {

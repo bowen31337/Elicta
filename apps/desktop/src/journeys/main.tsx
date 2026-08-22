@@ -9,6 +9,7 @@ import { ConsentScreen } from '../features/consent/route';
 import { DebriefChatScreen } from '../features/debrief-chat/route';
 import { DebriefScreen } from '../features/debrief/route';
 import { OperatorPanel } from '../features/panel/route';
+import { EngagementsScreen } from '../features/engagements/route';
 import { PrepScreen } from '../features/prep/route';
 import { RecordingScreen } from '../features/recording/route';
 import { ReplayScreen } from '../features/replay/route';
@@ -26,10 +27,12 @@ import {
   CAPTURING_ACOUSTIC,
   PAUSED,
   CONSENT_CONFIRMED,
+  CONSENT_NOT_REQUIRED,
   CONSENT_PENDING,
   DEBRIEF,
   DEBRIEF_CHAT,
   DEBRIEF_CHAT_EMPTY,
+  ENGAGEMENTS,
   PREP,
   RECORDING,
   REPLAY,
@@ -45,10 +48,12 @@ import {
  * this directory.
  */
 const SCREENS: Record<string, () => JSX.Element> = {
+  engagements: () => <EngagementsScreen {...ENGAGEMENTS} />,
   prep: () => <PrepScreen {...PREP} />,
   'prep-uncompiled': () => <PrepScreen {...PREP} bank={null} />,
   'consent-pending': () => <ConsentScreen {...CONSENT_PENDING} />,
   'consent-confirmed': () => <ConsentScreen {...CONSENT_CONFIRMED} />,
+  'consent-not-required': () => <ConsentScreen {...CONSENT_NOT_REQUIRED} />,
   recording: () => <RecordingScreen {...RECORDING} />,
   debrief: () => <DebriefScreen {...DEBRIEF} />,
   'debrief-chat': () => <DebriefChatScreen {...DEBRIEF_CHAT} />,
