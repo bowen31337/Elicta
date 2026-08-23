@@ -4,8 +4,7 @@ import { useCallback, useState } from 'react';
 
 import { ScreenEyebrow } from '../../ui/Mark';
 import { ScreenState } from '../../ui/ScreenState';
-import type { SessionStarted } from './consentActions';
-import { readableTimestamp, useConsent } from './useConsent';
+import { useConsent } from './useConsent';
 
 /**
  * Journey 2 — consent, then capture.
@@ -38,8 +37,15 @@ export interface ConsentPrompt {
 export interface ConsentActions {
   /** Puts consent on the record for this meeting, against a named person. */
   readonly confirm: (confirmedBy: string) => Promise<void>;
-  /** Opens the capture session this gate exists to admit. */
-  readonly start: () => Promise<SessionStarted>;
+  /**
+   * Goes to the recording screen, which is where the meeting actually begins.
+   *
+   * This used to be `start`, and it booked the meeting on the service from
+   * here. It does not any more: the meeting starts when the recording starts,
+   * and this screen can neither choose an input nor show that sound is
+   * arriving on it.
+   */
+  readonly proceed: () => void;
 }
 
 export interface ConsentScreenProps {
@@ -50,7 +56,6 @@ export interface ConsentScreenProps {
   readonly prompt: ConsentPrompt | null;
   readonly confirmedBy: string | null;
   readonly confirmedAt: string | null;
-  readonly captureMode: string;
   readonly actions: ConsentActions;
 }
 
@@ -136,15 +141,10 @@ export function ConsentScreen({
   prompt,
   confirmedBy,
   confirmedAt,
-  captureMode,
   actions,
 }: ConsentScreenProps) {
   const write = useWrite();
-  // Starting keeps its own error, so a refused start does not overwrite what
-  // the screen was saying about consent, or the other way round.
-  const starting = useWrite();
   const [confirmedByInput, setConfirmedByInput] = useState('');
-  const [session, setSession] = useState<SessionStarted | null>(null);
 
   // The service's own rule (`ConsentGate.capture_may_begin`): everything but
   // an outstanding confirmation lets capture begin.
@@ -155,11 +155,6 @@ export function ConsentScreen({
     void write.run(async () => {
       await actions.confirm(confirmedByInput);
       setConfirmedByInput('');
-    });
-
-  const start = () =>
-    void starting.run(async () => {
-      setSession(await actions.start());
     });
 
   return (
@@ -272,36 +267,30 @@ export function ConsentScreen({
         </div>
       </section>
 
-      <section aria-labelledby="capture-state">
-        <h2 className="t-section" id="capture-state">
-          Capture
+      <section aria-labelledby="next-step">
+        <h2 className="t-section" id="next-step">
+          Next
         </h2>
         <div className="group">
           <div className="row">
             <div className="row-main">
-              <span className="t-body">{captureMode}</span>
+              <span className="t-body">Set up the recording</span>
               <span className="t-footnote">
-                {session === null
-                  ? `Platform voice processing is off — it is tuned for a listener, and removes detail the transcriber uses.`
-                  : `Session live since ${readableTimestamp(session.startedAt)}.`}
+                {captureMayBegin
+                  ? 'Choose your microphone and check that sound is arriving, then start recording. The meeting begins when the recording does.'
+                  : 'Confirm consent above, and this opens.'}
               </span>
             </div>
-            {session === null ? null : <span className="pill pill--ok">Live</span>}
             <button
               type="button"
               className="btn btn--filled"
-              disabled={!captureMayBegin || session !== null || starting.busy}
-              onClick={start}
+              disabled={!captureMayBegin}
+              onClick={actions.proceed}
             >
-              Start
+              Continue to recording
             </button>
           </div>
         </div>
-        {starting.error === null ? null : (
-          <p className="t-footnote prep-error" role="alert">
-            {starting.error}
-          </p>
-        )}
       </section>
     </main>
   );
@@ -316,8 +305,10 @@ export function ConsentScreen({
  * A gate that lies in the safe direction still trains the operator to ignore
  * it.
  */
-export default function ConsentRoute() {
-  const consent = useConsent();
+export default function ConsentRoute({
+  navigate,
+}: { navigate?: (to: string) => void } = {}) {
+  const consent = useConsent(navigate);
 
   if (consent.status !== 'ready' && consent.status !== 'missing') {
     return (
@@ -338,7 +329,6 @@ export default function ConsentRoute() {
       prompt={consent.prompt}
       confirmedBy={consent.confirmedBy}
       confirmedAt={consent.confirmedAt}
-      captureMode={consent.captureMode}
       actions={consent.actions}
     />
   );

@@ -55,6 +55,7 @@ const SCENES = [
   'capturing',
   'paused',
   'capture-acoustic',
+  'checking',
   'about-managed',
   'about-unmanaged',
   'settings-first-run',

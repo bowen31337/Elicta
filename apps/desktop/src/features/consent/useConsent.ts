@@ -8,7 +8,7 @@ import {
   useCurrentMeeting,
 } from '../../services/selection';
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
-import { confirmConsent, startSession, type SessionStarted } from './consentActions';
+import { confirmConsent } from './consentActions';
 import type { ConsentGateStatus, ConsentScreenProps } from './route';
 
 /**
@@ -43,6 +43,11 @@ interface WireConsentRecord {
   readonly confirmed_at: string;
 }
 
+function defaultNavigate(to: string): void {
+  if (typeof window === 'undefined') return;
+  window.location.hash = to;
+}
+
 /** A timestamp an operator can read, from the service's ISO-8601. */
 export function readableTimestamp(iso: string): string {
   const at = new Date(iso);
@@ -58,7 +63,7 @@ export interface ConsentData extends ConsentScreenProps {
   readonly idleHint: string;
 }
 
-export function useConsent(): ConsentData {
+export function useConsent(navigate: (to: string) => void = defaultNavigate): ConsentData {
   const engagement = useCurrentEngagement();
   const meeting = useCurrentMeeting(engagement.engagementId);
 
@@ -107,16 +112,13 @@ export function useConsent(): ConsentData {
   );
 
   /**
-   * The service asks its own gate before allocating anything, so a start
-   * refused for want of consent comes back as a 403 naming consent rather
-   * than as a screen that quietly did nothing.
+   * The gate's job ends when it opens.
+   *
+   * Nothing is booked here and no device is touched: the recording screen owns
+   * both, because it is the one that can offer a choice of input and show that
+   * sound is arriving on it.
    */
-  const start = useCallback(async (): Promise<SessionStarted> => {
-    if (meetingId === null) {
-      throw new Error('No meeting is selected, so there is nothing to start.');
-    }
-    return await startSession(meetingId);
-  }, [meetingId]);
+  const proceed = useCallback(() => navigate('#/capture'), [navigate]);
 
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
@@ -133,13 +135,12 @@ export function useConsent(): ConsentData {
             body: wirePrompt.body,
             legalBasis: wirePrompt.legal_basis,
           },
-    actions: { confirm, start },
+    actions: { confirm, proceed },
     confirmedBy: record.data?.confirmed_by ?? null,
     confirmedAt:
       record.data === null || record.data === undefined
         ? null
         : readableTimestamp(record.data.confirmed_at),
-    captureMode: meeting.meeting?.capture_mode ?? 'Not set',
     // `record` is left out of the combined status on purpose: its 404 means
     // "nobody has confirmed yet", which this screen exists to display.
     status:

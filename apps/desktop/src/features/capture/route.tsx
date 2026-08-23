@@ -5,7 +5,10 @@ import { useState } from 'react';
 
 import { ScreenEyebrow } from '../../ui/Mark';
 import { formatElapsed } from './elapsed';
+import { decibels, meterPosition, type AudioLevel } from './levelMeter';
+import type { CaptureStore } from '../../services/captureSession';
 import { useCapture } from './useCapture';
+import { useRecordingStart } from './useRecordingStart';
 
 /**
  * Journey 11 — controlling capture mid-meeting.
@@ -22,7 +25,7 @@ import { useCapture } from './useCapture';
  * carried by colour, an explicit word, and the button's own label together —
  * never by colour alone (WCAG 1.4.1).
  */
-export type CaptureState = 'capturing' | 'paused' | 'stopped';
+export type CaptureState = 'capturing' | 'paused' | 'checking' | 'stopped';
 
 export interface CaptureSource {
   /** The device to open. Defaults to the label for the fixed journey scenes,
@@ -33,6 +36,23 @@ export interface CaptureSource {
   readonly active: boolean;
 }
 
+/**
+ * A live reading of the open input, for the meter.
+ *
+ * Three states, not two, and the difference matters on screen. The whole prop
+ * being **absent** means this render was never given a meter — the fixed
+ * journey scenes, and any moment when nothing is recording. A present prop
+ * with a **null** level means a meter was attempted and there is no reading to
+ * be had. Collapsing those two would make every documentation screenshot
+ * announce that the browser cannot measure sound.
+ */
+export interface CaptureMetering {
+  /** The current reading, or `null` where none can be taken. */
+  readonly level: AudioLevel | null;
+  /** Recent meter positions, oldest first, for the scrolling wave. */
+  readonly waveform: readonly number[];
+}
+
 export interface CaptureScreenProps {
   readonly state: CaptureState;
   readonly elapsed: string;
@@ -41,6 +61,10 @@ export interface CaptureScreenProps {
   readonly enrolmentSeconds: number;
   /** Fired by the pause/resume control. Omitted by the fixed journey scenes. */
   readonly onTogglePause?: () => void;
+  /** Opens the chosen input without recording, so it can be seen working. */
+  readonly onCheck?: (sourceId: string) => void;
+  /** Why recording cannot begin for consent reasons. Disables the control. */
+  readonly consentBlocked?: string | null;
   /** Opens the chosen input. Omitted by the fixed journey scenes. */
   readonly onStart?: (sourceId: string) => void;
   /** Releases the device. Omitted by the fixed journey scenes. */
@@ -50,9 +74,29 @@ export interface CaptureScreenProps {
   /** Shown when the audio backend is unreachable, so "not recording" is
    *  never left looking like a choice the operator made. */
   readonly unavailableReason?: string;
+  /**
+   * Where this recording's audio is going, when that is not where the operator
+   * would assume.
+   *
+   * A recording that is being uploaded for transcription and one that is not
+   * look identical here — same word, same clock, same meter. The difference
+   * surfaces afterwards as a meeting with no transcript, which reads as a
+   * broken product rather than as the consent gate doing its job. Absent when
+   * there is nothing to say: a line confirming the ordinary case on every
+   * recording is one more thing to read past.
+   */
+  readonly uploadNote?: string | null;
+  /** A live reading of the open input. Omitted when there is no meter. */
+  readonly metering?: CaptureMetering;
 }
 
 const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: string }> = {
+  checking: {
+    word: 'Checking the microphone',
+    detail:
+      'Nothing is being recorded. Say something and watch the level move, then start recording.',
+    pill: 'pill pill--warn',
+  },
   capturing: {
     word: 'Recording',
     detail: 'Audio is being captured and transcribed.',
@@ -70,6 +114,77 @@ const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: str
   },
 };
 
+/**
+ * How loud the open input is, right now.
+ *
+ * This is the answer to the one question the rest of the screen cannot
+ * answer: *is sound actually arriving?* Without it, a muted microphone and a
+ * working one produce identical screens for the length of a meeting, and the
+ * failure is only discovered in the transcript.
+ *
+ * **It is one bar, for one device, and says so.** The audio here is a single
+ * mixed stream — `getUserMedia` opens one device, and the desktop session
+ * holds one source — so there is nothing in it to separate per person. The
+ * product does attribute speech to speakers, but it does that on finalised
+ * transcript text, seconds behind and only ever "the operator or not", which
+ * cannot drive a meter. A bar per participant would therefore be a drawn
+ * number with nothing behind it, so the note under the bar says plainly what
+ * the reading covers.
+ */
+function CaptureLevel({ metering, device }: { metering: CaptureMetering; device: string }) {
+  if (metering.level === null) {
+    // Not a meter pinned at zero: zero says the room is silent, which is a
+    // finding an operator would act on. "No reading" is a different claim.
+    return (
+      <p className="capture-meter-absent t-footnote" role="status">
+        This browser cannot measure the input level. Recording is unaffected.
+      </p>
+    );
+  }
+
+  const fill = meterPosition(metering.level.rms);
+  const peak = meterPosition(metering.level.peak);
+  const db = decibels(metering.level.peak);
+  const reading = db === null ? '—' : `${Math.round(db)} dB`;
+
+  return (
+    <div className="capture-meter">
+      {/* Decorative: the same reading is carried by the meter below, and a
+          wave announced sample by sample would be unusable to read. */}
+      <div className="capture-meter-wave" aria-hidden="true">
+        {metering.waveform.map((bar, index) => (
+          <span
+            key={index}
+            className="capture-meter-bar"
+            style={{ height: `${Math.max(2, bar * 100)}%` }}
+          />
+        ))}
+      </div>
+      <div className="capture-meter-row">
+        <span className="capture-meter-device t-footnote">{device}</span>
+        <div
+          className="capture-meter-track"
+          role="meter"
+          aria-label="Input level"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(fill * 100)}
+          aria-valuetext={db === null ? 'Silent' : `${Math.round(db)} decibels peak`}
+        >
+          <span className="capture-meter-fill" style={{ width: `${fill * 100}%` }} />
+          {/* The peak sits ahead of the average and is what clipping shows up
+              in, so it is marked rather than averaged away. */}
+          <span className="capture-meter-peakmark" style={{ left: `${peak * 100}%` }} />
+        </div>
+        <span className="capture-meter-db t-footnote tabular">{reading}</span>
+      </div>
+      <p className="capture-meter-note t-footnote">
+        One mixed stream — this room, not individual speakers.
+      </p>
+    </div>
+  );
+}
+
 export function CaptureScreen({
   state,
   elapsed,
@@ -79,8 +194,12 @@ export function CaptureScreen({
   onTogglePause,
   onStart,
   onStop,
+  onCheck,
+  consentBlocked = null,
   captureError,
   unavailableReason,
+  uploadNote,
+  metering,
 }: CaptureScreenProps) {
   const copy = STATE_COPY[state];
   const acoustic = sources.find((source) => source.active && source.kind === 'acoustic');
@@ -111,7 +230,18 @@ export function CaptureScreen({
           </div>
           <span className="t-body tabular capture-elapsed">{elapsed}</span>
         </div>
-        {state === 'stopped' ? (
+        {/* Directly under the banner, because it answers the banner's claim:
+            "Recording" is what the software believes, and this is the
+            evidence. Never shown when stopped -- there is no input open to
+            take a reading from, and an empty meter beside "Stopped" would
+            invite the reading that the room had gone quiet. */}
+        {state !== 'stopped' && metering !== undefined ? (
+          <CaptureLevel
+            metering={metering}
+            device={sources.find((source) => source.active)?.label ?? 'The open input'}
+          />
+        ) : null}
+        {state === 'stopped' || state === 'checking' ? (
           <div className="row row--form capture-controls">
             {sources.length > 1 ? (
               <>
@@ -132,11 +262,29 @@ export function CaptureScreen({
                 </select>
               </>
             ) : null}
+            {state === 'stopped' ? (
+              // Before this is pressed, a browser has told us neither the ids
+              // nor the labels of its inputs, so the list above is
+              // placeholders. Granting is what fills it in — which is why the
+              // check is a real step and not a nicety.
+              <button
+                type="button"
+                className="btn"
+                onClick={() => (selected === null ? undefined : onCheck?.(selected))}
+                disabled={blocked || selected === null}
+              >
+                Check microphone
+              </button>
+            ) : (
+              <button type="button" className="btn" onClick={onStop}>
+                Stop checking
+              </button>
+            )}
             <button
               type="button"
               className="btn btn--filled capture-toggle"
               onClick={() => (selected === null ? undefined : onStart?.(selected))}
-              disabled={blocked || selected === null}
+              disabled={blocked || selected === null || consentBlocked !== null}
             >
               Start recording
             </button>
@@ -156,6 +304,13 @@ export function CaptureScreen({
             </button>
           </div>
         )}
+        {consentBlocked ? (
+          // `status`, not `alert`: nothing has failed. This is the gate being
+          // a gate, and it names the screen that opens it.
+          <p className="capture-warning t-footnote" role="status">
+            {consentBlocked}
+          </p>
+        ) : null}
         {captureError ? (
           <p className="capture-warning t-footnote" role="alert">
             {captureError}
@@ -166,8 +321,22 @@ export function CaptureScreen({
             {unavailableReason}
           </p>
         ) : null}
+        {uploadNote ? (
+          // `status`, like the consent gate above and unlike an error: the
+          // recording is working, and what it is not doing is deliberate.
+          <p className="capture-warning t-footnote" role="status">
+            {uploadNote}
+          </p>
+        ) : null}
+        {/* The hint has to match the controls actually on screen. While
+            checking there is no pause to explain, and the thing worth saying
+            is that the input being listened to is the one that will record. */}
         <p className="t-footnote hint">
-          Pausing takes effect immediately — there is no buffered audio to flush.
+          {state === 'checking'
+            ? 'Nothing here is recorded. Starting records on this same input, without asking again.'
+            : state === 'stopped'
+              ? 'Checking opens the input and records nothing, so you can hear it working first.'
+              : 'Pausing takes effect immediately — there is no buffered audio to flush.'}
         </p>
       </section>
 
@@ -227,8 +396,14 @@ export function CaptureScreen({
   );
 }
 
-export default function CaptureRoute() {
-  const capture = useCapture();
+/**
+ * `store` is injectable only so a test drives a session of its own. The
+ * router mounts this with no props, and the application's session is the
+ * module's — the one the consent screen may already have started.
+ */
+export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
+  const capture = useCapture(store);
+  const beginning = useRecordingStart(store);
 
   // The shell reports `idle` before a meeting starts and after it ends; the
   // screen calls that `stopped`, because "idle" describes the software and
@@ -250,14 +425,26 @@ export default function CaptureRoute() {
       onTogglePause={() => {
         void (capture.status.state === 'paused' ? capture.resume() : capture.pause());
       }}
-      onStart={(sourceId) => void capture.start(sourceId)}
+      // Not `capture.start`: starting a recording books the meeting, because
+      // the meeting begins when the recording does.
+      onStart={(sourceId) => beginning.start(sourceId)}
+      onCheck={(sourceId) => beginning.check(sourceId)}
       onStop={() => void capture.stop()}
-      captureError={capture.error}
+      consentBlocked={beginning.consentBlocked}
+      captureError={beginning.error ?? capture.error}
+      // Handed over only while something is open, so `level: null` always
+      // means "no reading available" and never "nothing is recording".
+      metering={
+        state === 'stopped'
+          ? undefined
+          : { level: capture.level, waveform: capture.waveform }
+      }
       // `blockedReason` is the whole message now, not a flag the screen turns
       // into one: the old sentence blamed the desktop app for a page served
       // over plain HTTP, which is neither true nor something an operator can
       // act on.
       unavailableReason={capture.blockedReason ?? undefined}
+      uploadNote={capture.uploadNote}
     />
   );
 }

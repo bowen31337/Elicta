@@ -28,3 +28,95 @@
   background: color-mix(in srgb, var(--orange) 12%, transparent);
   color: var(--label);
 }
+
+/* --- The level meter -------------------------------------------------------
+   Sits directly under the state banner because it answers the banner's claim:
+   "Recording" is what the software believes, and this is the evidence. A muted
+   input and a working one produce an identical screen without it.
+
+   Colour is never the carrier here. The dB readout and the meter's own
+   `aria-valuetext` hold the reading; the green is supplementary, which is what
+   keeps this clear of WCAG 1.4.1 the same way the state banner is. */
+.capture-meter {
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--fill-4);
+}
+
+/* The wave is the recent history, newest at the right. Bars grow from the
+   centre in both directions, which is what makes it read as a waveform rather
+   than as a bar chart. */
+.capture-meter-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+}
+.capture-meter-wave .capture-meter-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 1px;
+  background: var(--green);
+  /* Transitioned rather than animated, so the global
+     `prefers-reduced-motion` rule in tokens.css flattens it with no
+     second implementation here. */
+  transition: height 80ms linear;
+}
+
+.capture-meter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.capture-meter-device {
+  color: var(--label-supporting);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+
+.capture-meter-track {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.capture-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 80ms linear;
+}
+/* The peak runs ahead of the average and is where clipping first shows, so it
+   is marked rather than averaged away. */
+.capture-meter-peakmark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--label);
+  opacity: 0.55;
+  transition: left 80ms linear;
+}
+
+.capture-meter-db {
+  color: var(--label-supporting);
+  min-width: 4.5ch;
+  text-align: right;
+}
+
+.capture-meter-note,
+.capture-meter-absent {
+  margin: var(--space-2) 0 0;
+  color: var(--label-supporting);
+}
+.capture-meter-absent {
+  padding: var(--space-3) var(--space-5);
+}

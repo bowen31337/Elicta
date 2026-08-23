@@ -148,6 +148,19 @@ describe('opening the microphone', () => {
     expect(media.getUserMedia).toHaveBeenCalledTimes(1);
   });
 
+  it('hands back the stream it opened, so the level meter has something to tap', async () => {
+    // Without this the capture screen can say "Recording" over a muted input
+    // for forty minutes and look identical to one that is working. The level
+    // meter is the only thing on the screen that tells those two apart, and it
+    // needs the stream the session is already holding.
+    const track = fakeTrack();
+    const media = fakeMediaDevices([], [track]);
+
+    const session = await openBrowserCapture(media, 'mic-1');
+
+    expect(session.stream.getAudioTracks()).toEqual([track]);
+  });
+
   /** Journey 11's claim: the device is released when you stop. */
   it('releases the device on stop', async () => {
     const track = fakeTrack();

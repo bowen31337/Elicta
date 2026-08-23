@@ -1,7 +1,37 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+/**
+ * The shell's event channel. Held as a module mock rather than a global stub
+ * because the hook reaches it through a dynamic `import`, which is the only
+ * way the same bundle can run in a browser with no Tauri to import from.
+ */
+const shellEvents: { emit?: (payload: unknown) => void } = {};
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+    if (name === 'capture://frame') {
+      shellEvents.emit = (payload) => handler({ payload });
+    }
+    return () => undefined;
+  }),
+}));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
+
+import { createCaptureStore } from '../../../services/captureSession';
 import { shellAvailable, useCapture } from '../useCapture';
+
+/**
+ * One session per test, rather than the one the application runs.
+ *
+ * The session moved out of this hook and into `services/captureSession`, so
+ * that the consent screen can open a device the capture screen then displays.
+ * A module singleton would carry a live session — and the environment it read
+ * at construction — from one test into the next.
+ */
+function renderCapture() {
+  const store = createCaptureStore();
+  return renderHook(() => useCapture(store));
+}
 
 /**
  * The hook's job outside the desktop shell is to be harmless.
@@ -16,17 +46,22 @@ import { shellAvailable, useCapture } from '../useCapture';
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   vi.restoreAllMocks();
+  // `restoreAllMocks` does not undo `stubGlobal`, so without this a test that
+  // stubs `AudioContext` leaves it standing for every test after it -- and the
+  // one case that matters, a browser with no Web Audio at all, can then never
+  // be reached.
+  vi.unstubAllGlobals();
 });
 
 describe('outside the desktop shell', () => {
   it('reports the shell as unavailable rather than guessing', () => {
     expect(shellAvailable()).toBe(false);
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
     expect(result.current.available).toBe(false);
   });
 
   it('settles into idle with no sources instead of throwing', async () => {
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
 
     await waitFor(() => expect(result.current.status.state).toBe('idle'));
     expect(result.current.sources).toEqual([]);
@@ -34,7 +69,7 @@ describe('outside the desktop shell', () => {
   });
 
   it('leaves the controls callable and inert', async () => {
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
 
     // Not "does not throw" as an incidental fact — a screen that renders a
     // pause button has to survive that button being pressed.
@@ -50,7 +85,7 @@ describe('inside the desktop shell', () => {
   it('detects the shell', () => {
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     expect(shellAvailable()).toBe(true);
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
     expect(result.current.available).toBe(true);
   });
 });
@@ -69,7 +104,7 @@ describe('a browser with no microphone attached', () => {
       value: { enumerateDevices: async () => [], getUserMedia: async () => ({}) },
     });
 
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
 
     await waitFor(() => expect(result.current.blockedReason).toMatch(/no microphone/i));
   });
@@ -81,7 +116,7 @@ describe('a browser with no microphone attached', () => {
       value: { enumerateDevices: () => new Promise(() => {}), getUserMedia: async () => ({}) },
     });
 
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
 
     expect(result.current.blockedReason).toBeNull();
   });
@@ -128,7 +163,7 @@ describe('a browser that has not yet been given permission', () => {
       },
     });
 
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
     await waitFor(() => expect(result.current.sources).toHaveLength(1));
 
     await act(async () => {
@@ -176,7 +211,7 @@ describe('marking the input that is live', () => {
       },
     });
 
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
     await waitFor(() => expect(result.current.sources).toHaveLength(1));
 
     await act(async () => {
@@ -216,7 +251,7 @@ describe('the recording clock', () => {
     vi.stubGlobal('isSecureContext', true);
     browserWithMicrophone();
 
-    const { result } = renderHook(() => useCapture());
+    const { result } = renderCapture();
 
     expect(result.current.elapsedSeconds).toBe(0);
   });
@@ -227,7 +262,7 @@ describe('the recording clock', () => {
       vi.stubGlobal('isSecureContext', true);
       browserWithMicrophone();
 
-      const { result } = renderHook(() => useCapture());
+      const { result } = renderCapture();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -251,7 +286,7 @@ describe('the recording clock', () => {
       vi.stubGlobal('isSecureContext', true);
       browserWithMicrophone();
 
-      const { result } = renderHook(() => useCapture());
+      const { result } = renderCapture();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -281,7 +316,7 @@ describe('the recording clock', () => {
       vi.stubGlobal('isSecureContext', true);
       browserWithMicrophone();
 
-      const { result } = renderHook(() => useCapture());
+      const { result } = renderCapture();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -317,7 +352,7 @@ describe('the recording clock', () => {
       vi.stubGlobal('isSecureContext', true);
       browserWithMicrophone();
 
-      const { result } = renderHook(() => useCapture());
+      const { result } = renderCapture();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -335,5 +370,213 @@ describe('the recording clock', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * The level meter.
+ *
+ * The screen it feeds can say "Recording" for forty minutes over a muted input
+ * and look identical to one that is working, so these assert the reading is a
+ * real one taken off the stream -- and, just as importantly, that its absence
+ * is reported as absence rather than as a zero, which would be the same lie in
+ * the other direction.
+ */
+describe('the level meter', () => {
+  /** An `AudioContext` whose analyser always reports the byte given. */
+  function stubAudioContext(byte: number) {
+    const released = { source: false, context: false };
+    class FakeAudioContext {
+      createAnalyser() {
+        return {
+          fftSize: 0,
+          getByteTimeDomainData(into: Uint8Array) {
+            into.fill(byte);
+          },
+        };
+      }
+      createMediaStreamSource() {
+        return {
+          connect: () => undefined,
+          disconnect: () => {
+            released.source = true;
+          },
+        };
+      }
+      async close() {
+        released.context = true;
+      }
+    }
+    vi.stubGlobal('AudioContext', FakeAudioContext);
+    return released;
+  }
+
+  function stubMicrophone() {
+    const track = { kind: 'audio', enabled: true, stop: () => undefined };
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        enumerateDevices: async () => [
+          { kind: 'audioinput', deviceId: 'mic-1', label: 'Built-in Microphone' },
+        ],
+        getUserMedia: async () => ({
+          getAudioTracks: () => [track],
+          getTracks: () => [track],
+        }),
+      },
+    });
+  }
+
+  it('reports a level read off the open stream while recording', async () => {
+    stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+
+    await waitFor(() => expect(result.current.level?.peak).toBe(1));
+  });
+
+  it('builds a waveform from successive readings, so the screen can scroll it', async () => {
+    stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+
+    await waitFor(() => expect(result.current.waveform.length).toBeGreaterThan(1));
+  });
+
+  it('has no level at all before recording starts, rather than a zero', async () => {
+    // Zero is a reading -- "the room is silent". Before a device is open there
+    // is no reading, and a meter drawn at zero would claim otherwise.
+    stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    expect(result.current.level).toBeNull();
+  });
+
+  it('releases the audio graph when recording stops', async () => {
+    const released = stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(released.source).toBe(true);
+    expect(released.context).toBe(true);
+    expect(result.current.level).toBeNull();
+  });
+
+  it('reads a flat zero while paused, in every backend', async () => {
+    // The one reading this meter must never get wrong. In a browser pause
+    // disables the track, so silence is physically true. In the desktop shell
+    // a paused session drops each frame *before* emitting it, so a level fed
+    // by those events would simply freeze at its last value -- a bar still
+    // showing sound arriving at the moment the operator went off the record.
+    stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+    await waitFor(() => expect(result.current.level?.peak).toBe(1));
+
+    await act(async () => {
+      await result.current.pause();
+    });
+
+    expect(result.current.level).toEqual({ rms: 0, peak: 0 });
+  });
+
+  it('flattens the whole wave on pause, not just its newest bar', async () => {
+    // The wave is a history, and a history of loud speech is still drawn loud.
+    // Left alone it puts a wall of green beside the word "Paused" -- the one
+    // ambiguity this screen exists to remove. While paused the recent input
+    // level genuinely is zero, so that is what it shows, on the tap.
+    stubAudioContext(255);
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+    await waitFor(() => expect(result.current.waveform.length).toBeGreaterThan(2));
+    expect(result.current.waveform.some((bar) => bar > 0)).toBe(true);
+
+    await act(async () => {
+      await result.current.pause();
+    });
+
+    expect(result.current.waveform.every((bar) => bar === 0)).toBe(true);
+    expect(result.current.waveform.length).toBeGreaterThan(2);
+  });
+
+  it('records without a meter on a browser that has no Web Audio at all', async () => {
+    // jsdom is such a browser, and so is any engine where the constructor is
+    // missing. Recording must not depend on the meter being possible.
+    stubMicrophone();
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => {
+      await result.current.start('mic-1');
+    });
+
+    expect(result.current.status.state).toBe('capturing');
+    expect(result.current.level).toBeNull();
+  });
+});
+
+describe('the level meter in the desktop shell', () => {
+  /**
+   * The shell has no Web Audio to tap: nothing downstream of the audio thread
+   * ever sees a sample, so the measurement travels on the frame event itself.
+   */
+  it('takes its reading from the frame events the session emits', async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(shellEvents.emit).toBeDefined());
+
+    act(() => {
+      shellEvents.emit?.({ samples: 320, sequence: 1, rms: 0.5, peak: 0.8 });
+    });
+
+    expect(result.current.level).toEqual({ rms: 0.5, peak: 0.8 });
+  });
+
+  it('ignores a frame event from a build too old to measure one', async () => {
+    // A packaged shell without the level fields must leave the meter absent
+    // rather than pinning it at zero, which would read as a silent room.
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+
+    const { result } = renderCapture();
+    await waitFor(() => expect(shellEvents.emit).toBeDefined());
+
+    act(() => {
+      shellEvents.emit?.({ samples: 320, sequence: 1 });
+    });
+
+    expect(result.current.level).toBeNull();
   });
 });

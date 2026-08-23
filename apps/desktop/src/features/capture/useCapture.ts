@@ -1,64 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 import {
-  browserCaptureBlockedReason,
-  currentAudioEnvironment,
-  listBrowserSources,
-  openBrowserCapture,
-  type BrowserCaptureSession,
-} from './browserCapture';
+  captureSession,
+  defaultShellAvailable,
+  type CaptureSourceOption,
+  type CaptureStatus,
+  type CaptureStore,
+} from '../../services/captureSession';
+import type { AudioLevel } from './levelMeter';
 
 /**
- * Drives the real capture session, in the desktop shell or in a browser.
+ * The capture session, as one screen sees it.
  *
- * The screen this feeds was built and tested long before anything opened a
- * microphone, which is why it stays presentational and this hook is separate:
- * the journey scenes and the screen tests render fixed states and must keep
+ * **The session itself lives in `services/captureSession`, not here.** It used
+ * to live in this hook, in a `useRef` whose unmount effect stopped the device
+ * — which was safe for exactly as long as one screen ever called this. The
+ * consent screen now opens the microphone and then navigates to the capture
+ * screen, so a session that died with its screen would be released on the way
+ * there. The desktop shell never had that problem: its session lives in Rust,
+ * in a `CaptureManager` held as Tauri state. The store is the browser being
+ * given the same lifetime, and this hook is now a subscriber to it.
+ *
+ * The screen this feeds stays presentational, which is why it is separate: the
+ * journey scenes and the screen tests render fixed states and must keep
  * working with no device anywhere near them.
- *
- * **There are two backends, and the shell is preferred.** Inside Tauri the
- * commands do the work, because the shell can reach loopback and wired inputs
- * a browser cannot see. Outside it, `browserCapture` opens the page's own
- * microphone — which is what makes `./start.sh` a usable way to try the
- * product before anything is packaged.
- *
- * **Unavailable is four different situations.** This used to report one
- * boolean and the screen printed "unavailable outside the desktop app" for all
- * of them, which was wrong in three cases and unhelpful in the fourth: a page
- * on plain HTTP, a refused permission, and a machine with no microphone are
- * all things the operator can act on. `blockedReason` says which.
  */
-export interface CaptureSourceOption {
-  readonly id: string;
-  readonly label: string;
-  readonly degraded: boolean;
-}
 
-export interface CaptureStatus {
-  readonly state: 'idle' | 'capturing' | 'paused';
-  readonly source: CaptureSourceOption | null;
-  readonly frames: number;
-}
-
-const IDLE: CaptureStatus = { state: 'idle', source: null, frames: 0 };
+export type { CaptureSourceOption, CaptureStatus };
 
 /** Whether this bundle is running inside the desktop shell at all. */
-export function shellAvailable(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
-
-async function callShell<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
-  if (!shellAvailable()) return null;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<T>(command, args);
-  } catch {
-    // A command that rejects — no session running, device unplugged — is a
-    // state the screen already renders. Throwing here would instead take the
-    // whole panel down mid-meeting.
-    return null;
-  }
-}
+export const shellAvailable = defaultShellAvailable;
 
 export interface UseCapture {
   readonly status: CaptureStatus;
@@ -74,214 +45,69 @@ export interface UseCapture {
    * time spent paused. Zero when nothing is recording.
    */
   readonly elapsedSeconds: number;
+  /**
+   * How loud the open input is right now, or `null` when there is no reading
+   * to be had — nothing recording, or a browser with no Web Audio.
+   *
+   * `null` rather than a zero, because the two mean opposite things: zero is
+   * "the room is silent", which is a finding an operator acts on, and a meter
+   * drawn at zero for want of a meter would be that finding invented.
+   */
+  readonly level: AudioLevel | null;
+  /** Recent levels, oldest first, for the scrolling wave. Empty when idle. */
+  readonly waveform: readonly number[];
+  /**
+   * What this recording is doing about a transcript, when it is not the
+   * obvious thing — see `CaptureSnapshot.uploadNote`.
+   */
+  readonly uploadNote: string | null;
   readonly start: (sourceId?: string) => Promise<void>;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly stop: () => Promise<void>;
 }
 
-export function useCapture(): UseCapture {
-  const [status, setStatus] = useState<CaptureStatus>(IDLE);
-  const [sources, setSources] = useState<readonly CaptureSourceOption[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const shell = shellAvailable();
-
-  // Read once: whether the page is secure and whether the API exists cannot
-  // change without a navigation, and re-reading per render would make the
-  // reason flicker.
-  const [environment] = useState(currentAudioEnvironment);
-  // Whether the browser found any input, once it has looked. `null` until it
-  // has: `browserCaptureBlockedReason` treats "not asked" and "asked, none"
-  // differently on purpose, and collapsing them here would put "no microphone"
-  // on screen for the moment before the first enumeration returns.
-  const [inputCount, setInputCount] = useState<number | null>(null);
-  const blockedReason = shell
-    ? null
-    : browserCaptureBlockedReason({
-        ...environment,
-        inputCount: inputCount ?? undefined,
-      });
-  const available = blockedReason === null;
-
-  const session = useRef<BrowserCaptureSession | null>(null);
-  const media = environment.mediaDevices;
-
-  /**
-   * The recording clock.
-   *
-   * It lives here rather than in either backend because neither can supply
-   * it: the shell's `capture_status` reports a frame count and no timestamp,
-   * and a browser `MediaStream` has no start time on it at all. The route
-   * used to pass the literal `"00:00"`, so a forty-minute recording displayed
-   * exactly what it displayed before it began.
-   *
-   * Recorded time, not wall time: `recorded` banks whatever a run accumulated
-   * when it paused, and `runningSince` is the start of the run in progress.
-   * Deriving it from the two on every tick — rather than incrementing a
-   * counter — is what keeps it honest when the interval is throttled, which
-   * a background tab does routinely.
-   */
-  const recorded = useRef(0);
-  const runningSince = useRef<number | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const capturing = status.state === 'capturing';
+/**
+ * `store` is injectable for the same reason `browserCapture` takes its
+ * `MediaDevices`: so a test drives a session of its own rather than the one
+ * the application is running.
+ */
+export function useCapture(store: CaptureStore = captureSession): UseCapture {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 
   useEffect(() => {
-    if (status.state === 'idle') {
-      recorded.current = 0;
-      runningSince.current = null;
-      setElapsedSeconds(0);
-      return undefined;
-    }
-
-    if (!capturing) {
-      // Paused. Bank the run that just ended and stop the clock where it is.
-      if (runningSince.current !== null) {
-        recorded.current += Date.now() - runningSince.current;
-        runningSince.current = null;
-        setElapsedSeconds(recorded.current / 1000);
-      }
-      return undefined;
-    }
-
-    if (runningSince.current === null) runningSince.current = Date.now();
-    const read = () => {
-      const since = runningSince.current;
-      setElapsedSeconds(
-        (recorded.current + (since === null ? 0 : Date.now() - since)) / 1000,
-      );
-    };
-    read();
-    const timer = setInterval(read, 250);
-    return () => clearInterval(timer);
-  }, [capturing, status.state]);
-
-  const listSources = useCallback(async () => {
-    if (shell) return (await callShell<CaptureSourceOption[]>('list_audio_sources')) ?? [];
-    if (!media) return [];
-    return listBrowserSources(media);
-  }, [shell, media]);
-
-  useEffect(() => {
-    let live = true;
-    void (async () => {
-      const [listed, current] = await Promise.all([
-        listSources(),
-        shell ? callShell<CaptureStatus>('capture_status') : Promise.resolve(null),
-      ]);
-      if (!live) return;
-      setSources(listed);
-      if (!shell) setInputCount(listed.length);
-      if (current) setStatus(current);
-    })();
-    return () => {
-      live = false;
-    };
-  }, [listSources, shell]);
-
-  // A device pulled mid-meeting has to reach the operator — the session is
-  // over either way, and silently showing "recording" would be a lie.
-  useEffect(() => {
-    if (!shell) return undefined;
-    let unlisten: (() => void) | undefined;
-    void (async () => {
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-        unlisten = await listen('capture://disconnected', () => setStatus(IDLE));
-      } catch {
-        // Same reasoning as `callShell`: if the event channel cannot be
-        // opened, the screen is merely not told about a disconnect. An
-        // unhandled rejection here would be a worse outcome than that.
-      }
-    })();
-    return () => unlisten?.();
-  }, [shell]);
-
-  // Releasing the device when the screen goes away is not tidiness: an open
-  // microphone keeps the browser's recording indicator lit, which tells an
-  // operator they are being recorded when they are not.
-  useEffect(() => () => session.current?.stop(), []);
-
-  const runShell = useCallback(async (command: string, args?: Record<string, unknown>) => {
-    const next = await callShell<CaptureStatus>(command, args);
-    if (next) setStatus(next);
-  }, []);
+    void store.refresh();
+  }, [store]);
 
   const start = useCallback(
     async (sourceId?: string) => {
-      setError(null);
-      if (shell) return runShell('start_capture', { sourceId });
-      if (!media) return;
-
-      const chosen = sourceId ?? sources[0]?.id;
-      if (chosen === undefined) {
-        setError('No microphone is available to record from.');
-        return;
-      }
+      // Swallowed here and not in the store: this is the capture screen's own
+      // button, whose failure the screen renders from `error`. The consent
+      // screen awaits the store directly, because it has to *not* go on to
+      // allocate a session when the device refuses.
       try {
-        session.current?.stop();
-        session.current = await openBrowserCapture(media, chosen);
-      } catch (cause) {
-        session.current = null;
-        setError(cause instanceof Error ? cause.message : 'The microphone could not be opened.');
-        return;
-      }
-      setStatus({
-        state: 'capturing',
-        source: sources.find((source) => source.id === chosen) ?? null,
-        frames: 0,
-      });
-      // Device ids and labels are both withheld until permission is granted,
-      // so the list read before the prompt was a set of placeholders. Re-read
-      // it now that the browser will tell us what they are.
-      const named = await listSources();
-      setSources(named);
-      // The status is still holding the placeholder, whose empty id matches
-      // nothing in the list that just came back — which leaves the row that is
-      // recording without its "In use" marker. Re-point it at the device the
-      // browser says it opened, which for a default microphone is the only
-      // account of which one that was.
-      const opened = session.current?.deviceId;
-      if (opened !== null && opened !== undefined) {
-        setStatus((current) => ({
-          ...current,
-          source: named.find((source) => source.id === opened) ?? current.source,
-        }));
+        await store.start(sourceId);
+      } catch {
+        /* recorded in the snapshot by the store */
       }
     },
-    [shell, media, sources, runShell, listSources],
+    [store],
   );
 
-  const pause = useCallback(async () => {
-    if (shell) return runShell('pause_capture');
-    if (!session.current) return;
-    session.current.pause();
-    setStatus((current) => ({ ...current, state: 'paused' }));
-  }, [shell, runShell]);
-
-  const resume = useCallback(async () => {
-    if (shell) return runShell('resume_capture');
-    if (!session.current) return;
-    session.current.resume();
-    setStatus((current) => ({ ...current, state: 'capturing' }));
-  }, [shell, runShell]);
-
-  const stop = useCallback(async () => {
-    if (shell) return runShell('stop_capture');
-    session.current?.stop();
-    session.current = null;
-    setStatus(IDLE);
-  }, [shell, runShell]);
+  const pause = useCallback(() => store.pause(), [store]);
+  const resume = useCallback(() => store.resume(), [store]);
+  const stop = useCallback(() => store.stop(), [store]);
 
   return {
-    status,
-    sources,
-    available,
-    blockedReason,
-    error,
-    // Floored here rather than at each write, so a caller can never be handed
-    // a fractional second to render.
-    elapsedSeconds: Math.max(0, Math.floor(elapsedSeconds)),
+    status: snapshot.status,
+    sources: snapshot.sources,
+    available: snapshot.blockedReason === null,
+    blockedReason: snapshot.blockedReason,
+    error: snapshot.error,
+    elapsedSeconds: snapshot.elapsedSeconds,
+    level: snapshot.level,
+    waveform: snapshot.waveform,
+    uploadNote: snapshot.uploadNote,
     start,
     pause,
     resume,

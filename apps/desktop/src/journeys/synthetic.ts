@@ -161,10 +161,9 @@ export const CONSENT_PENDING: ConsentScreenProps = {
   },
   confirmedBy: null,
   confirmedAt: null,
-  captureMode: 'Line-in from the meeting machine',
   actions: {
     confirm: async () => undefined,
-    start: async () => ({ sessionId: 'session-4', startedAt: '2026-08-18T09:59:00Z' }),
+    proceed: () => undefined,
   },
 };
 
@@ -415,9 +414,22 @@ export const REPLAY_FAILING: ReplayScreenProps = {
 // --- Journey 11: capture control ------------------------------------------
 
 
+/**
+ * A speech-shaped level history for the capture screen's meter.
+ *
+ * Generated from a fixed formula rather than sampled or randomised, because
+ * these scenes are what the documentation screenshots are taken from: a wave
+ * that differed between runs would put every chapter that shows this screen
+ * into drift on every build.
+ */
+const SPEECH_WAVE: readonly number[] = Array.from({ length: 48 }, (_, index) =>
+  Math.max(0.06, Math.min(0.94, 0.52 + 0.42 * Math.sin(index / 2.1) * Math.sin(index / 7.3))),
+);
+
 export const CAPTURING: CaptureScreenProps = {
   state: 'capturing',
   elapsed: '23:41',
+  metering: { level: { rms: 0.06, peak: 0.21 }, waveform: SPEECH_WAVE },
   sources: [
     { label: 'USB interface — line-in from the meeting machine', kind: 'wired', active: true },
     { label: 'Loopback from a silent join', kind: 'loopback', active: false },
@@ -427,7 +439,34 @@ export const CAPTURING: CaptureScreenProps = {
   enrolmentSeconds: 48,
 };
 
-export const PAUSED: CaptureScreenProps = { ...CAPTURING, state: 'paused', elapsed: '23:41' };
+/**
+ * Paused reads a flat zero, and that is the point of showing it here: the
+ * meter is the operator's own confirmation that the pause landed, independent
+ * of the banner that claims it.
+ */
+export const PAUSED: CaptureScreenProps = {
+  ...CAPTURING,
+  state: 'paused',
+  elapsed: '23:41',
+  metering: { level: { rms: 0, peak: 0 }, waveform: SPEECH_WAVE.map(() => 0) },
+};
+
+/**
+ * The green room, before anything is recorded.
+ *
+ * A browser withholds device ids *and* labels until the first permission
+ * grant, so the picker before this step reads "Microphone 1" and is not a
+ * choice at all; checking is what fills it in. It is also the operator's one
+ * chance to see sound arriving before the choice becomes binding — capture
+ * refuses to start a second session on either backend, so changing input
+ * afterwards means stopping and restarting.
+ */
+export const CHECKING: CaptureScreenProps = {
+  ...CAPTURING,
+  state: 'checking',
+  elapsed: '00:00',
+  metering: { level: { rms: 0.05, peak: 0.18 }, waveform: SPEECH_WAVE },
+};
 
 /** The degraded input path, which the screen is expected to argue against. */
 export const CAPTURING_ACOUSTIC: CaptureScreenProps = {

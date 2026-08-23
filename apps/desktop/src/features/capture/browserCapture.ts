@@ -144,6 +144,15 @@ export interface BrowserCaptureSession {
    * cannot mark the row that is live.
    */
   readonly deviceId: string | null;
+  /**
+   * The live stream, for the level meter to tap.
+   *
+   * Handed out rather than metered here on purpose: this module's job is
+   * opening and releasing a device, and an `AudioContext` is a second
+   * resource with its own lifetime. `levelMeter` owns that, and the caller
+   * owns deciding whether a meter is wanted at all.
+   */
+  readonly stream: MediaStreamLike;
 }
 
 function openFailureMessage(cause: unknown): string {
@@ -204,6 +213,7 @@ export async function openBrowserCapture(
   const tracks = stream.getAudioTracks();
   return {
     deviceId: tracks[0]?.getSettings?.().deviceId ?? null,
+    stream,
     // Pausing silences the track rather than stopping it: the device stays
     // open, so resuming is instant and does not re-prompt. FR-1.3 wants pause
     // to take effect on the tap, and a disabled track emits silence at once.

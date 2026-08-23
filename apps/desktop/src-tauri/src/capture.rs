@@ -72,6 +72,114 @@ pub struct FrameEvent {
     /// Frames delivered since the session started, so a dropped event is
     /// visible to the receiver as a gap rather than being invisible.
     pub sequence: u64,
+    /// Root-mean-square amplitude of the frame, 0..1 — what the capture
+    /// screen's level meter draws.
+    pub rms: f32,
+    /// Largest single sample in the frame, 0..1 — where clipping shows up.
+    pub peak: f32,
+}
+
+/// The frame's actual audio, on its way to the service as `capture://pcm`.
+///
+/// Separate from `FrameEvent` rather than a field on it: the level meter needs
+/// two floats twelve times a second and would otherwise be handed four
+/// kilobytes of audio it has no use for.
+#[derive(Debug, Clone, Serialize)]
+pub struct PcmEvent {
+    /// The same counter `FrameEvent` carries, so a receiver can tell a dropped
+    /// frame from a quiet one.
+    pub sequence: u64,
+    /// Base64 little-endian linear16 at 16kHz mono — exactly what
+    /// `POST /api/sessions/{id}/audio-chunk` takes, because it is what the
+    /// normalising pipeline already produces.
+    pub pcm: String,
+}
+
+/// The base64 alphabet, in index order.
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// One frame of normalised audio as the service's `pcm` field.
+///
+/// **The byte order is written out**, rather than reinterpreting the slice's
+/// own memory: `linear16` means little-endian on the wire whatever the machine
+/// doing the encoding happens to be, and a big-endian host reinterpreting its
+/// own memory would send every sample byte-swapped — which is not silence and
+/// not speech, but full-scale noise.
+///
+/// Hand-written rather than pulled in. `base64` is already in the lock file as
+/// somebody else's transitive dependency, and promoting it to a direct one for
+/// sixteen lines of table lookup changes the manifest that CI builds
+/// `--locked` from.
+fn pcm_payload(samples: &[i16]) -> String {
+    let mut bytes = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for group in bytes.chunks(3) {
+        let triple = (u32::from(group[0]) << 16)
+            | (u32::from(group.get(1).copied().unwrap_or(0)) << 8)
+            | u32::from(group.get(2).copied().unwrap_or(0));
+        out.push(BASE64[((triple >> 18) & 63) as usize] as char);
+        out.push(BASE64[((triple >> 12) & 63) as usize] as char);
+        // The padding is the part an encoder written from memory gets wrong:
+        // a group of one byte carries two characters of data, not three.
+        out.push(if group.len() > 1 {
+            BASE64[((triple >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if group.len() > 2 {
+            BASE64[(triple & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// How loud one normalised frame was.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameLevel {
+    pub rms: f32,
+    pub peak: f32,
+}
+
+/// Measures a frame for the level meter.
+///
+/// This exists because the capture screen cannot otherwise tell a working
+/// microphone from a muted one: without it the screen says "Recording" for
+/// forty minutes over silence and looks exactly like a session that is
+/// working. The browser backend reads its own level off a Web Audio analyser;
+/// in the shell nothing downstream of here ever sees a sample, so the
+/// measurement has to happen on the audio thread and travel with the event.
+///
+/// **Normalised by 32768, not 32767.** `i16` is asymmetric — `MIN` is -32768
+/// and `MAX` is 32767 — so dividing by `MAX` makes a perfectly legal sample
+/// measure 1.00003, and a meter that reads over-scale on ordinary loud speech
+/// is a meter an operator learns to ignore.
+fn level_of(samples: &[i16]) -> FrameLevel {
+    if samples.is_empty() {
+        return FrameLevel {
+            rms: 0.0,
+            peak: 0.0,
+        };
+    }
+
+    let mut sum_of_squares = 0.0f64;
+    let mut peak = 0.0f32;
+    for &sample in samples {
+        let amplitude = (f64::from(sample) / 32768.0).abs() as f32;
+        sum_of_squares += f64::from(amplitude) * f64::from(amplitude);
+        if amplitude > peak {
+            peak = amplitude;
+        }
+    }
+    FrameLevel {
+        rms: ((sum_of_squares / samples.len() as f64).sqrt() as f32).min(1.0),
+        peak: peak.min(1.0),
+    }
 }
 
 /// What the capture screen renders: the state, in words, plus what is capturing.
@@ -173,11 +281,28 @@ pub fn start_capture(
                             }
                             let normalized = pipeline.process(frame);
                             let sequence = frames.fetch_add(1, Ordering::Relaxed) + 1;
+                            let level = level_of(&normalized.samples);
                             let _ = app.emit(
                                 "capture://frame",
                                 FrameEvent {
                                     samples: normalized.samples.len(),
                                     sequence,
+                                    rms: level.rms,
+                                    peak: level.peak,
+                                },
+                            );
+                            // The audio itself, for the upload. Emitted after
+                            // the meter rather than before, so a front end
+                            // busy with a chunk still gets its level on time —
+                            // and emitted per frame rather than accumulated
+                            // here, because the buffering, the sequencing and
+                            // the retries all live in one tested place on the
+                            // other side, and none of them should exist twice.
+                            let _ = app.emit(
+                                "capture://pcm",
+                                PcmEvent {
+                                    sequence,
+                                    pcm: pcm_payload(&normalized.samples),
                                 },
                             );
                         }
@@ -285,6 +410,68 @@ mod tests {
         assert_eq!(status.state, "idle");
         assert!(status.source.is_none());
         assert_eq!(status.frames, 0);
+    }
+
+    #[test]
+    fn pcm_payload_encodes_one_sample_little_endian() {
+        // 1 is 0x0001, which on the wire is 01 00 — the order the service's
+        // `linear16` means, and the opposite of how the number is written.
+        assert_eq!(pcm_payload(&[1]), "AQA=");
+    }
+
+    #[test]
+    fn pcm_payload_encodes_a_negative_sample() {
+        assert_eq!(pcm_payload(&[-2]), "/v8=");
+    }
+
+    #[test]
+    fn pcm_payload_pads_a_part_full_group() {
+        // Two samples are four bytes, which is one whole base64 group and one
+        // byte over — the case padding exists for, and the one an encoder
+        // written from memory gets wrong.
+        assert_eq!(pcm_payload(&[1, -2]), "AQD+/w==");
+    }
+
+    #[test]
+    fn pcm_payload_of_no_samples_is_empty() {
+        assert_eq!(pcm_payload(&[]), "");
+    }
+
+    #[test]
+    fn a_silent_frame_measures_zero() {
+        let level = level_of(&[0, 0, 0, 0]);
+        assert_eq!(level.rms, 0.0);
+        assert_eq!(level.peak, 0.0);
+    }
+
+    #[test]
+    fn a_full_scale_square_wave_measures_one() {
+        let level = level_of(&[i16::MAX, i16::MIN, i16::MAX, i16::MIN]);
+        assert!((level.peak - 1.0).abs() < 1e-3, "peak was {}", level.peak);
+        assert!((level.rms - 1.0).abs() < 1e-3, "rms was {}", level.rms);
+    }
+
+    #[test]
+    fn the_most_negative_sample_does_not_read_over_full_scale() {
+        // `i16` is asymmetric: MIN is -32768 and MAX is 32767. Normalising by
+        // 32767 makes a legal sample measure 1.00003, and a meter that reports
+        // over-scale on loud speech teaches an operator to ignore it.
+        let level = level_of(&[i16::MIN]);
+        assert!(level.peak <= 1.0, "peak was {}", level.peak);
+    }
+
+    #[test]
+    fn peak_exceeds_rms_on_a_frame_that_is_mostly_quiet() {
+        let level = level_of(&[0, 0, 0, i16::MAX]);
+        assert!(level.peak > level.rms);
+        assert!((level.peak - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_empty_frame_measures_zero_rather_than_dividing_by_nothing() {
+        let level = level_of(&[]);
+        assert_eq!(level.rms, 0.0);
+        assert_eq!(level.peak, 0.0);
     }
 
     #[test]

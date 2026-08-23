@@ -33,7 +33,11 @@ const MEETINGS = {
       meeting_id: 'meeting-1',
       engagement_id: 'eng-1',
       state: 'planned',
-      capture_mode: 'Line-in',
+      // The service's own value. `capture_mode` is the *language* mode — the
+      // column is `String(16)` and defaults to "monolingual" — and a fixture
+      // reading like an audio path is what let a Capture card claim to name
+      // your microphone for as long as it did.
+      capture_mode: 'monolingual',
       scheduled_at: null,
       session_purpose: 'Discovery 1',
       sections_filled: null,
@@ -102,14 +106,22 @@ describe('the consent screen', () => {
     expect(await screen.findByText('standing for the engagement')).toBeInTheDocument();
   });
 
-  it('shows the capture mode the meeting was actually created with', async () => {
+  /**
+   * The screen used to print `capture_mode` under a heading saying Capture,
+   * beside a Start button — which read as "this is the input you are about to
+   * record from". It is the language mode. This screen makes no claim about
+   * audio at all now; the recording screen, which can show a level meter, does.
+   */
+  it('makes no claim about the microphone, which it cannot know', async () => {
     stubService({
       ...BASE,
       '/api/meetings/meeting-1/consent-gate?engagement_id=eng-1': { status: 'confirmed' },
     });
     render(<ConsentRoute />);
 
-    expect(await screen.findAllByText(/Line-in/)).not.toHaveLength(0);
+    await screen.findByText('Confirmed');
+    expect(screen.queryByText(/monolingual/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Capture' })).not.toBeInTheDocument();
   });
 
   /**

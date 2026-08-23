@@ -110,6 +110,20 @@ pnpm dev                                       # tauri dev
 pnpm generate:api-client                       # regenerate from the live service schema
 ```
 
+**Does a recording actually reach the service?** Nothing in CI answers that — the
+upload path is unit-tested piece by piece and joined only at runtime. `audio-upload.mjs`
+runs the join: Chrome's fake capture device through the real `getUserMedia`, the real
+chunk uploader, the real hold. It needs the service and the panel running, makes and
+soft-deletes a meeting of its own, and from the moment Stop fires it spends real speech
+credentials.
+```bash
+node tests/e2e/journeys/audio-upload.mjs                    # Chrome's test tone
+FAKE_AUDIO=speech.wav EXPECT_WORDS="dashboard,depot" \
+  node tests/e2e/journeys/audio-upload.mjs                  # and that words come back
+```
+A tone proves the bytes arrive and the sequence never gaps; only speech proves a
+transcript. The file's header says how to generate a WAV — there is no fixture here.
+
 Database migrations (Alembic, run from the repo root):
 ```bash
 uv run --project apps/service alembic upgrade head         # apply

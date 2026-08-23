@@ -2,25 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { captureSession } from '../../../services/captureSession';
 import ConsentRoute from '../route';
 
-/**
- * The gate, as behaviour rather than as a label.
- *
- * Journey 2's whole claim is that consent is "a gate you pass, not a warning
- * you read past". Three things stopped that being true, and each has a test
- * here:
- *
- * 1. The screen decided whether capture could begin from the *consent record*
- *    (`confirmedBy !== null`) rather than from the *gate*. Consent standing
- *    for the whole engagement writes no per-meeting record, so the one model
- *    the journey opens by advertising rendered as "Required" with capture
- *    disabled — the exact opposite of what the service said.
- * 2. There was no control to confirm consent at all, so nothing could move
- *    the screen out of that state.
- * 3. The service composes an operator-facing prompt naming the law it rests
- *    on, and the screen dropped it, leaving a gate with no warning on it.
- */
 const ENGAGEMENTS = {
   items: [
     {
@@ -118,7 +102,8 @@ const BASE = {
 beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.unstubAllGlobals());
 
-const startButton = () => screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement;
+const continueButton = () =>
+  screen.getByRole('button', { name: /continue to recording/i }) as HTMLButtonElement;
 
 describe('consent standing for the whole engagement', () => {
   /**
@@ -133,7 +118,7 @@ describe('consent standing for the whole engagement', () => {
     expect(await screen.findByText('standing for the engagement')).toBeInTheDocument();
     expect(screen.queryByText('Required')).not.toBeInTheDocument();
     expect(screen.queryByText(/Capture cannot start/)).not.toBeInTheDocument();
-    expect(startButton().disabled).toBe(false);
+    expect(continueButton().disabled).toBe(false);
   });
 
   it('says why it is not asking rather than leaving the row blank', async () => {
@@ -169,7 +154,7 @@ describe('consent still to be confirmed', () => {
 
     expect(await screen.findByText('Not confirmed')).toBeInTheDocument();
     expect(screen.getByText('Required')).toBeInTheDocument();
-    expect(startButton().disabled).toBe(true);
+    expect(continueButton().disabled).toBe(true);
   });
 
   it('states what is being confirmed, and the law it rests on', async () => {
@@ -238,7 +223,7 @@ describe('consent still to be confirmed', () => {
     expect(await screen.findByText('Confirmed')).toBeInTheDocument();
     expect(screen.getByText(/Dana Whitfield, COO/)).toBeInTheDocument();
     expect(screen.getByText('On record')).toBeInTheDocument();
-    await waitFor(() => expect(startButton().disabled).toBe(false));
+    await waitFor(() => expect(continueButton().disabled).toBe(false));
   });
 
   it('says what the service said when it refuses a confirmation', async () => {
@@ -267,7 +252,7 @@ describe('consent already confirmed', () => {
     render(<ConsentRoute />);
 
     expect(await screen.findByText('Confirmed')).toBeInTheDocument();
-    expect(startButton().disabled).toBe(false);
+    expect(continueButton().disabled).toBe(false);
     expect(screen.queryByText(/Capture cannot start/)).not.toBeInTheDocument();
   });
 
@@ -280,71 +265,78 @@ describe('consent already confirmed', () => {
   });
 });
 
-describe('starting the meeting', () => {
+describe('leaving for the recording', () => {
   /**
-   * The button the whole gate exists to enable had no handler. Confirming
-   * consent moved the screen from "Required" to "On record" and started
-   * nothing — the gate opened onto a control that did not work.
+   * Consent is a gate, and a gate's job ends when it opens.
+   *
+   * This screen used to carry a Capture card with a Start button on it, which
+   * booked the meeting on the service and opened no microphone — so an
+   * operator was told a meeting had begun while nothing was listening. Worse,
+   * the card had no way to choose an input, and the row under its heading was
+   * the meeting's *language* mode, so a card titled Capture said nothing about
+   * capture at all. The recording, and the choice of device, belong to the one
+   * screen that can show a level meter.
    */
-  it('opens the session the gate admitted', async () => {
+  it('books nothing itself', async () => {
     const written = stubService({ ...BASE, [GATE]: { status: 'confirmed' } });
     render(<ConsentRoute />);
 
     await screen.findByText('Confirmed');
-    await userEvent.click(startButton());
+    await userEvent.click(continueButton());
 
-    await waitFor(() => expect(written).toHaveLength(1));
-    expect(written[0]).toMatchObject({
-      path: '/api/meetings/meeting-1/session/start',
-      method: 'POST',
-    });
+    // The meeting starts when the recording starts, and that is not here.
+    expect(written).toHaveLength(0);
   });
 
-  it('reports the meeting as live rather than looking like nothing happened', async () => {
+  it('takes the operator to the recording screen', async () => {
+    stubService({ ...BASE, [GATE]: { status: 'confirmed' } });
+    const went: string[] = [];
+    render(<ConsentRoute navigate={(to) => went.push(to)} />);
+
+    await screen.findByText('Confirmed');
+    await userEvent.click(continueButton());
+
+    expect(went).toEqual(['#/capture']);
+  });
+
+  it('opens no microphone on the way', async () => {
+    // Asserted against the application's own session, because that is the one
+    // a regression here would open. This screen used to carry a Start button
+    // that booked a meeting and opened nothing; the correction is not a
+    // quieter version of that, it is the recording screen owning both.
+    stubService({ ...BASE, [GATE]: { status: 'confirmed' } });
+    render(<ConsentRoute navigate={() => undefined} />);
+
+    await screen.findByText('Confirmed');
+    await userEvent.click(continueButton());
+
+    expect(captureSession.getSnapshot().status.state).toBe('idle');
+  });
+
+  it('holds the door shut while consent is outstanding', async () => {
+    stubService({
+      ...BASE,
+      [GATE]: { status: 'awaiting_confirmation', prompt: PROMPT },
+    });
+    const went: string[] = [];
+    render(<ConsentRoute navigate={(to) => went.push(to)} />);
+
+    await screen.findByText('Not confirmed');
+    expect(continueButton().disabled).toBe(true);
+
+    await userEvent.click(continueButton());
+    expect(went).toEqual([]);
+  });
+
+  it('says nothing about microphones, which are not its business', async () => {
     stubService({ ...BASE, [GATE]: { status: 'confirmed' } });
     render(<ConsentRoute />);
 
     await screen.findByText('Confirmed');
-    await userEvent.click(startButton());
 
-    expect(await screen.findByText(/Session live/i)).toBeInTheDocument();
-  });
-
-  it('will not start the same meeting twice', async () => {
-    const written = stubService({ ...BASE, [GATE]: { status: 'confirmed' } });
-    render(<ConsentRoute />);
-
-    await screen.findByText('Confirmed');
-    await userEvent.click(startButton());
-    await screen.findByText(/Session live/i);
-    await userEvent.click(startButton());
-
-    expect(written).toHaveLength(1);
-  });
-
-  it('says why in the service’s words when the start is refused', async () => {
-    stubService({ ...BASE, [GATE]: { status: 'confirmed' } }, {
-      status: 403,
-      detail: 'consent has not been confirmed for this meeting, so capture cannot begin',
-    });
-    render(<ConsentRoute />);
-
-    await screen.findByText('Confirmed');
-    await userEvent.click(startButton());
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(/consent has not been confirmed/);
-  });
-
-  it('starts nothing while consent is still outstanding', async () => {
-    const written = stubService({
-      ...BASE,
-      [GATE]: { status: 'awaiting_confirmation', prompt: PROMPT },
-    });
-    render(<ConsentRoute />);
-
-    await screen.findByText('Not confirmed');
-    await userEvent.click(startButton());
-
-    expect(written).toHaveLength(0);
+    expect(screen.queryByRole('heading', { name: 'Capture' })).not.toBeInTheDocument();
+    // The row that used to sit under that heading showed `capture_mode`, which
+    // is the language mode — "monolingual" under a heading saying Capture.
+    expect(screen.queryByText(/monolingual/i)).not.toBeInTheDocument();
   });
 });

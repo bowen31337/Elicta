@@ -72,17 +72,17 @@ describe('prep', () => {
 });
 
 describe('consent', () => {
-  it('will not let capture start before consent is on record', () => {
+  it('holds the way to the recording shut before consent is on record', () => {
     render(<ConsentScreen {...CONSENT_PENDING} />);
 
-    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /continue to recording/i })).toBeDisabled();
     expect(screen.getByText('Required')).toBeInTheDocument();
   });
 
-  it('enables capture once consent is confirmed, and says who confirmed it', () => {
+  it('opens the way once consent is confirmed, and says who confirmed it', () => {
     render(<ConsentScreen {...CONSENT_CONFIRMED} />);
 
-    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /continue to recording/i })).toBeEnabled();
     expect(screen.getByText(/Priya Raman/)).toBeInTheDocument();
   });
 
