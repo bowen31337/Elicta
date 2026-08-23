@@ -209,7 +209,7 @@ describe('capture control', () => {
     render(<CaptureScreen {...PAUSED} />);
 
     expect(screen.getByRole('heading', { name: 'Paused' })).toBeInTheDocument();
-    expect(screen.getByText(/Nothing said now is captured/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing said now is kept/)).toBeInTheDocument();
   });
 
   it('offers resume when paused and pause when recording', () => {

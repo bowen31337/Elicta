@@ -99,12 +99,16 @@ const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: str
   },
   capturing: {
     word: 'Recording',
-    detail: 'Audio is being captured and transcribed.',
+    // Not "and transcribed": nothing transcribes during a meeting here.
+    // The audio uploaded from this screen becomes a transcript on the
+    // record path afterwards, and an operator told otherwise would go
+    // looking for a live transcript that does not exist.
+    detail: 'Audio is being captured. It becomes a transcript after the meeting, not during it.',
     pill: 'pill pill--alert',
   },
   paused: {
     word: 'Paused',
-    detail: 'No audio is reaching the transcriber. Nothing said now is captured.',
+    detail: 'No audio is reaching the recording. Nothing said now is kept.',
     pill: 'pill pill--warn',
   },
   stopped: {
