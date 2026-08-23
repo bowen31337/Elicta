@@ -174,6 +174,12 @@ async function main() {
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${profile}`,
       '--no-sandbox',
+      // `start.sh --https` generates its own certificate in .certs/, so a TLS
+      // run is unauditable without this: Chrome would land on an interstitial
+      // and the scene check below would stop the run. Scoped to an https base
+      // URL rather than always on, because silently accepting a bad
+      // certificate is not a default worth carrying into an http run.
+      ...(APP.startsWith('https:') ? ['--ignore-certificate-errors'] : []),
       'about:blank',
     ],
     { stdio: 'ignore' },
