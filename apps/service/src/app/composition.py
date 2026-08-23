@@ -211,6 +211,14 @@ from app.modules.trigger.listener import LiveUtterances
 from app.modules.trigger.models import UtteranceAccepted, UtteranceRequest
 from app.modules.trigger.router import build_live_utterance_router
 from app.modules.trigger.selection import select as select_nudge
+from app.modules.voiceprint.models import OperatorVoiceprint
+from app.modules.voiceprint.router import build_voiceprint_router
+from app.modules.voiceprint.service import (
+    DEFAULT_OPERATOR_ID,
+    OPERATOR,
+    identify_speaker,
+    is_usable,
+)
 from app.orchestration.anthropic_engines import probe_anthropic_credential
 from app.orchestration.bank_collector import BankCollector
 from app.orchestration.compiler import (
@@ -334,6 +342,12 @@ class Backend:
         default_factory=dict
     )
     vocabulary_calls: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
+
+    # The operator's enrolled voiceprint, keyed by operator id (FR-1.5). One
+    # entry, in practice: there is a single local operator, and the table's
+    # unique index says so. Keyed anyway because the day there are two, the
+    # shape should not have to change underneath the routes.
+    operator_voiceprints: dict[str, OperatorVoiceprint] = field(default_factory=dict)
 
     citation_rows: list[CitationRow] = field(default_factory=list)
 
@@ -934,6 +948,14 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # restart lost the answer to "did we have permission for this?", and the
     # gate it opens with it.
     backend.consent_records = store.consent_records(lambda row: ConsentRecord(**row))
+
+    # Nothing rebuilds a voiceprint. It is not derived from a transcript or a
+    # document — the only thing that produces one is a person recording
+    # themselves for a minute, so losing it on restart means asking them to do
+    # that again with no explanation.
+    backend.operator_voiceprints = store.operator_voiceprints(
+        lambda row: OperatorVoiceprint(**row)
+    )
 
     # The record path's own three. Classified above as pipeline output "rebuilt
     # from the transcript", which two of them *are* and the third describes
@@ -2007,6 +2029,21 @@ def _include_operational_routers(
         if meeting_id not in backend.known_meetings:
             return None
 
+        # FR-1.6, and architecture section 3.5: the gate evaluates only
+        # utterances the operator did not say. A nudge prompting the operator
+        # to interrogate their own sentence is never useful, and every one
+        # spent on it comes out of the rate limit FR-5.8 imposes on the
+        # questions that are.
+        #
+        # `speaker` is `None` whenever verification could not answer -- nobody
+        # enrolled, a print from a retired embedder, a window with no speech in
+        # it -- and `None` deliberately falls through to the gate. The
+        # behaviour of a deployment that never enrols is exactly what it was.
+        if payload.speaker == OPERATOR:
+            return UtteranceAccepted(
+                meeting_id=meeting_id, triggered=False, trigger_reason="operator speech"
+            )
+
         hit = evaluate_utterance(payload.text)
         if hit is None:
             return UtteranceAccepted(meeting_id=meeting_id, triggered=False)
@@ -2057,6 +2094,19 @@ def _include_operational_routers(
         )
 
     app.include_router(build_live_utterance_router(observe_utterance))
+
+    async def get_voiceprint(operator_id: str) -> OperatorVoiceprint | None:
+        return backend.operator_voiceprints.get(operator_id)
+
+    async def save_voiceprint(voiceprint: OperatorVoiceprint) -> None:
+        backend.operator_voiceprints[voiceprint.operator_id] = voiceprint
+
+    async def forget_voiceprint(operator_id: str) -> bool:
+        return backend.operator_voiceprints.pop(operator_id, None) is not None
+
+    app.include_router(
+        build_voiceprint_router(get_voiceprint, save_voiceprint, forget_voiceprint)
+    )
 
 
     # --- slow lane tick --------------------------------------------------
@@ -2585,8 +2635,27 @@ def _include_operational_routers(
     # utterances, the stream carries nudges to the panel. Nothing turned the
     # first into the second, so a real meeting recorded perfectly and left the
     # panel at its resting state from the first word to the last.
-    async def _observe_text(session_id: str, text: str) -> None:
-        await observe_utterance(session_id, UtteranceRequest(text=text))
+    async def _observe_text(session_id: str, text: str, speaker: str | None) -> None:
+        await observe_utterance(session_id, UtteranceRequest(text=text, speaker=speaker))
+
+    async def _identify_speaker(session_id: str, window: bytes) -> str | None:
+        """Whose voice is in one window of the meeting (FR-1.6).
+
+        Off the event loop, without exception. The baseline embedder is pure
+        Python and takes around 200ms on a four-second window -- against the
+        ~15ms per utterance the architecture budgets, and against an event loop
+        that is also serving this meeting's nudge stream. Run inline it would
+        stall every open connection on the service for a fifth of a second
+        every four seconds of every meeting.
+
+        Answering `None` when nobody is enrolled costs nothing and skips the
+        work entirely, which is the path almost every deployment is on.
+        """
+
+        voiceprint = backend.operator_voiceprints.get(DEFAULT_OPERATOR_ID)
+        if not is_usable(voiceprint):
+            return None
+        return await asyncio.to_thread(identify_speaker, window, voiceprint)
 
     # Injected like every other inference seam in this service, rather than
     # imported here. Constructing the vendor client at the composition root
@@ -2597,7 +2666,11 @@ def _include_operational_routers(
     if recognise is None and settings_store is not None and vocabulary is not None:
         recognise = deepgram_live_recogniser(settings_store, vocabulary)
 
-    live_utterances = None if recognise is None else LiveUtterances(recognise, _observe_text)
+    live_utterances = (
+        None
+        if recognise is None
+        else LiveUtterances(recognise, _observe_text, identify=_identify_speaker)
+    )
 
     async def feed_live_lane(session_id: str, pcm: bytes) -> None:
         """Offer one chunk to the live lane, if there is a live lane to offer it to.

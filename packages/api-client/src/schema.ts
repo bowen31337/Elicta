@@ -682,6 +682,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/voiceprint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Voiceprint
+         * @description Whether this operator is enrolled, and with what.
+         *
+         *     200 with `enrolled: false` rather than 404. Not being enrolled is a
+         *     normal state of the capture screen, not a missing resource, and a 404
+         *     here would make "no enrolment yet" and "the service is not reachable"
+         *     look the same to the panel.
+         */
+        get: operations["read_voiceprint_api_operator_voiceprint_get"];
+        put?: never;
+        /**
+         * Create Voiceprint
+         * @description Enrol from one sample, replacing any earlier print.
+         *
+         *     422 rather than 400 for a sample that cannot be embedded: the request
+         *     is well-formed and the *audio* is the problem, and the detail is
+         *     written for the operator because the capture screen shows it verbatim.
+         */
+        post: operations["create_voiceprint_api_operator_voiceprint_post"];
+        /**
+         * Delete Voiceprint
+         * @description Remove the enrolment.
+         *
+         *     204 whether or not there was one to remove. The caller asked for a
+         *     state, not for a transaction, and answering 404 for "already not
+         *     enrolled" would make the panel report a failure for getting what it
+         *     asked for.
+         */
+        delete: operations["delete_voiceprint_api_operator_voiceprint_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/slow-lane/tick": {
         parameters: {
             query?: never;
@@ -2007,6 +2049,18 @@ export interface components {
             target_requirements_template?: string | null;
         };
         /**
+         * EnrolmentRequest
+         * @description One enrolment sample, in the format the whole system moves audio in.
+         *
+         *     Base64 linear16, 16kHz, mono — the same shape `POST /audio-chunk` takes and
+         *     the same shape the panel's `pcm.ts` produces, so the capture screen needs
+         *     no second conversion to enrol.
+         */
+        EnrolmentRequest: {
+            /** Pcm */
+            pcm: string;
+        };
+        /**
          * FillState
          * @description How much of a template section the meeting has covered so far (PRD FR-8.2; architecture §4).
          * @enum {string}
@@ -3013,6 +3067,39 @@ export interface components {
          * @enum {string}
          */
         VocabularyTermType: "product_name" | "internal_system" | "acronym";
+        /**
+         * VoiceprintStatus
+         * @description What the capture screen is told about the enrolment.
+         *
+         *     Never the embedding, on the same reasoning the settings surface never
+         *     returns a secret: an operator's voiceprint is biometric material, this is a
+         *     read anyone who can reach the API can make, and nothing on the screen has
+         *     any use for the bytes. The status answers "am I enrolled, with how much
+         *     audio, by which model, and when" — which is everything the screen shows.
+         *
+         *     `max_sample_seconds` and `min_sample_seconds` come from here rather than
+         *     being written into the panel, so the cap the UI counts down to is the cap
+         *     the service actually enforces.
+         */
+        VoiceprintStatus: {
+            /** Enrolled */
+            enrolled: boolean;
+            /** Sample Seconds */
+            sample_seconds?: number | null;
+            /** Embedding Model */
+            embedding_model?: string | null;
+            /** Enrolled At */
+            enrolled_at?: string | null;
+            /** Max Sample Seconds */
+            max_sample_seconds: number;
+            /** Min Sample Seconds */
+            min_sample_seconds: number;
+            /**
+             * Usable
+             * @default false
+             */
+            usable: boolean;
+        };
         /**
          * BankCandidate
          * @description One candidate question in a meeting's recompiled bank (PRD FR-4.8, architecture section 3.6).
@@ -4460,6 +4547,77 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    read_voiceprint_api_operator_voiceprint_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceprintStatus"];
+                };
+            };
+        };
+    };
+    create_voiceprint_api_operator_voiceprint_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrolmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceprintStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_voiceprint_api_operator_voiceprint_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

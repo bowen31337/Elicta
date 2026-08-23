@@ -25,6 +25,7 @@ PostgreSQL deployment the migration chain targets.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import threading
@@ -961,6 +962,58 @@ class StateStore:
             loaded=loaded,
             persist=persist,
             forget=lambda key: self._delete(table, "engagement_id", key),
+            lock=self._lock,
+        )
+
+    def operator_voiceprints(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """The enrolled operator voiceprint, keyed by operator id (FR-1.5).
+
+        The embedding crosses this boundary as base64 rather than as bytes.
+        Every durable collection here persists through `dump`, which is JSON,
+        and raw bytes do not survive that — so the model carries the encoded
+        form and the column underneath stays binary, which is what the table
+        was created as and what keeps a 96-byte vector 96 bytes on disk.
+        """
+
+        table = metadata.tables["operator_voiceprints"]
+        loaded: dict[str, V] = {
+            row.operator_id: decode(
+                {
+                    "operator_id": row.operator_id,
+                    "embedding": base64.b64encode(row.embedding).decode("ascii"),
+                    "embedding_model": row.embedding_model,
+                    "sample_duration_ms": row.sample_duration_ms,
+                    "enrolled_at": row.enrolled_at,
+                }
+            )
+            for row in self._rows(table)
+        }
+
+        def persist(key: str, value: Any) -> None:
+            payload = dump(value)
+            self._upsert(
+                table,
+                "operator_id",
+                key,
+                {
+                    # Keyed by the operator rather than by a fresh id per
+                    # write: this is an upsert of the one row that operator is
+                    # allowed to have, and minting a new id each time would
+                    # collide with the unique index instead of replacing.
+                    "id": f"voiceprint-{key}",
+                    "embedding": base64.b64decode(payload["embedding"]),
+                    "embedding_model": payload["embedding_model"],
+                    "sample_duration_ms": payload["sample_duration_ms"],
+                    "enrolled_at": payload["enrolled_at"],
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "operator_id", key),
             lock=self._lock,
         )
 

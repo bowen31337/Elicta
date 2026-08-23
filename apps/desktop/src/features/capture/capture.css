@@ -120,3 +120,13 @@
 .capture-meter-absent {
   padding: var(--space-3) var(--space-5);
 }
+
+/* Stop and Discard sit side by side while a voice sample is recording. Both
+   are sized to their labels: Stop is the one being aimed at, and a full-width
+   pair would put Discard under the thumb that was reaching for it. */
+.enrol-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.enrol-actions .btn { white-space: nowrap; }

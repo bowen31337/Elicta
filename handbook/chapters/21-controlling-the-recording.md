@@ -80,21 +80,41 @@ at the start that everyone dismisses without reading.
 
 ## Record your own voice once
 
-The idea is that you record up to a minute of yourself so that Elicta can tell
-your speech from the client's.
+Record up to a minute of yourself, once, and Elicta can tell your speech from
+the client's.
 
-It would be worth the minute. Without it, a question *you* asked can be recorded
-as something the client wanted — and that error carries all the way into the
+It is worth the minute. Without it, a question *you* asked can be recorded as
+something the client wanted — and that error carries all the way into the
 write-up, where nobody would know to doubt it.
+
+Pick the microphone to record it from — the list sits directly above the
+button, and it is a separate choice from the input the meeting is recorded on.
+They are different jobs. The meeting wants the cleanest feed of the room; this
+wants whatever is nearest your own mouth, which is often a headset the meeting
+is not running through at all.
+
+Then press Enrol and talk. The screen counts the seconds as they go and stops
+itself at a minute; you can stop earlier, or discard the take and start again. What
+Elicta keeps is a small numerical description of your voice, not the recording —
+the audio is used to work that out and then thrown away. Re-recording replaces
+what was there before.
 
 ## Where this is honest about itself
 
 Pausing, the state display and the argument for a better microphone all work,
 and they work in the installed app rather than only in principle.
 
-Recording your own voice does not. The screen offers it and the button does
-nothing yet, so today every voice in the room is treated the same way — which
-is the error described above, still waiting to be prevented.
+Recording your own voice works too, now. For a long time it did not: the screen
+offered it, the button did nothing, and the words above it read "Not enrolled"
+however many times you had pressed it.
+
+What compares voices afterwards is a plain measurement of the shape of a voice
+rather than the trained model this is eventually meant to use. It separates
+voices that sound clearly different. Two voices that sound alike it may not
+separate, and when it is unsure it treats the speech as the client's — so the
+cost of it being wrong is a question you did not need, rather than a client's
+requirement quietly passed over. The screen says as much, next to where you
+record.
 
 Capture no longer needs the installed application. In a browser on a secure
 page, the page's own microphone is used and the browser's recording indicator

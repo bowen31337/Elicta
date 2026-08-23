@@ -39,9 +39,13 @@ class _Recogniser:
 class _Observed:
     def __init__(self) -> None:
         self.seen: list[tuple[str, str]] = []
+        #: Who the verifier said was speaking, per utterance, kept apart from
+        #: `seen` so the existing assertions stay about the words.
+        self.speakers: list[str | None] = []
 
-    async def __call__(self, session_id: str, text: str) -> None:
+    async def __call__(self, session_id: str, text: str, speaker: str | None = None) -> None:
         self.seen.append((session_id, text))
+        self.speakers.append(speaker)
 
 
 @pytest.mark.asyncio
@@ -126,3 +130,73 @@ async def test_the_recogniser_is_told_which_session_it_is_hearing() -> None:
     await listener.feed("meeting-7", b"\x00" * 100)
 
     assert recogniser.sessions == ["meeting-7"]
+
+
+class _Verifier:
+    """Stands in for speaker verification, and records what it was asked."""
+
+    def __init__(self, answer: str | None) -> None:
+        self.answer = answer
+        self.windows: list[tuple[str, bytes]] = []
+
+    async def __call__(self, session_id: str, window: bytes) -> str | None:
+        self.windows.append((session_id, window))
+        return self.answer
+
+
+@pytest.mark.asyncio
+async def test_an_utterance_carries_whoever_the_verifier_heard() -> None:
+    """FR-1.6. The tag rides with the words to the gate, which skips its own."""
+
+    observed = _Observed()
+    listener = LiveUtterances(
+        _Recogniser("We need it by March."),
+        observed,
+        identify=_Verifier("operator"),
+        window_bytes=100,
+    )
+
+    await listener.feed("meeting-1", b"\x00" * 100)
+
+    assert observed.speakers == ["operator"]
+
+
+@pytest.mark.asyncio
+async def test_the_verifier_is_asked_about_the_window_the_words_came_from() -> None:
+    """Not a different slice, and not the whole buffer: FR-1.6 asks about the
+    audio segment behind the utterance, and that is this window exactly."""
+
+    verifier = _Verifier("other")
+    listener = LiveUtterances(
+        _Recogniser("Roughly a few thousand."), _Observed(), identify=verifier, window_bytes=100
+    )
+
+    await listener.feed("meeting-1", b"\x01" * 100)
+
+    assert verifier.windows == [("meeting-1", b"\x01" * 100)]
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_window_is_never_sent_for_verification() -> None:
+    """Verification is the expensive step here. Spending it on a window the
+    recogniser already found no words in buys nothing."""
+
+    verifier = _Verifier("operator")
+    listener = LiveUtterances(_Recogniser("   "), _Observed(), identify=verifier, window_bytes=100)
+
+    await listener.feed("meeting-1", b"\x00" * 100)
+
+    assert verifier.windows == []
+
+
+@pytest.mark.asyncio
+async def test_with_no_verifier_the_utterance_is_untagged_and_still_arrives() -> None:
+    """The path every deployment that never enrols stays on."""
+
+    observed = _Observed()
+    listener = LiveUtterances(_Recogniser("It should be quick."), observed, window_bytes=100)
+
+    await listener.feed("meeting-1", b"\x00" * 100)
+
+    assert observed.seen == [("meeting-1", "It should be quick.")]
+    assert observed.speakers == [None]

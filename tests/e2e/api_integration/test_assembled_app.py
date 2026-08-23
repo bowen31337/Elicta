@@ -64,6 +64,11 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/session/stream", "get"),
     ("/api/meetings/{meeting_id}/live/utterance", "post"),
     ("/api/meetings/{meeting_id}/slow-lane/tick", "post"),
+    # One print per operator, so one resource: read its status, replace it,
+    # remove it. The status never returns the embedding itself.
+    ("/api/operator/voiceprint", "get"),
+    ("/api/operator/voiceprint", "post"),
+    ("/api/operator/voiceprint", "delete"),
     ("/api/replay/runs", "get"),
     ("/api/replay/runs", "post"),
     ("/api/replay/runs/{run_id}", "get"),

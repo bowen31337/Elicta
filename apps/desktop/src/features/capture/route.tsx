@@ -8,6 +8,7 @@ import { formatElapsed } from './elapsed';
 import { decibels, meterPosition, type AudioLevel } from './levelMeter';
 import type { CaptureStore } from '../../services/captureSession';
 import { useCapture } from './useCapture';
+import { useEnrolment } from './useEnrolment';
 import { useRecordingStart } from './useRecordingStart';
 
 /**
@@ -53,6 +54,39 @@ export interface CaptureMetering {
   readonly waveform: readonly number[];
 }
 
+/**
+ * The enrolment control, when this render has a live one.
+ *
+ * Absent on the fixed journey scenes, which show the enrolled and not-enrolled
+ * states as pictures and must never open a microphone to do it. Its absence is
+ * what keeps the button inert there, and the screen otherwise identical.
+ */
+export interface CaptureEnrolment {
+  readonly phase: 'idle' | 'recording' | 'saving';
+  /** Whole seconds recorded in this attempt so far. */
+  readonly seconds: number;
+  /** Where this attempt stops itself, as the service reported it. */
+  readonly maxSeconds: number;
+  /** The shortest sample the service will accept. */
+  readonly minSeconds: number;
+  /**
+   * Whether the enrolled sample can still be compared against live audio.
+   *
+   * Enrolled and verifying nothing is a real state — a print left behind by an
+   * embedder no longer running — and it looks exactly like a working one
+   * unless the screen says otherwise.
+   */
+  readonly usable: boolean;
+  /** Why the last attempt failed, in the operator's terms. */
+  readonly error?: string | null;
+  /** Why enrolling cannot be started here at all. Disables the control. */
+  readonly blockedReason?: string | null;
+  /** Starts recording from one input, named as `CaptureSource.id` names it. */
+  readonly onStart?: (sourceId: string) => void;
+  readonly onStop?: () => void;
+  readonly onCancel?: () => void;
+}
+
 export interface CaptureScreenProps {
   readonly state: CaptureState;
   readonly elapsed: string;
@@ -88,6 +122,8 @@ export interface CaptureScreenProps {
   readonly uploadNote?: string | null;
   /** A live reading of the open input. Omitted when there is no meter. */
   readonly metering?: CaptureMetering;
+  /** The live enrolment control. Omitted by the fixed journey scenes. */
+  readonly enrolment?: CaptureEnrolment;
 }
 
 const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: string }> = {
@@ -195,6 +231,7 @@ export function CaptureScreen({
   sources,
   operatorEnrolled,
   enrolmentSeconds,
+  enrolment,
   onTogglePause,
   onStart,
   onStop,
@@ -207,6 +244,58 @@ export function CaptureScreen({
 }: CaptureScreenProps) {
   const copy = STATE_COPY[state];
   const acoustic = sources.find((source) => source.active && source.kind === 'acoustic');
+
+  /**
+   * Which input the voice sample is recorded from, held apart from the one the
+   * meeting records on.
+   *
+   * They are genuinely different choices. The meeting wants the cleanest feed
+   * of the room — a wired input, or a silent join. Enrolling wants whichever
+   * microphone is closest to the operator's own mouth, which is often a
+   * headset the meeting is not being recorded through at all.
+   *
+   * So the meeting's input is deliberately *not* inherited. The default here
+   * is the browser's own default device, which is the one this recorded from
+   * before there was any choice to make — inheriting the meeting's instead
+   * would silently move enrolment onto the room microphone, the worst input
+   * for the one recording where a single voice is the entire point.
+   *
+   * Tracked by position rather than by id: before the first permission grant a
+   * browser withholds every device id, so all of them are the empty string and
+   * no value here could tell them apart. The position always can, and the id
+   * it resolves to is still what gets asked for.
+   */
+  const [chosenVoiceInput, setChosenVoiceInput] = useState(0);
+  const voiceInputId = sources[chosenVoiceInput]?.id ?? '';
+
+  const recordingVoice = enrolment?.phase === 'recording';
+  const savingVoice = enrolment?.phase === 'saving';
+  // No live control, mid-save, or the browser cannot open a microphone here.
+  const enrolBlocked =
+    enrolment === undefined || savingVoice || (enrolment.blockedReason ?? null) !== null;
+  const maxSeconds = enrolment?.maxSeconds ?? 60;
+  const minSeconds = enrolment?.minSeconds ?? 3;
+
+  // The count is said in words rather than only drawn: the operator is talking,
+  // not watching, and the number is what tells them whether they have said
+  // enough to be worth keeping.
+  const enrolmentWord = recordingVoice
+    ? `Recording — ${enrolment.seconds}s of ${maxSeconds}s`
+    : savingVoice
+      ? 'Saving your voice sample'
+      : operatorEnrolled
+        ? 'Enrolled'
+        : 'Not enrolled';
+
+  const enrolmentDetail = recordingVoice
+    ? enrolment.seconds < minSeconds
+      ? `Keep talking — at least ${minSeconds}s is needed. Stopping ends the recording and keeps it.`
+      : 'Stopping ends the recording and keeps it. It stops on its own at the cap.'
+    : savingVoice
+      ? 'Working out the voiceprint. The recording itself is not kept.'
+      : operatorEnrolled
+        ? `${enrolmentSeconds}s sample. Your speech is tagged as yours, so a question you ask is not mistaken for a client requirement.`
+        : `Record up to ${maxSeconds} seconds so your own speech can be told apart from the client’s.`;
   const blocked = Boolean(unavailableReason);
   const sourceId = (source: CaptureSource) => source.id ?? source.label;
   const [chosen, setChosen] = useState<string | null>(null);
@@ -258,8 +347,16 @@ export function CaptureScreen({
                   value={selected ?? ''}
                   onChange={(event) => setChosen(event.target.value)}
                 >
-                  {sources.map((source) => (
-                    <option key={sourceId(source)} value={sourceId(source)}>
+                  {/* Keyed by position, not by id. A browser withholds every
+                      device id until the first permission grant, so before it
+                      each of these is the empty string — React saw one key
+                      twice and warned that it may duplicate or omit an option,
+                      on the picker an operator uses precisely when they have
+                      not yet granted anything. The value stays the id, which
+                      being empty is the honest answer: with nothing to pin,
+                      every one of them means "the default microphone". */}
+                  {sources.map((source, index) => (
+                    <option key={`${index}-${source.label}`} value={sourceId(source)}>
                       {source.label}
                     </option>
                   ))}
@@ -379,22 +476,98 @@ export function CaptureScreen({
           Your voice
         </h2>
         <div className="group">
+          {/* Only when there is a choice to make. One input is not a decision,
+              and a select holding a single option is a control that looks
+              like it does something.
+
+              Enabled even with no live enrolment control behind it, and
+              disabled only while one is running: choosing an input is local
+              state and works on its own, so a fixed journey scene showing this
+              greyed out would depict a screen the operator never sees. */}
+          {sources.length > 1 ? (
+            <div className="row row--form">
+              <label className="t-body" htmlFor="voice-input">
+                Record from
+              </label>
+              <select
+                id="voice-input"
+                className="field field--inline"
+                value={String(chosenVoiceInput)}
+                disabled={recordingVoice || savingVoice}
+                onChange={(event) => setChosenVoiceInput(Number(event.target.value))}
+              >
+                {sources.map((source, index) => (
+                  <option key={`${index}-${source.label}`} value={String(index)}>
+                    {source.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="row">
             <div className="row-main">
-              <span className="t-body">
-                {operatorEnrolled ? 'Enrolled' : 'Not enrolled'}
-              </span>
-              <span className="t-footnote">
-                {operatorEnrolled
-                  ? `${enrolmentSeconds}s sample. Your speech is tagged as yours, so a question you ask is not mistaken for a client requirement.`
-                  : 'Record up to 60 seconds so your own speech can be told apart from the client’s.'}
-              </span>
+              <span className="t-body">{enrolmentWord}</span>
+              <span className="t-footnote">{enrolmentDetail}</span>
             </div>
-            <button type="button" className="btn">
-              {operatorEnrolled ? 'Re-record' : 'Enrol'}
-            </button>
+            {/* Recording puts two controls here rather than one. Stop keeps
+                what was said; Discard throws it away — and an operator who
+                has just recorded themselves saying the wrong thing needs the
+                second one to exist, rather than having to enrol badly and
+                enrol again. */}
+            {recordingVoice ? (
+              <div className="enrol-actions">
+                <button type="button" className="btn btn--filled" onClick={enrolment?.onStop}>
+                  Stop
+                </button>
+                <button type="button" className="btn" onClick={enrolment?.onCancel}>
+                  Discard
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => enrolment?.onStart?.(voiceInputId)}
+                disabled={enrolBlocked}
+              >
+                {savingVoice ? 'Saving…' : operatorEnrolled ? 'Re-record' : 'Enrol'}
+              </button>
+            )}
           </div>
         </div>
+        {/* What this actually is, said once and not softened. The recogniser
+            behind enrolment is a baseline built from the shape of a voice, not
+            the learned speaker model the design calls for, and an operator told
+            it "identifies you" would trust a tag it has not earned between two
+            people who sound alike. */}
+        <p className="t-footnote hint">
+          Telling voices apart uses a built-in baseline. It separates voices
+          that sound clearly different; two similar voices it may not, and it
+          applies only while live transcription is running.
+        </p>
+        {/* Said here only when it is not already said above. What stops an
+            enrolment is almost always what stops the recording — an insecure
+            page, a browser with no microphone API — and the screen has
+            explained that once at the top. Repeating it verbatim beside the
+            Enrol button reads as a second, different problem. */}
+        {enrolment?.blockedReason && enrolment.blockedReason !== unavailableReason ? (
+          <p className="capture-warning t-footnote" role="status">
+            {enrolment.blockedReason}
+          </p>
+        ) : null}
+        {enrolment?.error ? (
+          <p className="capture-warning t-footnote" role="alert">
+            {enrolment.error}
+          </p>
+        ) : null}
+        {operatorEnrolled && enrolment !== undefined && !enrolment.usable ? (
+          // Enrolled and verifying nothing. Every other line in this section
+          // reads as working, so this one is said outright.
+          <p className="capture-warning t-footnote" role="status">
+            This sample was recorded by a version of the voice model that is no
+            longer running, so nothing is being told apart. Re-record to fix it.
+          </p>
+        ) : null}
       </section>
     </main>
   );
@@ -408,6 +581,9 @@ export function CaptureScreen({
 export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
   const capture = useCapture(store);
   const beginning = useRecordingStart(store);
+  // Its own device, its own lifetime: enrolling is not a meeting, and routing
+  // it through the capture session would let recording a voice sample book one.
+  const enrolment = useEnrolment();
 
   // The shell reports `idle` before a meeting starts and after it ends; the
   // screen calls that `stopped`, because "idle" describes the software and
@@ -424,8 +600,23 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
         kind: source.degraded ? 'acoustic' : source.id === 'loopback' ? 'loopback' : 'wired',
         active: capture.status.source?.id === source.id,
       }))}
-      operatorEnrolled={false}
-      enrolmentSeconds={0}
+      // Read from the service rather than hardcoded. These were `false` and
+      // `0` on every render, so the section described an operator who had
+      // never enrolled however many times they had.
+      operatorEnrolled={enrolment.status?.enrolled ?? false}
+      enrolmentSeconds={Math.round(enrolment.status?.sample_seconds ?? 0)}
+      enrolment={{
+        phase: enrolment.phase,
+        seconds: enrolment.seconds,
+        maxSeconds: enrolment.maxSeconds,
+        minSeconds: enrolment.status?.min_sample_seconds ?? 3,
+        usable: enrolment.status?.usable ?? false,
+        error: enrolment.error,
+        blockedReason: enrolment.blockedReason,
+        onStart: (sourceId: string) => enrolment.start(sourceId),
+        onStop: enrolment.stop,
+        onCancel: enrolment.cancel,
+      }}
       onTogglePause={() => {
         void (capture.status.state === 'paused' ? capture.resume() : capture.pause());
       }}

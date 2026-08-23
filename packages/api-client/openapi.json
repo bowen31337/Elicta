@@ -1957,6 +1957,81 @@
         }
       }
     },
+    "/api/operator/voiceprint": {
+      "get": {
+        "tags": [
+          "operator-voiceprint"
+        ],
+        "summary": "Read Voiceprint",
+        "description": "Whether this operator is enrolled, and with what.\n\n200 with `enrolled: false` rather than 404. Not being enrolled is a\nnormal state of the capture screen, not a missing resource, and a 404\nhere would make \"no enrolment yet\" and \"the service is not reachable\"\nlook the same to the panel.",
+        "operationId": "read_voiceprint_api_operator_voiceprint_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceprintStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "operator-voiceprint"
+        ],
+        "summary": "Create Voiceprint",
+        "description": "Enrol from one sample, replacing any earlier print.\n\n422 rather than 400 for a sample that cannot be embedded: the request\nis well-formed and the *audio* is the problem, and the detail is\nwritten for the operator because the capture screen shows it verbatim.",
+        "operationId": "create_voiceprint_api_operator_voiceprint_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceprintStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "operator-voiceprint"
+        ],
+        "summary": "Delete Voiceprint",
+        "description": "Remove the enrolment.\n\n204 whether or not there was one to remove. The caller asked for a\nstate, not for a transaction, and answering 404 for \"already not\nenrolled\" would make the panel report a failure for getting what it\nasked for.",
+        "operationId": "delete_voiceprint_api_operator_voiceprint_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/slow-lane/tick": {
       "post": {
         "tags": [
@@ -4675,6 +4750,21 @@
         ],
         "title": "EngagementUpdateResponse"
       },
+      "EnrolmentRequest": {
+        "properties": {
+          "pcm": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Pcm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pcm"
+        ],
+        "title": "EnrolmentRequest",
+        "description": "One enrolment sample, in the format the whole system moves audio in.\n\nBase64 linear16, 16kHz, mono \u2014 the same shape `POST /audio-chunk` takes and\nthe same shape the panel's `pcm.ts` produces, so the capture screen needs\nno second conversion to enrol."
+      },
       "FillState": {
         "type": "string",
         "enum": [
@@ -6536,6 +6626,69 @@
         ],
         "title": "VocabularyTermType",
         "description": "The categories FR-3.6 asks the vocabulary list to distinguish."
+      },
+      "VoiceprintStatus": {
+        "properties": {
+          "enrolled": {
+            "type": "boolean",
+            "title": "Enrolled"
+          },
+          "sample_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Seconds"
+          },
+          "embedding_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embedding Model"
+          },
+          "enrolled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrolled At"
+          },
+          "max_sample_seconds": {
+            "type": "integer",
+            "title": "Max Sample Seconds"
+          },
+          "min_sample_seconds": {
+            "type": "integer",
+            "title": "Min Sample Seconds"
+          },
+          "usable": {
+            "type": "boolean",
+            "title": "Usable",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "enrolled",
+          "max_sample_seconds",
+          "min_sample_seconds"
+        ],
+        "title": "VoiceprintStatus",
+        "description": "What the capture screen is told about the enrolment.\n\nNever the embedding, on the same reasoning the settings surface never\nreturns a secret: an operator's voiceprint is biometric material, this is a\nread anyone who can reach the API can make, and nothing on the screen has\nany use for the bytes. The status answers \"am I enrolled, with how much\naudio, by which model, and when\" \u2014 which is everything the screen shows.\n\n`max_sample_seconds` and `min_sample_seconds` come from here rather than\nbeing written into the panel, so the cap the UI counts down to is the cap\nthe service actually enforces."
       },
       "app__modules__compiler__api__models__BankCandidate": {
         "properties": {

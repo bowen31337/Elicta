@@ -359,3 +359,42 @@ class AudioDestructionEventRow(Base):
     # Attempt order for one session. Which came last is the answer to "where
     # does the audio stand now", so it has to survive the restart too.
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
+
+
+class OperatorVoiceprintRow(Base):
+    """The operator's enrolled voice sample, as an embedding (FR-1.5).
+
+    One row per operator — re-enrolling replaces it rather than adding another,
+    which is what the unique index on `operator_id` enforces. Durable for the
+    plainest of the reasons in this file: nothing rebuilds it. A voiceprint is
+    not derived from a transcript or a document or anything else still on the
+    machine; the only thing that produces one is a person recording themselves
+    for a minute, and losing it on restart means asking them to do it again
+    without saying why.
+
+    `embedding` holds the vector, never the audio it came from. FR-1.7 forbids
+    raw audio reaching persistent storage, and a fixed-width embedding is the
+    reason this table can exist at all — it is 96 bytes whether the sample was
+    three seconds or sixty, so it cannot become a recording by accident.
+
+    The id is a plain string assigned by the application rather than the
+    `postgresql.UUID` with a `gen_random_uuid()` default that this table's
+    first revision declared. SQLite is the default state store and takes its
+    schema from `metadata.create_all` rather than from Alembic, so a
+    PostgreSQL-only column type here would mean the two databases disagreed
+    about the shape of the same table — and only the deployment on PostgreSQL
+    would ever find out.
+    """
+
+    __tablename__ = "operator_voiceprints"
+
+    id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    operator_id: Mapped[str] = mapped_column(sa.String(128), nullable=False, unique=True)
+    embedding: Mapped[bytes] = mapped_column(sa.LargeBinary(), nullable=False)
+    #: Which embedder produced the bytes. Verification refuses to compare a
+    #: print stamped with a model it is not running, because scoring one
+    #: embedder's vector against another's returns a number that looks like a
+    #: similarity and means nothing.
+    embedding_model: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    sample_duration_ms: Mapped[int] = mapped_column(sa.Integer(), nullable=False)
+    enrolled_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)

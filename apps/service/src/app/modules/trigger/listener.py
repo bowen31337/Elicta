@@ -25,8 +25,15 @@ WINDOW_BYTES = 32_000 * 4
 #: (FR-2.9), and a live path that quietly dropped it would mis-hear exactly the
 #: proper nouns a requirements meeting turns on.
 Recognise = Callable[[str, bytes], Awaitable[str]]
-#: Where a finalised utterance goes.
-Observe = Callable[[str, str], Awaitable[None]]
+#: Where a finalised utterance goes, with whoever the verifier believes said
+#: it -- `None` when nothing could tell, which is the ordinary case on a
+#: deployment where nobody has enrolled.
+Observe = Callable[[str, str, str | None], Awaitable[None]]
+#: Whose voice is in this window, or `None` if the question cannot be answered
+#: (PRD FR-1.6). Awaitable because the answer is real signal processing rather
+#: than a lookup: it must not run on the event loop the meeting's own event
+#: stream is being served from.
+Identify = Callable[[str, bytes], Awaitable[str | None]]
 
 
 class LiveUtterances:
@@ -37,10 +44,12 @@ class LiveUtterances:
         recognise: Recognise,
         observe: Observe,
         *,
+        identify: Identify | None = None,
         window_bytes: int = WINDOW_BYTES,
     ) -> None:
         self._recognise = recognise
         self._observe = observe
+        self._identify = identify
         self._window = window_bytes
         self._buffers: dict[str, bytes] = {}
 
@@ -60,8 +69,16 @@ class LiveUtterances:
             # Whitespace counts as silence. The intake requires non-empty
             # text, so passing a blank line on would turn a quiet room into a
             # stream of 422s.
-            if heard.strip():
-                await self._observe(session_id, heard.strip())
+            if not heard.strip():
+                continue
+
+            # Verified against the same window the words came from, and only
+            # once there are words in it. This is the audio segment FR-1.6
+            # asks about, it is already in hand, and asking about a window
+            # that turned out to be silence would spend the whole cost of the
+            # comparison to learn nothing.
+            speaker = None if self._identify is None else await self._identify(session_id, window)
+            await self._observe(session_id, heard.strip(), speaker)
 
         # Written back even when nothing was recognised: the remainder is the
         # start of the next window, and dropping it loses speech silently.
