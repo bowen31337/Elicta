@@ -179,6 +179,20 @@ def test_only_the_continuity_fields_are_made_durable() -> None:
     assert not isinstance(backend.transcript_cleanings, DurableMapping)
 
 
+def test_session_audio_is_never_made_durable() -> None:
+    """FR-1.7 as a test, not as an intention.
+
+    Raw audio is never written to disk. `session_audio` holding bytes makes
+    that a live risk rather than a theoretical one, so the guard is here
+    beside the other durability decisions.
+    """
+
+    backend = attach_state_store(Backend(), open_state_store("sqlite://"))
+
+    assert isinstance(backend.session_audio, dict)
+    assert not isinstance(backend.session_audio, DurableMapping)
+
+
 def _engagement(client: TestClient, organisation: str) -> str:
     created = client.post(
         "/api/engagements",

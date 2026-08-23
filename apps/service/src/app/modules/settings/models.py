@@ -40,6 +40,11 @@ class SecretKey(str, Enum):
     ANTHROPIC_API_KEY = "anthropic_api_key"
     ANTHROPIC_OAUTH_TOKEN = "anthropic_oauth_token"
     ASR_VENDOR_API_KEY = "asr_vendor_api_key"
+    # The record path runs two independent engines (FR-2.6), and independent
+    # vendors do not share an API key. `ASR_VENDOR_API_KEY` above stays for the
+    # live path, which this does not touch.
+    DEEPGRAM_API_KEY = "deepgram_api_key"
+    ASSEMBLYAI_API_KEY = "assemblyai_api_key"
     CAPTURE_VENDOR_API_KEY = "capture_vendor_api_key"
     MICROSOFT_GRAPH_CLIENT_SECRET = "microsoft_graph_client_secret"
     STATE_DATABASE_URL = "state_database_url"

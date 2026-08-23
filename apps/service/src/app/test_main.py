@@ -166,3 +166,50 @@ def test_the_settings_database_otherwise_lives_in_the_user_data_directory(
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
 
     assert default_settings_database() == tmp_path / "elicta" / "settings.db"
+
+
+def test_the_app_starts_with_no_speech_credentials_configured() -> None:
+    """The CI / fresh-checkout case: this must not regress.
+
+    `ConnectorSettings.record_vendors` defaults to Deepgram and AssemblyAI,
+    and a brand-new settings store — exactly what a fresh checkout or a CI
+    runner starts with — has neither credential set. An unconfigured speech
+    vendor must fail closed per call, the same way an unconfigured Anthropic
+    key does, not stop the service from starting: this is the regression
+    `UnconfiguredVendor` propagating out of `create_app` would be.
+    """
+
+    from app.modules.settings.store import InMemorySettingsStore
+
+    app = create_app(settings_store=InMemorySettingsStore())
+
+    api_paths = [path for path in app.openapi()["paths"] if path.startswith("/api")]
+    assert api_paths, "an unconfigured speech vendor must not stop the app assembling"
+
+
+def test_the_app_starts_with_a_vendor_that_has_no_batch_client() -> None:
+    """A save the settings model permits must not be able to brick a boot.
+
+    `record_vendors = [deepgram, custom]` passes every validator on
+    `ConnectorSettings` — a custom vendor needs only `custom_base_url` — so it
+    is reachable from the Settings form. No batch client for it exists here,
+    and that used to leave `create_app` raising: a form entry that stops the
+    service starting, which also stops the screen the mistake would be
+    corrected on from being served.
+    """
+
+    from app.modules.settings.models import ConnectorSettings, SpeechVendor
+    from app.modules.settings.store import InMemorySettingsStore
+
+    store = InMemorySettingsStore()
+    store.write_connectors(
+        ConnectorSettings(
+            record_vendors=[SpeechVendor.DEEPGRAM, SpeechVendor.CUSTOM],
+            custom_base_url="https://custom.example/asr",
+        )
+    )
+
+    app = create_app(settings_store=store)
+
+    api_paths = [path for path in app.openapi()["paths"] if path.startswith("/api")]
+    assert api_paths, "a vendor with no batch client must not stop the app assembling"

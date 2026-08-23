@@ -234,6 +234,7 @@ _agent_models = importlib.import_module("app.modules.compiler.agent.models")
 _asr_models = importlib.import_module("app.modules.asr-record.models")
 _asr_router = importlib.import_module("app.modules.asr-record.router")
 _asr_citation = importlib.import_module("app.modules.asr-record.citation")
+_audio_hold = importlib.import_module("app.modules.asr-record.audio_hold")
 
 RecordPathTranscript = _asr_models.RecordPathTranscript
 RecordPathTranscriptionJob = _asr_models.RecordPathTranscriptionJob
@@ -378,8 +379,19 @@ class Backend:
     context_pack_digests: dict[str, Any] = field(default_factory=dict)
 
     retained_audio: dict[str, str] = field(default_factory=dict)
+    #: The session's audio, in memory only (FR-1.7, NFR-2.4). Deliberately a
+    #: plain dict: `attach_state_store` must never make this durable, and
+    #: `test_session_audio_is_never_made_durable` is what keeps it that way.
+    session_audio: dict[str, Any] = field(default_factory=dict)  # str -> SessionAudio
     session_diarizations: dict[str, SessionDiarization] = field(default_factory=dict)
     audio_destruction_events: list[AudioDestructionEvent] = field(default_factory=list)
+    #: How many transcripts a session must collect before the record path is
+    #: finished with its audio. Set by `build_app` from the engines it was
+    #: actually given, never assumed: it defaults to the two FR-2.6 requires
+    #: and a validator enforces, but `build_app(record_path_engines=[one])` is
+    #: a supported injection, and under a hardcoded 2 that session's audio was
+    #: never destroyed and its debrief never ran — both gates wait for a
+    #: transcript that no engine exists to write.
     record_path_engine_count: int = 2
 
     known_meetings: set[str] = field(default_factory=set)
@@ -523,20 +535,73 @@ def _audited_compiler_engines(
 def _audited_debrief_engines(
     backend: Backend, engagement_id: str, engines: DebriefEngines
 ) -> DebriefEngines:
-    """The §7 debrief seams, audited. See `_audited_compiler_engines`."""
+    """The §7 debrief seams, audited. See `_audited_compiler_engines`.
+
+    `diarize` is attributed to whoever it actually calls, which is not
+    `engines.name`. That name is the inference model's, and five of these six
+    seams are model calls; the diarizer is a speech vendor's, passed through
+    `anthropic_debrief_engines` untouched. Auditing it under the set's name
+    had the egress log — the record of what left the machine and to whom —
+    saying a meeting's raw audio went to Anthropic. `_audited_record_engine`
+    resolves attribution per call for the same reason; here the seam itself
+    carries the answer, because unlike the record engines there is no
+    per-call id to resolve it from.
+
+    The reachability observer comes off it for the same reason: `_lane_status`
+    reports on the *model*, and a speech vendor answering is not evidence the
+    model is reachable.
+    """
 
     if not engines.is_configured:
         return engines
     seam = partial(_audit_seam, backend, engagement_id, name=engines.name, observe=True)
     return DebriefEngines(
         name=engines.name,
-        diarize=seam(engines.diarize),
+        diarize=_audit_seam(
+            backend,
+            engagement_id,
+            engines.diarize,
+            getattr(engines.diarize, "processor_name", engines.name),
+        ),
         clean=seam(engines.clean),
         translate=seam(engines.translate),
         classify=seam(engines.classify),
         run_chain=seam(engines.run_chain),
         converse=seam(engines.converse),
     )
+
+
+def _audited_record_engine(backend: Backend, name: str, transcribe: Any) -> Any:
+    """One record-path batch engine, audited per call. See `_audited_compiler_engines`.
+
+    Unlike the compiler and debrief seams, this list is built once at
+    startup, before any session — let alone its engagement — exists, so the
+    fixed `engagement_id` `_audit_seam` wants cannot be resolved until the
+    call itself supplies a session id. The record path keys everything by
+    the meeting and calls it a session (see `_engagement_of_meeting`), so
+    that id is resolved fresh on every call and a fresh audited wrapper
+    built around it; falling back to the id itself keeps a session with no
+    known engagement recorded rather than dropped.
+    """
+
+    async def call(session_id: str, *args: Any, **kwargs: Any) -> Any:
+        engagement_id = _engagement_of_meeting(backend, session_id) or session_id
+        return await _audit_seam(backend, engagement_id, transcribe, name)(
+            session_id, *args, **kwargs
+        )
+
+    return call
+
+
+def _audited_record_engines(
+    backend: Backend, engines: Sequence[tuple[str, Any]]
+) -> list[tuple[str, Any]]:
+    """The record path's batch engines, audited. See `_audited_compiler_engines`."""
+
+    return [
+        (name, _audited_record_engine(backend, name, transcribe))
+        for name, transcribe in engines
+    ]
 
 
 class _BackendEgressSink:
@@ -576,6 +641,20 @@ def upstream_status_for(failure: UpstreamFailure) -> int:
     """
 
     return _UPSTREAM_STATUS.get(failure, 503)
+
+
+def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
+    """The `read_audio` every vendor client takes, bound to one backend.
+
+    Injected rather than imported so a client never reaches for `Backend` —
+    the same discipline `orchestration/engines.py` follows for inference.
+    """
+
+    def read(session_id: str) -> bytes:
+        entry = backend.session_audio.get(session_id)
+        return bytes(entry.buffer) if entry is not None else b""
+
+    return read
 
 
 def _engagement_of_meeting(backend: Backend, meeting_id: str) -> str | None:
@@ -809,6 +888,27 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
         lambda row: VocabularyTermResponse(**row)
     )
     return backend
+
+
+def _vendor_probe_for(key: SecretKey, settings_store: SettingsStore) -> Any:
+    """The probe for one speech credential, chosen by the vendor it belongs to.
+
+    This used to read `connectors.live_vendor` for every speech key, which was
+    tolerable while there was one. With a key per record vendor it is simply
+    the wrong endpoint, and a working key reported as broken is worse than an
+    unverified one — an operator acts on it.
+
+    The live-path key keeps following `live_vendor`, because that setting is
+    genuinely what it authenticates against.
+    """
+
+    if key is SecretKey.DEEPGRAM_API_KEY:
+        return probe_for_vendor("deepgram")
+    if key is SecretKey.ASSEMBLYAI_API_KEY:
+        return probe_for_vendor("assemblyai")
+    if key is SecretKey.ASR_VENDOR_API_KEY:
+        return probe_for_vendor(settings_store.read().connectors.live_vendor.value)
+    return None
 
 
 def build_app(
@@ -1199,11 +1299,15 @@ def build_app(
     # stage downstream of transcription working from "hello there". Injected
     # for the same reason `debrief_engines` is: the seam is where a vendor, or
     # a fixture standing in for one, substitutes.
-    engines = (
+    engines = _audited_record_engines(
+        backend,
         list(record_path_engines)
         if record_path_engines is not None
-        else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)]
+        else [stub_engine("engine-a", backend), stub_engine("engine-b", backend)],
     )
+    # The two gates that wait for "every engine" count against this, so it is
+    # read from the engines this app was built with rather than assumed.
+    backend.record_path_engine_count = len(engines)
 
     async def get_vocabulary(session_or_meeting_id: str) -> list[str]:
         """The engagement's vocabulary, for a caller holding a meeting id (FR-2.9).
@@ -1589,13 +1693,15 @@ def build_app(
                     secret, base_url=inference.base_url, mode=mode
                 )
 
-        # The speech vendors have real probes now, chosen by whichever vendor
-        # the connector settings name. A custom vendor still has none — we do
-        # not know its API — so it reports "configured, not verified".
-        if probe is None and key is SecretKey.ASR_VENDOR_API_KEY:
-            vendor_probe = probe_for_vendor(
-                settings_store.read().connectors.live_vendor.value
-            )
+        # The speech vendors have real probes now, each key tested against its
+        # own vendor: the two record-path keys against Deepgram and AssemblyAI
+        # by which key they are, and only the live-path key against whichever
+        # vendor `connectors.live_vendor` names, because that setting is
+        # genuinely what it authenticates against. A custom vendor still has
+        # no probe — we do not know its API — so it reports "configured, not
+        # verified".
+        if probe is None:
+            vendor_probe = _vendor_probe_for(key, settings_store)
             if vendor_probe is not None:
 
                 async def probe(secret: str, call=vendor_probe) -> None:
@@ -2262,6 +2368,45 @@ def _include_operational_routers(
 
     app.include_router(build_reference_document_link_router(fetch_body, attach_document))
 
+    # --- record-path audio chunk upload (spec §5.3, NFR-2.4) ------------
+    async def on_audio_retained(session_id: str, audio_ref: str) -> None:
+        """Record that the service now holds this session's raw audio.
+
+        Same obligation `on_audio_retained` in `build_app` records for the
+        engine-driven record-path routers: accepting audio for a session is
+        the moment custody begins, so it is the moment NFR-2.4's destruction
+        gate first has something to discard.
+        """
+
+        backend.retained_audio[session_id] = audio_ref
+
+    def audio_was_destroyed(session_id: str) -> bool:
+        """Whether this session's audio already has a destruction record.
+
+        NFR-2.4's record has to stay true after it is written. Nothing marked
+        a session closed, so a chunk with `sequence: 0` posted after the
+        destruction event recreated the hold and re-recorded the audio as
+        retained — and nothing destroyed it again, because `destroy_if_ready`
+        is only re-entered when a gating stage finishes and both had already
+        finished for that session. The result was audio retained after a
+        record asserting it was destroyed.
+
+        Read from the events rather than a flag beside them: the event list
+        *is* the record, and a second place saying the same thing is a second
+        place to disagree with it.
+        """
+
+        return any(
+            event.session_id == session_id
+            for event in backend.audio_destruction_events
+        )
+
+    app.include_router(
+        _audio_hold.build_audio_chunk_router(
+            backend.session_audio, on_audio_retained, audio_was_destroyed
+        )
+    )
+
 
 # --------------------------------------------------------------------------
 # Session audio lifecycle (PRD NFR-2.4, ADR-008).
@@ -2286,6 +2431,7 @@ def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:
 
     async def delete_audio(session_id: str, audio_ref: str) -> None:
         backend.retained_audio.pop(session_id, None)
+        _audio_hold.discard(backend.session_audio, session_id)
 
     async def emit(event: AudioDestructionEvent) -> None:
         backend.audio_destruction_events.append(event)

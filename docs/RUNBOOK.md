@@ -120,9 +120,5 @@ Credential Manager for the database key).
 | `GROQ_API_KEY`, `GROQ_MODEL` | Optional | claw-forge CLI | Configures the Groq provider. |
 | `CEREBRAS_API_KEY`, `CEREBRAS_MODEL` | Optional | claw-forge CLI | Configures the Cerebras provider. |
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Optional | claw-forge CLI | Configures a local Ollama provider. |
-
-`apps/service` does not yet have external ASR-vendor or database
-credentials in this table — the managed-capture and ASR vendor selections
-are an open decision (architecture D4, Phase 2) and the question bank runs
-on local SQLite (architecture §3). This table will grow as those components
-land; keep it in sync with `.env.example` when they do.
+| `ELICTA_DEEPGRAM_API_KEY` | Optional — one of the two ways in | `apps/service` (record-path ASR, FR-2.6) | API key for Deepgram, one of the two independent batch speech engines the record path runs (architecture §14.1-14.2). The Settings screen has no field for this key yet — it offers the live path's single ASR key only — so this variable and `PUT /api/admin/settings` are the two ways to supply it. A value saved through that endpoint overrides this one, and is re-read per call, so it takes effect without a restart. |
+| `ELICTA_ASSEMBLYAI_API_KEY` | Optional — one of the two ways in | `apps/service` (record-path ASR, FR-2.6) | API key for AssemblyAI, one of the two independent batch speech engines the record path runs (architecture §14.1-14.2). The Settings screen has no field for this key yet — it offers the live path's single ASR key only — so this variable and `PUT /api/admin/settings` are the two ways to supply it. A value saved through that endpoint overrides this one, and is re-read per call, so it takes effect without a restart. |

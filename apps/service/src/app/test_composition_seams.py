@@ -91,6 +91,17 @@ ACCEPTED_READ_ONLY: dict[str, str] = {
         "rather than the engagement's own template. Resolving that name is "
         "what would let this field be written."
     ),
+    "session_audio": (
+        "Written, but not here: `session_audio` is handed to "
+        "`audio_hold.build_audio_chunk_router` as the raw dict, and "
+        "`append_chunk` — in `audio_hold.py`, not this file — is what fills "
+        "it, so it can enforce chunk ordering in one place rather than "
+        "composition.py duplicating that check before indexing in. The same "
+        "reason covers `discard`: `delete_audio` calls it instead of "
+        "`backend.session_audio.pop(...)` so the two collections a session's "
+        "audio touches are forgotten by one call, not two kept in sync by "
+        "hand."
+    ),
 }
 
 # Calls that PUT something into a field, as opposed to reads of it. `pin`
