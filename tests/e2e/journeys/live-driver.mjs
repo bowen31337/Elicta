@@ -20,6 +20,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { reapOnExit, sweepStaleProfiles } from './reap.mjs';
+
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 export const CHROME =
@@ -95,6 +97,7 @@ export async function launchBrowser({ width, height, scale = 2 }) {
   // has never heard of, and journey 1 fails on "the engagement can be chosen
   // from the toolbar" with the previous run's id in the message. It reads
   // exactly like a regression in the picker, and the picker is fine.
+  sweepStaleProfiles('elicta-live-run-');
   const profile = mkdtempSync(path.join(tmpdir(), 'elicta-live-run-'));
   const chrome = spawn(
     CHROME,
@@ -111,6 +114,21 @@ export async function launchBrowser({ width, height, scale = 2 }) {
     { stdio: 'ignore' },
   );
 
+  // Registered against the child the instant it exists, not once the session
+  // is built: callers reach `close()` on their happy path only, and the paths
+  // that skip it — a throw anywhere below, an interrupt, an early exit — are
+  // exactly the ones that used to strand the browser. `socket` is captured by
+  // reference because the reaper outlives every step that might fail before
+  // there is one.
+  let socket = null;
+  const close = reapOnExit(() => {
+    try { socket?.close(); } catch { /* already gone */ }
+    chrome.kill();
+    // Best effort: a profile left behind is litter in the temp directory,
+    // not a failed run, so it must never take the run down with it.
+    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
   let wsUrl = null;
   for (let attempt = 0; attempt < 60 && wsUrl === null; attempt += 1) {
     try {
@@ -122,11 +140,11 @@ export async function launchBrowser({ width, height, scale = 2 }) {
     if (wsUrl === null) await sleep(250);
   }
   if (wsUrl === null) {
-    chrome.kill();
+    close();
     throw new Error('Chrome did not expose a CDP endpoint');
   }
 
-  const socket = new WebSocket(wsUrl);
+  socket = new WebSocket(wsUrl);
   await new Promise((ready) => socket.addEventListener('open', ready));
   const cdp = new Cdp(socket);
 
@@ -141,18 +159,7 @@ export async function launchBrowser({ width, height, scale = 2 }) {
     mobile: false,
   });
 
-  return {
-    cdp,
-    chrome,
-    socket,
-    close: () => {
-      socket.close();
-      chrome.kill();
-      // Best effort: a profile left behind is litter in the temp directory,
-      // not a failed run, so it must never take the run down with it.
-      try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
-    },
-  };
+  return { cdp, chrome, socket, close };
 }
 
 /**

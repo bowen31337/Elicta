@@ -24,9 +24,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { reapOnExit, sweepStaleProfiles } from './reap.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '../../../docs/journeys/screenshots');
@@ -119,12 +122,13 @@ async function waitForApp() {
   );
 }
 
-function launchChrome(port) {
+function launchChrome(port, profile) {
   const chrome = spawn(
     CHROME,
     [
       '--headless=new',
       `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
       '--no-sandbox',
       '--hide-scrollbars',
       '--force-device-scale-factor=2',
@@ -184,7 +188,18 @@ async function main() {
   mkdirSync(OUT, { recursive: true });
 
   const port = 9222 + Math.floor(Math.random() * 500);
-  const chrome = launchChrome(port);
+  // Chrome mints its own profile under /tmp when it is not given one, and
+  // removes it only on a graceful shutdown — which a reaped run is not. On
+  // this host /tmp is tmpfs, so each abandoned profile is resident memory
+  // rather than disk. Owning the directory makes its removal ours to
+  // guarantee instead of Chrome's to skip.
+  sweepStaleProfiles('elicta-capture-');
+  const profile = mkdtempSync(path.join(tmpdir(), 'elicta-capture-'));
+  const chrome = launchChrome(port, profile);
+  const reap = reapOnExit(() => {
+    chrome.kill();
+    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
   const socket = new WebSocket(await connect(port));
   await new Promise((ready) => socket.addEventListener('open', ready));
   const cdp = new Cdp(socket);
@@ -263,7 +278,7 @@ async function main() {
   }
 
   socket.close();
-  chrome.kill();
+  reap();
   console.log(`\n${captured} screenshots written to docs/journeys/screenshots/`);
 }
 

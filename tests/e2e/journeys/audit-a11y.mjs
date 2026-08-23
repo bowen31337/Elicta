@@ -17,9 +17,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { reapOnExit, sweepStaleProfiles } from './reap.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = process.env.JOURNEY_BASE_URL ?? 'http://127.0.0.1:1420';
@@ -116,11 +119,28 @@ async function connect(port) {
 async function main() {
   const json = process.argv.includes('--json');
   const port = 9800 + Math.floor(Math.random() * 300);
+  // Chrome mints its own profile under /tmp when it is not given one, and
+  // removes it only on a graceful shutdown — which a reaped run is not. On
+  // this host /tmp is tmpfs, so each abandoned profile is resident memory
+  // rather than disk. Owning the directory makes its removal ours to
+  // guarantee instead of Chrome's to skip.
+  sweepStaleProfiles('elicta-audit-a11y-');
+  const profile = mkdtempSync(path.join(tmpdir(), 'elicta-audit-a11y-'));
   const chrome = spawn(
     CHROME,
-    ['--headless=new', `--remote-debugging-port=${port}`, '--no-sandbox', 'about:blank'],
+    [
+      '--headless=new',
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profile}`,
+      '--no-sandbox',
+      'about:blank',
+    ],
     { stdio: 'ignore' },
   );
+  const reap = reapOnExit(() => {
+    chrome.kill();
+    try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
 
   const socket = new WebSocket(await connect(port));
   await new Promise((ready) => socket.addEventListener('open', ready));
@@ -160,7 +180,7 @@ async function main() {
   }
 
   socket.close();
-  chrome.kill();
+  reap();
 
   if (json) {
     console.log(JSON.stringify(findings, null, 2));
