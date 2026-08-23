@@ -93,8 +93,10 @@ They are different jobs. The meeting wants the cleanest feed of the room; this
 wants whatever is nearest your own mouth, which is often a headset the meeting
 is not running through at all.
 
-Then press Enrol and talk. The screen counts the seconds as they go and stops
-itself at a minute; you can stop earlier, or discard the take and start again. What
+Then press Enrol and talk. The screen counts the seconds as they go and shows
+the level beside the count, so you can see it is hearing you rather than find
+out at the end that it was not. It stops itself at a minute; you can stop
+earlier, or discard the take and start again. What
 Elicta keeps is a small numerical description of your voice, not the recording —
 the audio is used to work that out and then thrown away. Re-recording replaces
 what was there before.

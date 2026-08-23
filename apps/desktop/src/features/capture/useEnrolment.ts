@@ -6,6 +6,15 @@ import {
   openBrowserCapture,
   type BrowserAudioEnvironment,
 } from './browserCapture';
+import {
+  currentAudioContextFactory,
+  meterPosition,
+  openLevelReader,
+  pushHistory,
+  type AudioContextLike,
+  type AudioLevel,
+  type LevelReader,
+} from './levelMeter';
 import { base64OfInt16, TARGET_SAMPLE_RATE } from './pcm';
 import { currentPcmContextFactory, openPcmTap, type PcmContextLike } from './pcmTap';
 
@@ -64,6 +73,17 @@ export interface UseEnrolment {
   readonly maxSeconds: number;
   /** Why the last attempt failed, in the operator's terms. */
   readonly error: string | null;
+  /**
+   * How loud the input is right now, or `null` when there is no reading.
+   *
+   * `null` rather than zero, for the same reason it is `null` on the recording
+   * meter: zero says the room is silent, which is a finding an operator acts
+   * on by talking louder. "No reading" is a different claim, and drawing it as
+   * silence would have them shouting at a microphone that is working.
+   */
+  readonly level: AudioLevel | null;
+  /** Recent meter positions, oldest first, for the scrolling wave. */
+  readonly waveform: readonly number[];
   /** Why enrolment cannot be started at all here, or `null` when it can. */
   readonly blockedReason: string | null;
   /**
@@ -79,6 +99,8 @@ export interface UseEnrolment {
 export interface EnrolmentDeps {
   readonly environment?: () => BrowserAudioEnvironment;
   readonly pcmContext?: () => (() => PcmContextLike) | null;
+  /** The meter's own context, separate from the one the samples come off. */
+  readonly audioContext?: () => (() => AudioContextLike) | null;
   readonly fetch?: typeof fetch;
 }
 
@@ -86,6 +108,10 @@ const PATH = '/api/operator/voiceprint';
 
 /** Until the service answers, assume the cap the service actually enforces. */
 const FALLBACK_MAX_SECONDS = 60;
+
+/** Matched to the recording meter's, so the two read as one instrument. */
+const WAVEFORM_BARS = 48;
+const METER_INTERVAL_MS = 50;
 
 async function failureMessage(response: Response): Promise<string> {
   try {
@@ -101,6 +127,7 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
   const {
     environment = currentAudioEnvironment,
     pcmContext = currentPcmContextFactory,
+    audioContext = currentAudioContextFactory,
     fetch: fetchImpl = fetch,
   } = deps;
 
@@ -108,6 +135,8 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
   const [status, setStatus] = useState<EnrolmentStatus | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [level, setLevel] = useState<AudioLevel | null>(null);
+  const [waveform, setWaveform] = useState<readonly number[]>([]);
 
   /**
    * Everything the running recording owns, in one ref.
@@ -120,6 +149,9 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     samples: Int16Array[];
     total: number;
     close: () => void;
+    /** `null` where the browser will not give a meter. Recording is not
+     *  conditional on one: a sample with no bar beside it is still a sample. */
+    meter: LevelReader | null;
   } | null>(null);
 
   const maxSeconds = status?.max_sample_seconds ?? FALLBACK_MAX_SECONDS;
@@ -144,7 +176,12 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     const open = recording.current;
     if (open === null) return null;
     recording.current = null;
+    open.meter?.close();
     open.close();
+    // Cleared rather than frozen at its last value: a bar left standing beside
+    // a stopped recording is a reading of a microphone that is closed.
+    setLevel(null);
+    setWaveform([]);
     return { samples: open.samples, total: open.total };
   }, []);
 
@@ -244,7 +281,20 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
         tap?.close();
         session.stop();
       };
-      recording.current = { samples: [], total: 0, close };
+
+      // A meter is a convenience and the sample is not, so a browser that will
+      // not give one records without it rather than refusing to record.
+      let meter: LevelReader | null = null;
+      const makeMeterContext = audioContext();
+      if (makeMeterContext !== null) {
+        try {
+          meter = openLevelReader(makeMeterContext(), session.stream);
+        } catch {
+          meter = null;
+        }
+      }
+
+      recording.current = { samples: [], total: 0, close, meter };
 
       try {
         tap = openPcmTap(makeContext(), session.stream, (chunk) => {
@@ -266,7 +316,7 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
         setError('The microphone opened but its samples could not be read.');
       }
     })();
-  }, [environment, maxSeconds, pcmContext]);
+  }, [audioContext, environment, maxSeconds, pcmContext]);
 
   // The clock the operator watches, and the cap that ends the recording.
   //
@@ -284,6 +334,27 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     return () => clearInterval(timer);
   }, [maxSeconds, phase, stop]);
 
+  /**
+   * The meter, on a tick of its own.
+   *
+   * Twenty times a second against the clock's four, because they are showing
+   * different things: the clock counts whole seconds and would flicker if it
+   * ran faster, and a level that only moved four times a second reads as a
+   * broken meter rather than as a quiet room. This is the same rate the
+   * recording meter runs at, so the two look like one instrument.
+   */
+  useEffect(() => {
+    if (phase !== 'recording') return;
+    const timer = setInterval(() => {
+      const open = recording.current;
+      if (open?.meter == null) return;
+      const next = open.meter.read();
+      setLevel(next);
+      setWaveform((history) => pushHistory(history, meterPosition(next.rms), WAVEFORM_BARS));
+    }, METER_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [phase]);
+
   // A screen that unmounts mid-recording must not leave the device open — the
   // browser's recording indicator would stay lit with nothing behind it.
   useEffect(() => () => void release(), [release]);
@@ -293,6 +364,8 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     status,
     seconds,
     maxSeconds,
+    level,
+    waveform,
     error,
     blockedReason: browserCaptureBlockedReason(environment()),
     start,

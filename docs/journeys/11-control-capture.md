@@ -46,7 +46,8 @@ meeting is being recorded on. Those are different jobs: the meeting wants the
 cleanest feed of the room, and this wants whatever is closest to your own mouth
 — often a headset the meeting is not running through at all.
 
-The recording is counted out loud while it runs and stops itself at a minute.
+The recording is counted out loud while it runs, with a level beside the count
+so you can see the microphone is hearing you, and it stops itself at a minute.
 What is kept is a small numerical description of your voice; the recording
 itself is never stored. You can re-record whenever you like, and each one
 replaces the last.

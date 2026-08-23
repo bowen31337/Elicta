@@ -228,6 +228,42 @@ async function main() {
     console.log('--- recording ---\n' + recording + '\n');
     expect(/Recording — \d+s of 60s/.test(recording), 'the screen counts the sample as it records');
 
+    // A picture of the screen while it is recording, when asked for one. The
+    // meter is the part of this that no assertion can really judge.
+    if (process.env.ENROLMENT_SHOT) {
+      const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
+      (await import('node:fs')).writeFileSync(
+        process.env.ENROLMENT_SHOT,
+        Buffer.from(shot.data, 'base64'),
+      );
+      console.log(`  wrote ${process.env.ENROLMENT_SHOT}`);
+    }
+
+    // The meter has to be reading the microphone, not drawing a constant. A
+    // dead meter and a working one look identical in a screenshot, and the
+    // whole reason it is on screen is to tell an operator that a silent input
+    // is silent — so the check is that it *moves*, not that it is non-zero.
+    const readings = [];
+    for (let i = 0; i < 12; i += 1) {
+      readings.push(
+        await cdp.eval(`
+          const meter = document.querySelector('#voice-input')?.closest('.group')
+            ?.querySelector('[role=meter]');
+          return meter === null || meter === undefined
+            ? null
+            : Number(meter.getAttribute('aria-valuenow'));
+        `),
+      );
+      await sleep(150);
+    }
+    const levels = readings.filter((value) => value !== null);
+    expect(levels.length > 0, 'the input level is on screen while the sample records');
+    expect(
+      new Set(levels).size > 1,
+      `the level follows the microphone rather than sitting still (${[...new Set(levels)].join(', ')})`,
+    );
+    expect(levels.some((value) => value > 0), 'the level rises when there is speech');
+
     await sleep(RECORD_MS);
     const counted = await cdp.eval(VOICE_SECTION);
     const seconds = Number(/Recording — (\d+)s/.exec(counted)?.[1] ?? 0);

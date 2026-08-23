@@ -130,3 +130,14 @@
   align-items: center;
 }
 .enrol-actions .btn { white-space: nowrap; }
+
+/* The enrolment meter sits inside the grouped list rather than under a banner
+   like the recording one, so it drops the standalone block's top margin and
+   takes the row padding around it instead — otherwise it reads as a panel
+   floating inside a card rather than as part of the list. */
+.enrol-meter {
+  padding: var(--space-3) var(--space-4);
+}
+.enrol-meter .capture-meter {
+  margin-top: 0;
+}

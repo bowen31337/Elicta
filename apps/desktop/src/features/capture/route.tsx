@@ -81,6 +81,13 @@ export interface CaptureEnrolment {
   readonly error?: string | null;
   /** Why enrolling cannot be started here at all. Disables the control. */
   readonly blockedReason?: string | null;
+  /**
+   * A live reading of the microphone being enrolled from. Present only while
+   * recording — the same three-state distinction the recording meter makes,
+   * where an absent prop is "no meter was asked for" and a present one holding
+   * `null` is "a meter was attempted and there is no reading to be had".
+   */
+  readonly metering?: CaptureMetering;
   /** Starts recording from one input, named as `CaptureSource.id` names it. */
   readonly onStart?: (sourceId: string) => void;
   readonly onStop?: () => void;
@@ -171,7 +178,21 @@ const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: str
  * number with nothing behind it, so the note under the bar says plainly what
  * the reading covers.
  */
-function CaptureLevel({ metering, device }: { metering: CaptureMetering; device: string }) {
+function CaptureLevel({
+  metering,
+  device,
+  note = 'One mixed stream — this room, not individual speakers.',
+}: {
+  metering: CaptureMetering;
+  device: string;
+  /**
+   * What the reading covers. Defaulted to the meeting's caveat because that is
+   * what this meter was built for, and overridden where it would be wrong:
+   * enrolling is deliberately one person into one microphone, so warning that
+   * the bar cannot separate speakers answers a question nobody asked.
+   */
+  note?: string;
+}) {
   if (metering.level === null) {
     // Not a meter pinned at zero: zero says the room is silent, which is a
     // finding an operator would act on. "No reading" is a different claim.
@@ -218,9 +239,7 @@ function CaptureLevel({ metering, device }: { metering: CaptureMetering; device:
         </div>
         <span className="capture-meter-db t-footnote tabular">{reading}</span>
       </div>
-      <p className="capture-meter-note t-footnote">
-        One mixed stream — this room, not individual speakers.
-      </p>
+      <p className="capture-meter-note t-footnote">{note}</p>
     </div>
   );
 }
@@ -504,6 +523,21 @@ export function CaptureScreen({
               </select>
             </div>
           ) : null}
+          {/* Under the count, above the controls: an operator recording a
+              voice sample is looking at the number of seconds and needs the
+              evidence beside it that the microphone is hearing them. Without
+              it the only feedback a silent input gives is a refusal sixty
+              seconds later, and they would have no idea which of the inputs
+              above was the wrong one. */}
+          {recordingVoice && enrolment?.metering !== undefined ? (
+            <div className="enrol-meter">
+              <CaptureLevel
+                metering={enrolment.metering}
+                device={sources[chosenVoiceInput]?.label ?? 'The open input'}
+                note="If this is not moving while you talk, the wrong input is open."
+              />
+            </div>
+          ) : null}
           <div className="row">
             <div className="row-main">
               <span className="t-body">{enrolmentWord}</span>
@@ -614,6 +648,12 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
         error: enrolment.error,
         blockedReason: enrolment.blockedReason,
         onStart: (sourceId: string) => enrolment.start(sourceId),
+        // Handed over only while something is open, so a `null` level always
+        // means "no reading available" and never "nothing is recording".
+        metering:
+          enrolment.phase === 'recording'
+            ? { level: enrolment.level, waveform: enrolment.waveform }
+            : undefined,
         onStop: enrolment.stop,
         onCancel: enrolment.cancel,
       }}
