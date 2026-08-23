@@ -2681,6 +2681,58 @@
           }
         }
       }
+    },
+    "/api/sessions/{session_id}/audio-chunk": {
+      "post": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Accept Audio Chunk",
+        "operationId": "accept_audio_chunk_api_sessions__session_id__audio_chunk_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioChunkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioChunkAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3001,6 +3053,47 @@
         "type": "object",
         "title": "AttendeeCreateRequest",
         "description": "One attendee's structured profile, captured with no free-text assessment field (PRD FR-3.10)."
+      },
+      "AudioChunkAccepted": {
+        "properties": {
+          "received_bytes": {
+            "type": "integer",
+            "title": "Received Bytes"
+          },
+          "next_sequence": {
+            "type": "integer",
+            "title": "Next Sequence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "received_bytes",
+          "next_sequence"
+        ],
+        "title": "AudioChunkAccepted",
+        "description": "What the uploader needs to send the next one."
+      },
+      "AudioChunkRequest": {
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sequence"
+          },
+          "pcm": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Pcm",
+            "description": "base64 linear16, 16 kHz mono"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sequence",
+          "pcm"
+        ],
+        "title": "AudioChunkRequest",
+        "description": "One slice of a session's recording, on its way to the hold."
       },
       "AudioDestructionEvent": {
         "properties": {
@@ -5691,6 +5784,8 @@
           "anthropic_api_key",
           "anthropic_oauth_token",
           "asr_vendor_api_key",
+          "deepgram_api_key",
+          "assemblyai_api_key",
           "capture_vendor_api_key",
           "microsoft_graph_client_secret",
           "state_database_url"

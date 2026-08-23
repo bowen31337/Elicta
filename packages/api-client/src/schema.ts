@@ -900,6 +900,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/audio-chunk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Audio Chunk */
+        post: operations["accept_audio_chunk_api_sessions__session_id__audio_chunk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1069,6 +1086,29 @@ export interface components {
             decision_authority?: string | null;
             /** Domain Expertise */
             domain_expertise?: string[];
+        };
+        /**
+         * AudioChunkAccepted
+         * @description What the uploader needs to send the next one.
+         */
+        AudioChunkAccepted: {
+            /** Received Bytes */
+            received_bytes: number;
+            /** Next Sequence */
+            next_sequence: number;
+        };
+        /**
+         * AudioChunkRequest
+         * @description One slice of a session's recording, on its way to the hold.
+         */
+        AudioChunkRequest: {
+            /** Sequence */
+            sequence: number;
+            /**
+             * Pcm
+             * @description base64 linear16, 16 kHz mono
+             */
+            pcm: string;
         };
         /**
          * AudioDestructionEvent
@@ -2585,7 +2625,7 @@ export interface components {
          *     unset.
          * @enum {string}
          */
-        SecretKey: "anthropic_api_key" | "anthropic_oauth_token" | "asr_vendor_api_key" | "capture_vendor_api_key" | "microsoft_graph_client_secret" | "state_database_url";
+        SecretKey: "anthropic_api_key" | "anthropic_oauth_token" | "asr_vendor_api_key" | "deepgram_api_key" | "assemblyai_api_key" | "capture_vendor_api_key" | "microsoft_graph_client_secret" | "state_database_url";
         /**
          * SecretStatus
          * @description What a read of a secret returns: presence, not value.
@@ -4881,6 +4921,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReferenceDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_audio_chunk_api_sessions__session_id__audio_chunk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AudioChunkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioChunkAccepted"];
                 };
             };
             /** @description Validation Error */
