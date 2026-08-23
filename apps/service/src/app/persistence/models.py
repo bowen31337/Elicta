@@ -191,6 +191,45 @@ class ReferenceDocumentRow(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(), nullable=True)
 
 
+class ConsentRecordRow(Base):
+    """One confirmation that consent was disclosed and given for a meeting.
+
+    The legally significant row in this schema, and the last one to get a
+    table: `ConsentRecord` has said "durable proof" since it was written, and
+    the records lived in a plain list on `Backend` with nothing behind it. A
+    restart lost them, which meant the answer to "did we have permission for
+    this?" was as durable as the process — and unlike a document or a
+    vocabulary term, a consent confirmation cannot be retyped from a source,
+    because it describes a moment rather than a fact about the engagement.
+
+    Two deliberate absences. There is **no foreign key** to `meetings`: this is
+    an audit record *about* a meeting id, and cascading it away with the row it
+    describes would delete the evidence along with the subject. And there is
+    **no `deleted_at`**, alone among the tables here — the soft-delete
+    convention exists so an operator can take something out of a list, and a
+    record of who took responsibility for recording a client is not theirs to
+    withdraw.
+    """
+
+    __tablename__ = "consent_records"
+
+    # `{meeting_id}:{ordinal}` — the list for one meeting is rewritten whole,
+    # so the ordinal is stable within a rewrite and the pair is unique.
+    id: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    confirmed_by: Mapped[str] = mapped_column(sa.String(512), nullable=False)
+    # ISO-8601 text, not `DateTime`, alone among the timestamps here. The
+    # value is `datetime.now(UTC)` — timezone-aware — and SQLite's DateTime
+    # stores naive, so a round trip would silently drop the offset from a
+    # legally significant instant and read back as an ambiguous local time.
+    # Text is exact on every backend the deployment might use.
+    confirmed_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    # Append order within a meeting. A re-confirmation after a late arrival is
+    # the one that describes the meeting as recorded, so which came last has
+    # to survive the restart too.
+    ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
+
+
 class VocabularyTermRow(Base):
     """One client word the transcriber is told about (FR-2.9, FR-3.6).
 

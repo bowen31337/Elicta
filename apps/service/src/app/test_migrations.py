@@ -77,6 +77,7 @@ def test_the_schema_the_routers_depend_on_is_actually_created(
         "egress_log",
         "reference_documents",
         "vocabulary_terms",
+        "consent_records",
     ):
         assert f"CREATE TABLE {table}" in sql, f"{table} is never created"
 

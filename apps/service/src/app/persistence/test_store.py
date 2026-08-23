@@ -837,3 +837,74 @@ def test_a_database_written_before_a_not_null_column_existed_still_opens(tmp_pat
 
     with client_for(database) as second:
         assert set(_served_bank(second, engagement_id)) == {"c-1"}
+
+
+def _client_with_consent_model(database: str, engagement_id: str, model: str) -> TestClient:
+    """An app whose engagement asks for consent at every meeting.
+
+    The per-engagement override is the product's own mechanism and simply has
+    no screen yet, so a test sets it directly. Without it every engagement
+    takes the engagement-level default, the gate answers `not_required`, and a
+    test of confirmation durability would pass while proving nothing.
+    """
+
+    from app.core.consent.models import ConsentModel
+
+    backend = attach_state_store(Backend(), open_state_store(database))
+    backend.consent_models[engagement_id] = ConsentModel(model)
+    return TestClient(build_app(backend))
+
+
+def test_a_consent_confirmation_survives_a_restart(database: str) -> None:
+    """Who disclosed the recording is a legal record, not a cache.
+
+    It lived in a plain list on `Backend` with no table behind it, so the
+    answer to "did we have permission for this?" was only ever as durable as
+    the process. A restart mid-engagement lost it, and nothing rebuilds a
+    consent confirmation — unlike a document, it cannot be retyped from a
+    source, because it describes a moment.
+    """
+
+    with client_for(database) as first:
+        written = first.post(
+            "/api/meetings/meeting-1/consent-confirmation",
+            json={"confirmed_by": "Dana Whitfield, COO"},
+        )
+        assert written.status_code == 201, written.text
+        confirmed_at = written.json()["confirmed_at"]
+
+    with client_for(database) as second:
+        read = second.get("/api/meetings/meeting-1/consent-record")
+        assert read.status_code == 200, read.text
+        assert read.json()["confirmed_by"] == "Dana Whitfield, COO"
+        # The moment itself, not merely that some confirmation happened.
+        assert read.json()["confirmed_at"] == confirmed_at
+
+
+def test_the_gate_stays_open_after_a_restart(database: str) -> None:
+    """The record and the gate are one event, and both have to survive.
+
+    Keeping the durable record and the gate's own answer in separate fields is
+    what once let consent be captured perfectly and read back as never given.
+    A restart that restored the record and not the gate would be that same
+    failure, arriving a different way.
+    """
+
+    with _client_with_consent_model(database, "eng-1", "per_meeting") as first:
+        gate = first.get("/api/meetings/meeting-1/consent-gate?engagement_id=eng-1")
+        assert gate.json()["status"] == "awaiting_confirmation"
+        first.post(
+            "/api/meetings/meeting-1/consent-confirmation",
+            json={"confirmed_by": "Dana Whitfield, COO"},
+        )
+        assert (
+            first.get("/api/meetings/meeting-1/consent-gate?engagement_id=eng-1").json()["status"]
+            == "confirmed"
+        )
+
+    with _client_with_consent_model(database, "eng-1", "per_meeting") as second:
+        reopened = second.get("/api/meetings/meeting-1/consent-gate?engagement_id=eng-1")
+        assert reopened.json()["status"] == "confirmed", (
+            "the gate shut again on restart, so the meeting would be asked to "
+            "confirm consent it has already given"
+        )

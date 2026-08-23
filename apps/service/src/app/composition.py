@@ -276,8 +276,13 @@ class Backend:
     """In-memory stand-ins for every injected persistence callable across all routers."""
 
     consent_models: dict[str, ConsentModel] = field(default_factory=dict)
-    confirmed_meetings: set[str] = field(default_factory=set)
-    consent_records: list[ConsentRecord] = field(default_factory=list)
+    # Every confirmation for a meeting, oldest first, keyed by meeting id.
+    # A mapping rather than one flat list because the durable collection is
+    # keyed, and `confirmed_meetings` is gone: the gate's answer is now
+    # *derived* from whether a record exists, so the two can no longer
+    # disagree — which is exactly how consent was once captured perfectly and
+    # read back as never given.
+    consent_records: dict[str, list[ConsentRecord]] = field(default_factory=dict)
 
     egress_rows: list[EgressLogRow] = field(default_factory=list)
     # Which processing region each engagement is pinned to (NFR-2.2). Recorded
@@ -887,6 +892,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
     )
+    # The legally significant one, and the last to get a table. Losing this on
+    # restart lost the answer to "did we have permission for this?", and the
+    # gate it opens with it.
+    backend.consent_records = store.consent_records(lambda row: ConsentRecord(**row))
     return backend
 
 
@@ -976,19 +985,24 @@ def build_app(
         return _consent_model_for(backend, engagement_id)
 
     async def is_confirmed_for_meeting(meeting_id: str) -> bool:
-        return meeting_id in backend.confirmed_meetings
+        return bool(backend.consent_records.get(meeting_id))
 
     async def save_consent_record(record: ConsentRecord) -> None:
-        """Record the confirmation, and open the gate it confirms.
+        """Record the confirmation. The gate it opens is read from it.
 
-        These are one event, not two. Keeping the durable record and the
-        gate's own answer in separate fields is what let consent be captured
-        perfectly and read back as never given -- the audit trail was right
-        and the gate stayed shut.
+        These are one event, not two, and they are now one field. Keeping the
+        durable record and the gate's own answer in separate places is what
+        let consent be captured perfectly and read back as never given -- the
+        audit trail was right and the gate stayed shut.
+
+        The whole list is reassigned rather than appended to in place: a
+        `DurableMapping` persists through `__setitem__` only, so
+        `records.setdefault(k, []).append(v)` would write to memory and to
+        nowhere else.
         """
 
-        backend.consent_records.append(record)
-        backend.confirmed_meetings.add(record.meeting_id)
+        existing = backend.consent_records.get(record.meeting_id, [])
+        backend.consent_records[record.meeting_id] = [*existing, record]
 
     async def get_consent_record(meeting_id: str) -> ConsentRecord | None:
         """The most recent confirmation for this meeting, if there is one.
@@ -999,10 +1013,8 @@ def build_app(
         trail; this is only what the screen shows.
         """
 
-        for record in reversed(backend.consent_records):
-            if record.meeting_id == meeting_id:
-                return record
-        return None
+        records = backend.consent_records.get(meeting_id, [])
+        return records[-1] if records else None
 
     app.include_router(
         build_consent_router(
@@ -1822,7 +1834,7 @@ def _include_operational_routers(
 
         gate = evaluate_consent_gate(
             _consent_model_for(backend, backend.meeting_engagement_ids.get(meeting_id)),
-            confirmed_this_meeting=meeting_id in backend.confirmed_meetings,
+            confirmed_this_meeting=bool(backend.consent_records.get(meeting_id)),
         )
         if not gate.capture_may_begin:
             return CaptureAdmission.CONSENT_REQUIRED

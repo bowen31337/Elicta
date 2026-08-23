@@ -196,6 +196,12 @@ def _backfill_clause(column: sa.Column, dialect: Any) -> str | None:
     return f" NOT NULL DEFAULT {literal}"
 
 
+def _refuse_to_forget(key: Any) -> None:
+    """The `forget` for a collection nothing may delete from."""
+
+    raise PermissionError(f"consent records are an audit trail; {key!r} cannot be deleted")
+
+
 class DurableMapping(MutableMapping[K, V]):
     """A dict whose mutations are written through to a table as they happen.
 
@@ -641,6 +647,58 @@ class StateStore:
             loaded=loaded,
             persist=persist,
             forget=lambda key: self._delete(table, "engagement_id", key),
+            lock=self._lock,
+        )
+
+    def consent_records(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """Every consent confirmation for a meeting, oldest first.
+
+        Keyed by meeting id and holding the whole list rather than the latest,
+        because the list *is* the audit trail: a re-confirmation after a late
+        arrival does not replace the earlier one, it follows it. The screen
+        shows the last; an audit reads them all.
+        """
+
+        table = metadata.tables["consent_records"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.meeting_id, r.ordinal)):
+            loaded.setdefault(row.meeting_id, []).append(
+                decode(
+                    {
+                        "meeting_id": row.meeting_id,
+                        "confirmed_by": row.confirmed_by,
+                        # Pydantic parses the ISO-8601 text back, offset and
+                        # all, which is why it was stored as text.
+                        "confirmed_at": row.confirmed_at,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            # Read off the model rather than through `dump`, which would be a
+            # second serialisation of a value that is already exactly what the
+            # column wants.
+            rows = [
+                {
+                    "id": f"{key}:{ordinal}",
+                    "meeting_id": key,
+                    "confirmed_by": entry.confirmed_by,
+                    "confirmed_at": entry.confirmed_at.isoformat(),
+                    "ordinal": ordinal,
+                }
+                for ordinal, entry in enumerate(value)
+            ]
+            self._replace_children(table, "meeting_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            # A consent record is not withdrawable, so deletion is refused
+            # rather than quietly dropped: this is the one collection here
+            # whose whole purpose is to still be there when someone asks.
+            forget=_refuse_to_forget,
             lock=self._lock,
         )
 
