@@ -349,3 +349,105 @@ describe('the desktop shell feeding the bridge', () => {
     expect(bridge.stop).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('checking a microphone, which is not a recording', () => {
+  /**
+   * The seam where two changes met: the green room that opens a device so an
+   * operator can see it working, and the bridge that sends audio away. They
+   * landed in this file from different directions, and nothing asserted what
+   * happens when the first runs without the second.
+   *
+   * It matters more than an ordinary regression would. Checking happens
+   * *before* the client has been told anything — it is the operator alone,
+   * confirming their microphone works. Audio leaving the machine at that
+   * point would be audio sent from a room where nobody has been asked yet,
+   * and the consent screen's promise is made about a recording that has not
+   * begun.
+   */
+  it('creates no bridge at all while checking', async () => {
+    const context = fakeContext();
+    const createBridge = vi.fn(() => fakeBridge());
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge }),
+    );
+
+    await store.refresh();
+    await store.check('mic-1');
+
+    expect(store.getSnapshot().status.state).toBe('checking');
+    // Not merely "pushed nothing" — nothing was built that could push.
+    expect(createBridge).not.toHaveBeenCalled();
+  });
+
+  it('reads no samples while checking, even with the device open', async () => {
+    const context = fakeContext();
+    const bridge = fakeBridge();
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge: () => bridge }),
+    );
+
+    await store.refresh();
+    await store.check('mic-1');
+    // The device is open and the graph would carry audio if anything had
+    // attached to it.
+    context.emit(new Float32Array(1024).fill(0.5));
+
+    expect(bridge.pushed).toEqual([]);
+  });
+
+  it('starts uploading only once the check becomes a recording', async () => {
+    // The other half: a check that never uploads would be useless if the
+    // recording it turns into inherited that silence.
+    const context = fakeContext();
+    const bridge = fakeBridge();
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge: () => bridge }),
+    );
+
+    await store.refresh();
+    await store.check('mic-1');
+    await store.beginRecording();
+    context.emit(new Float32Array(1024).fill(0.5));
+
+    expect(store.getSnapshot().status.state).toBe('capturing');
+    expect(bridge.pushed.length).toBeGreaterThan(0);
+  });
+});
+
+describe('checking a microphone in the desktop shell', () => {
+  /**
+   * A different route with the same risk. `check` reaches `start_capture`,
+   * which starts the Rust capture thread — and that thread emits
+   * `capture://pcm` for as long as it runs, with no notion of whether the UI
+   * calls this a check or a recording. The only thing standing between those
+   * frames and the network is the `feeding` guard.
+   */
+  it('drops the frames Rust emits while only checking', async () => {
+    const emit: Record<string, (payload: unknown) => void> = {};
+    const bridge = fakeBridge();
+    const store = createCaptureStore({
+      shellAvailable: () => true,
+      environment: () => ({ isSecureContext: true, mediaDevices: undefined }),
+      audioContext: () => null,
+      createBridge: () => bridge,
+      invoke: (async (command: string) =>
+        command === 'start_capture'
+          ? { state: 'capturing', source: null, frames: 0 }
+          : command === 'list_audio_sources'
+            ? []
+            : null) as never,
+      listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
+        emit[name] = (payload) => handler({ payload });
+        return () => undefined;
+      },
+    });
+
+    await store.refresh();
+    await store.check('line-in');
+    // Rust is running and emitting, exactly as it would be during a recording.
+    emit['capture://pcm']?.({ pcm: 'AAAAAAAAAAA=' });
+
+    expect(store.getSnapshot().status.state).toBe('checking');
+    expect(bridge.pushed).toEqual([]);
+  });
+});
