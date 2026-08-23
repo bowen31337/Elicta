@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 
 import pytest
@@ -21,6 +22,21 @@ from app.modules.settings.models import DocumentSourceSettings, SecretKey
 from app.modules.settings.store import InMemorySettingsStore
 
 __all__ = ["Backend", "build_app", "configured_settings_store", "fake_microsoft"]
+
+
+# Shorten the live stream's connection window for the whole suite.
+#
+# `GET /api/meetings/{id}/session/stream` holds its connection open for
+# minutes, because closing it the moment the backlog ran dry turned the
+# panel's one subscription into a reconnection every three seconds. That
+# window belongs to a deployment, not to a suite that reads the stream to the
+# end -- which would otherwise wait it out once per assertion.
+#
+# Set on import rather than from a fixture: the app is built by fixtures of
+# every scope here, including a module-scoped one, and a function-scoped
+# fixture cannot run before those. `setdefault`, so a run that names its own
+# window keeps it.
+os.environ.setdefault("ELICTA_SESSION_STREAM_HOLD_SECONDS", "0.02")
 
 
 def _docx(text: str) -> bytes:

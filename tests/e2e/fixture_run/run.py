@@ -20,12 +20,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+
+# The session stream holds its connection open for minutes so the panel is not
+# reconnecting every three seconds. This harness reads the stream to the end to
+# count its frames, so it asks for the window a short-lived deployment would.
+os.environ.setdefault("ELICTA_SESSION_STREAM_HOLD_SECONDS", "0.02")
 
 from . import fixtures
 from .harness import build_fixture_app

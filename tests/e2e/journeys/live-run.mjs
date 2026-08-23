@@ -74,6 +74,48 @@ async function callApi(method, path, body, timeoutMs = 30000) {
   }
 }
 
+/**
+ * The backlog on a server-sent-events endpoint, without waiting for the end.
+ *
+ * `callApi` reads a response to its last byte, which is the wrong shape for
+ * the session stream: that connection is held open for minutes at a time, so
+ * that the panel is not reconnecting every three seconds. Read to the end, it
+ * returns nothing until the window expires and the abort fires first.
+ *
+ * The stream marks the end of what it currently has with a comment frame — a
+ * line beginning with a colon, which `EventSource` ignores. Everything before
+ * the first one is exactly what a panel connecting now would be handed.
+ */
+async function readSseBacklog(path, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API}${path}`, { method: 'GET', signal: controller.signal });
+    if (!response.body) return { status: response.status, json: null, text: '' };
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      const mark = text.search(/^:/m);
+      if (mark !== -1) {
+        text = text.slice(0, mark);
+        break;
+      }
+    }
+    // Let go of the connection rather than leaving it held for the window:
+    // the service keeps one open per reader, and a journey opens several.
+    await reader.cancel().catch(() => {});
+    return { status: response.status, json: null, text };
+  } catch (error) {
+    return { status: 0, json: { error: String(error.message ?? error) }, text: '' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Uploads one file the way the panel's drop zone does: `multipart/form-data`,
  *  with the boundary the runtime picks rather than one written by hand. */
 async function uploadApi(path, { filename, content, fields = {} }, timeoutMs = 30000) {
@@ -162,6 +204,7 @@ async function main() {
       state, secrets: SECRETS, sleep,
       eval: (expression) => cdp.eval(expression),
       api: (method, path, body = null, timeoutMs) => callApi(method, path, body, timeoutMs),
+      sse: (path, timeoutMs) => readSseBacklog(path, timeoutMs),
       upload: (path, file, timeoutMs) => uploadApi(path, file, timeoutMs),
       async narrate(message) {
         console.log(`    · ${message}`);

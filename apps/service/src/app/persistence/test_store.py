@@ -659,7 +659,7 @@ def test_a_database_written_before_a_column_existed_still_opens(tmp_path) -> Non
     ]
 
 
-def test_the_expected_languages_survive_a_restart(database: str) -> None:
+def test_the_expected_languages_survive_a_restart(database: str, monkeypatch) -> None:
     """Derived once, when the engagement is created — so it has to be kept.
 
     `derive_and_persist_expected_languages` runs on creation and nothing runs it
@@ -669,6 +669,11 @@ def test_the_expected_languages_survive_a_restart(database: str) -> None:
 
     The `engagements` table has carried the column since its first revision.
     """
+
+    # The stream holds its connection open for minutes in a deployment. Read
+    # to the end here, so the window is shortened the way a deployment behind
+    # a short-lived proxy would shorten it.
+    monkeypatch.setenv("ELICTA_SESSION_STREAM_HOLD_SECONDS", "0.02")
 
     with client_for(database) as first:
         created = first.post(

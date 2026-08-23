@@ -276,9 +276,9 @@ export const JOURNEYS = [
     async run(ctx) {
       const meetingId = ctx.state.meetingId;
       await ctx.narrate('Opening the live session stream the panel reads from');
-      const stream = await ctx.api('GET', `/api/meetings/${meetingId}/session/stream`, null, 6000);
+      const stream = await ctx.sse(`/api/meetings/${meetingId}/session/stream`, 6000);
       ctx.check('the session stream is reachable', stream.status < 400,
-        `status ${stream.status}, ${JSON.stringify(stream.json).slice(0, 200)}`);
+        `status ${stream.status}, ${stream.text.slice(0, 200)}`);
 
       await ctx.narrate('Ticking the slow lane — the pre-reasoning that refills the bank');
       const tick = await ctx.api('POST', `/api/meetings/${meetingId}/slow-lane/tick`);
@@ -390,7 +390,7 @@ export const JOURNEYS = [
         `audit returned ${JSON.stringify(egress.json).slice(0, 240)} after a live model call was made`);
 
       await ctx.narrate('The mode the panel reads is carried on the live session stream');
-      const stream = await ctx.api('GET', `/api/meetings/${ctx.state.meetingId}/session/stream`);
+      const stream = await ctx.sse(`/api/meetings/${ctx.state.meetingId}/session/stream`);
       const laneFrame = String(stream.text ?? '')
         .split('\n\n')
         .map((block) => block.split('\n'))
@@ -411,7 +411,7 @@ export const JOURNEYS = [
       // different entitlement from the slow lane the badge speaks for.
       await ctx.api('POST', `/api/engagements/${ctx.state.engagementId}/bank/compile`);
       await ctx.sleep(3000);
-      const afterCompile = await ctx.api('GET', `/api/meetings/${ctx.state.meetingId}/session/stream`);
+      const afterCompile = await ctx.sse(`/api/meetings/${ctx.state.meetingId}/session/stream`);
       const laneAfter = String(afterCompile.text ?? '')
         .split('\n\n')
         .map((block) => block.split('\n'))
