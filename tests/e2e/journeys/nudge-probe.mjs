@@ -14,15 +14,19 @@
  *   node tests/e2e/journeys/nudge-probe.mjs --listen         # watch, say nothing
  *   node tests/e2e/journeys/nudge-probe.mjs --quiet-check    # lines that must NOT fire
  *   node tests/e2e/journeys/nudge-probe.mjs --script         # the whole script, paced
+ *   node tests/e2e/journeys/nudge-probe.mjs --list          # meetings, newest last
  *
  *   SERVICE=http://127.0.0.1:8000  the service to talk to
  *
  * **Which meeting.** The panel and the capture screen read their meeting from
  * the browser's own storage, on the machine running the browser — which this
- * cannot see. So the meeting is named on the command line, and without one the
- * newest is used and printed. Check the printed id against the toolbar picker
- * before believing a quiet panel: pointing this at one meeting while watching
- * another is the likeliest way to conclude wrongly that nothing works.
+ * cannot see. Neither can the service: a meeting's state stays `planned` while
+ * it is being recorded, so nothing on the wire says which one is live. So the
+ * meeting is named on the command line, `--list` shows what there is to name,
+ * and without one the newest is used and printed. Check the printed id against
+ * the toolbar picker before believing a quiet panel: pointing this at one
+ * meeting while watching another is the likeliest way to conclude wrongly that
+ * nothing works.
  *
  * **No audio is involved, and nothing is billed.** This posts finalised text
  * to the same intake a recogniser posts to, so it exercises the gate, the bank
@@ -79,6 +83,29 @@ async function api(method, path, body) {
     json = null;
   }
   return { status: response.status, json, text };
+}
+
+/** Every meeting, oldest first, with the engagement it belongs to. */
+async function allMeetings() {
+  const engagements = await api('GET', '/api/engagements');
+  if (engagements.status !== 200) {
+    throw new Error(`the service answered ${engagements.status} for its engagements`);
+  }
+  const rows = [];
+  for (const engagement of engagements.json.items ?? []) {
+    const meetings = await api('GET', `/api/engagements/${engagement.engagement_id}/meetings`);
+    for (const meeting of meetings.json?.meetings ?? []) {
+      rows.push({
+        id: meeting.meeting_id,
+        engagement: engagement.engagement_id,
+        client: engagement.client_organisation,
+        mode: meeting.capture_mode,
+      });
+    }
+  }
+  // Ids are issued in order, so the highest number is the newest. Compared as
+  // numbers rather than as text, or meeting-9 outranks meeting-40.
+  return rows.sort((a, b) => Number(a.id.split('-').pop()) - Number(b.id.split('-').pop()));
 }
 
 /** The most recently created meeting, across every engagement. */
@@ -148,6 +175,16 @@ async function say(meetingId, text) {
 }
 
 async function main() {
+  if (flags.has('--list')) {
+    const rows = await allMeetings();
+    if (rows.length === 0) console.log('this service has no meetings');
+    for (const row of rows) {
+      console.log(`  ${row.id.padEnd(12)} ${row.mode.padEnd(11)} ${row.client} (${row.engagement})`);
+    }
+    console.log('\nnewest is last. The capture screen names the one it is on in the toolbar.');
+    return;
+  }
+
   const meetingId = named ?? (await newestMeeting());
   console.log(`meeting: ${meetingId}${named ? '' : '   (newest — check this against the picker)'}`);
   console.log(`service: ${SERVICE}\n`);
