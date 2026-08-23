@@ -300,9 +300,10 @@ would be out of date within a fortnight and would look just as confident.
 
 The honest shape of your first real meeting, in a sentence: **Elicta is a very
 good prepared-question list, a recorder, and an after-the-fact way to
-interrogate what was said.** The in-the-room suggestion — the thing it is
-ultimately for — is built, tested, and waiting on one missing service. Which
-of the two halves you are in is what that last chapter tells you.
+interrogate what was said** — and, once a speech provider is configured, a
+panel that puts a question in front of you while the client is still in the
+room. That last part is the thing it is ultimately for, and it now works for
+vague wording. What it does not yet do is in the last chapter.
 
 ---
 

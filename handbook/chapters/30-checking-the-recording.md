@@ -72,14 +72,16 @@ something went wrong later.
 
 ## Where this is honest about itself
 
-The comparing, the flagging and the destroying are built. The transcribing is
-not: on this path Elicta is not yet connected to either service.
+The comparing, the flagging and the destroying are built, and the transcribing
+is now connected: both companies are reached with the credentials you put in
+Settings, and the service says at startup which of the two it can actually
+speak to.
 
-Ask it to check a recording today and it will accept the job, name two engines
-and report no disagreements — because nothing was transcribed. Those two engine
-names are placeholders rather than companies. Everything on this page describes
-machinery that is finished and waiting, not a recording that has been through
-it. The comparison is real; it has had nothing real to compare.
+Configure neither and the honest behaviour is unchanged — the job is accepted,
+the two engines are named, and no disagreements are reported, because nothing
+was transcribed. A page reporting perfect agreement over nothing is the one
+result that would be worth distrusting, so read the setup screen before you
+read the figures.
 
 The screen says exactly that rather than putting a figure on it. It used to
 report that the engines had agreed on none of the recording, directly beside a

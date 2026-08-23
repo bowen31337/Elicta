@@ -7,7 +7,7 @@
 > from notes kept alongside the product itself, so it cannot fall out of date.
 > Editing it by hand has no effect — the next build puts it back.
 
-79 notes in total, 56 of them describing something that works today.
+84 notes in total, 59 of them describing something that works today.
 
 This page is read from the notes kept alongside each part of the product, so it says what is true now rather than what was true when somebody last remembered to update a page.
 
@@ -35,6 +35,9 @@ You can rely on these.
 | Catch a vague answer while it still matters | The panel itself: the running coverage count and time remaining, the suggestion and the line saying why it fired, all four one-tap responses, and the box for typing your own. It is connected to the meeting's live session, so whatever that session sends appears here |
 | Catch a vague answer while it still matters | Your taps are recorded against the meeting and sent back, so the debrief knows which suggestions you used and which you set aside |
 | Catch a vague answer while it still matters | The microphone. The desktop app opens the device, offers the audio interface and the silent-join path, and releases it when you stop |
+| Catch a vague answer while it still matters | Something to put in the panel. What the microphone hears is turned into words during the meeting, checked for the kind of vagueness that costs a requirement — an amount with no number, an adjective with no threshold, a date that is not a date, a commitment behind a hedge — and a question is put in front of you. Verified end to end against a real recording |
+| Catch a vague answer while it still matters | The question comes from the bank drafted before the meeting, chosen for the word you actually heard rather than for how highly it was ranked. Where the bank has nothing about that word, the question is built from the word itself, so the panel still works when no model can be reached |
+| Catch a vague answer while it still matters | At most one suggestion a minute, however much passes the check. The limit matters more than it sounds: a panel that interrupts more often than that stops being read, and it stops being read for the rest of the meeting |
 | Run a meeting in two languages | Showing which languages are in play, and telling apart the ones Elicta is listening for from the ones it has heard. What it listens for is worked out from the client background when the engagement is made, kept with the engagement, and shown on the panel before a word is spoken |
 | Run a meeting in two languages | We measured it rather than leaving it open. The two languages do not cover the same ground, and that is correct: Mandarin catches a whole category of deferred commitment that English carries in tone rather than words, so no word list could find it. Each language is stronger than the other somewhere, and the gaps are now named rather than assumed away |
 | When the connection drops | The two-speed design, the panel's degraded state, and honest recording of what could not be completed |
@@ -81,6 +84,7 @@ These work, once somebody has configured the outside service they depend on.
 | Part of the product | What the note says |
 |---|---|
 | Prepare for the engagement | Two one-off steps, both in Settings and both covered in journey 10. Drafting the questions needs an AI provider. Reading a document from SharePoint or OneDrive needs your Microsoft 365 tenant registered — a dropped file needs neither, which is the way in that always works |
+| Catch a vague answer while it still matters | Hearing the meeting needs a speech provider configured in Settings; without one the panel stays at its resting state and the recording is unaffected. Once configured it is charged by that vendor for every few seconds of audio, silence included, for as long as the recording runs |
 
 ## Still to come
 
@@ -93,7 +97,8 @@ These are described elsewhere in this guide as things that are not finished. The
 | Prepare for the engagement | **Remembering a failed compile across a restart.** The explanation above lives only as long as the service does. Restart it and the screen goes back to offering a compile, which is a fair trade — a failure kept from before a restart might describe a problem you have already fixed — but it does mean pressing Compile again is how you get the current answer |
 | Prepare for the engagement | A scanned PDF. The text of a page that is really a photograph is not recovered, so such a document contributes nothing rather than contributing nonsense |
 | Start the meeting | Asking for consent at all. Every engagement is currently set to treat consent as settled for the engagement as a whole, so no meeting asks and no consent record is written. The gate that would ask is built and tested; nothing can switch an engagement over to it yet |
-| Catch a vague answer while it still matters | Anything to put in the panel. Nothing turns speech into words yet: the connection point for a transcription service has three implementations and all three are stand-ins used for testing, so no sentence is ever produced, nothing is ever recognised as vague, and no suggestion is ever raised. Everything above this line works and has been tested; during a real meeting the panel would sit at its resting state all the way through |
+| Catch a vague answer while it still matters | Hearing across a pause. The recogniser is given four seconds at a time and nothing listens for the ends of sentences, so a phrase landing on the join between two of them can be missed. What is heard is accurate; what is missed is silent |
+| Catch a vague answer while it still matters | The other three ways a question can be earned — an action with nobody named as doing it, an answer that contradicts a document you supplied, a system or team nobody has mentioned before. Only the wording checks are built, and they are the ones that need no model |
 | Run a meeting in two languages | **Hearing them.** Detection needs a transcription service, and no client for one exists on the live path — so today the strip shows what is expected and never fills in what was heard. Everything downstream of detection is built and waiting on that one piece |
 | Run a meeting in two languages | **The suggestion in one language and the interface in another.** There is no setting for the language you read, and a suggestion carries no language of its own, so today both are whatever the screen is written in |
 | Run a meeting in two languages | **Number conversion, in the product.** It is written and tested — thoroughly, per language — but it lives in a component nothing calls yet, so no number reaching you has been through it |

@@ -4,12 +4,20 @@ This is what Elicta is for. A client says something that sounds like an answer
 but is not one, and five seconds later you ask the question that pins it down —
 instead of thinking of it in the car afterwards.
 
-One thing to know before the rest of this chapter describes it. The panel is
-built, connected to the meeting, and tested — but nothing yet turns speech into
-words, so in this build no sentence is ever recognised and no suggestion is ever
-raised. What follows is how the panel behaves when something reaches it. Today
-it would sit at the resting state described in the next section for the whole
-meeting.
+Two things to know before the rest of this chapter describes it. What the
+microphone hears is now turned into words while the meeting runs, checked for
+the kind of vagueness that costs a requirement, and a question is put in front
+of you — so what follows describes what you will actually see, not what the
+screen would do if something reached it.
+
+The checks that raise a question are the ones about wording: an amount with no
+number, an adjective with no threshold, a date that is not a date, a commitment
+behind a hedge. Those need no model and are quick enough to land while the
+sentence is still in the air. Three other ways a question could be earned are
+not built yet — an action with nobody named as doing it, an answer that
+contradicts a document you supplied, and a system or team nobody has mentioned
+before — so a meeting can pass without a suggestion and that is the product
+being quiet rather than broken.
 
 ## Before anyone speaks
 
