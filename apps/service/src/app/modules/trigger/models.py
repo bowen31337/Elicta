@@ -34,3 +34,24 @@ class UtteranceAccepted(BaseModel):
     trigger_reason: str | None = None
     surfaced: bool = False
     nudge_id: str | None = None
+
+
+class ParkedThread(BaseModel):
+    """Where a deferred question went.
+
+    The id is what the panel keeps, so a chip can say the thread was parked
+    rather than merely that the request succeeded.
+    """
+
+    open_question_id: str
+
+
+class FollowOnQuestion(BaseModel):
+    """The next question on a thread the operator wants to follow.
+
+    Carries only the question: the panel renders it under the chip that asked
+    for it, beside the nudge it deepens, and already knows which thread it
+    asked about.
+    """
+
+    question: str

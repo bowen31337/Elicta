@@ -208,9 +208,16 @@ from app.modules.settings.service import apply_settings_update, check_secret_con
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.modules.trigger.gate import evaluate as evaluate_utterance
 from app.modules.trigger.listener import LiveUtterances
-from app.modules.trigger.models import UtteranceAccepted, UtteranceRequest
+from app.modules.trigger.models import (
+    FollowOnQuestion,
+    ParkedThread,
+    UtteranceAccepted,
+    UtteranceRequest,
+)
 from app.modules.trigger.router import build_live_utterance_router
+from app.modules.trigger.selection import DEEPER_QUESTIONS, mentions_term
 from app.modules.trigger.selection import select as select_nudge
+from app.modules.trigger.threads import build_thread_router
 from app.modules.voiceprint.models import OperatorVoiceprint
 from app.modules.voiceprint.router import build_voiceprint_router
 from app.modules.voiceprint.service import (
@@ -454,6 +461,12 @@ class Backend:
     #: is not asked twice.
     surfaced_candidates: dict[str, set[str]] = field(default_factory=dict)
     next_nudge_id: int = 0
+    #: Every nudge this process has surfaced, by its id — the meeting it was
+    #: raised in and what fired it. The panel's `Park it` and `Go deeper`
+    #: address a thread by that id alone, so without this the service holds
+    #: the question it asked and cannot say which meeting asked it.
+    raised_nudges: dict[str, dict[str, Any]] = field(default_factory=dict)
+    next_open_question_id: int = 0
 
     nudge_dispositions: list[NudgeDispositionResponse] = field(default_factory=list)
 
@@ -909,6 +922,11 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     )
     backend.next_engagement_id = store.highest_engagement_ordinal()
     backend.meeting_details = store.meeting_details(lambda row: MeetingDetail(**row))
+    # The session purpose an operator typed on the Preparation screen. Nothing
+    # rebuilds a sentence a person wrote, so it belongs on disk rather than in
+    # the "rebuilt on demand" group — and the meetings table has carried the
+    # columns for it all along.
+    backend.meeting_updates = store.meeting_updates(lambda row: MeetingUpdateResponse(**row))
     # `known_meetings` is the existence guard on the live-session routes and
     # stays in memory. Seeding it from the meetings the store just loaded is
     # what stops a restart making every previously created meeting 404.
@@ -917,8 +935,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # applied to meetings: `meeting_details` is durable and the counter was
     # not, so a restart minted `meeting-1` again and it overwrote whichever
     # real meeting already held that id. Derived from the rows themselves so
-    # it cannot drift out of step with them.
-    backend.next_meeting_id = _highest_ordinal(backend.meeting_details, "meeting-")
+    # it cannot drift out of step with them — and from *every* row rather than
+    # from the loaded mapping, because a soft-deleted meeting is absent from
+    # the mapping and still holds its id in the table.
+    backend.next_meeting_id = store.highest_meeting_ordinal()
     backend.requirements_states = store.requirements_state(
         lambda row: RequirementsState(**row)
     )
@@ -1333,7 +1353,12 @@ def build_app(
     async def update_meeting(
         meeting_id: str, payload: MeetingUpdateRequest
     ) -> MeetingUpdateResponse | None:
-        if meeting_id not in backend.meeting_engagement_ids:
+        # Guarded on `_engagement_of_meeting` rather than on
+        # `meeting_engagement_ids` alone: that dict is written by creation and
+        # by nothing else, so after a restart it is empty and every rename of a
+        # meeting made by an earlier process answered 404. The durable record
+        # of the same fact is the meeting's own row.
+        if _engagement_of_meeting(backend, meeting_id) is None:
             return None
         updated = MeetingUpdateResponse(
             meeting_id=meeting_id,
@@ -1343,7 +1368,38 @@ def build_app(
         backend.meeting_updates[meeting_id] = updated
         return updated
 
-    app.include_router(build_meeting_router(create_meeting, get_engagement_context, update_meeting))
+    async def delete_meeting(meeting_id: str) -> bool:
+        """Take a meeting out of view, keeping the row (soft).
+
+        Creation writes the meeting into three places for the reason its own
+        comment gives — `meeting_engagement_ids` and `known_meetings` answer
+        "does it exist?", `meeting_details` answers "what is it?" — so a
+        removal has to undo all three, or the meeting disappears from every
+        list an operator reads and can still start a live session.
+
+        What it does not touch is everything hanging off the meeting: the
+        consent record, the record-path transcripts, the audio-destruction
+        events. They are reached through the meeting, which no longer resolves,
+        so hiding it hides them — and a cascade of marks would be a second
+        record of the same decision, able to disagree with the first. That is
+        the reasoning `delete_engagement` sets out, applied one level down.
+        """
+
+        if _engagement_of_meeting(backend, meeting_id) is None:
+            return False
+        # `meeting_details` is the durable one, and its `forget` is what marks
+        # the row. The other three are in-memory and are simply dropped.
+        backend.meeting_details.pop(meeting_id, None)
+        backend.meeting_updates.pop(meeting_id, None)
+        backend.meeting_engagement_ids.pop(meeting_id, None)
+        backend.known_meetings.discard(meeting_id)
+        return True
+
+    app.include_router(
+        build_meeting_router(
+            create_meeting, get_engagement_context, update_meeting, delete_meeting
+        )
+    )
 
     async def list_engagement_meetings(engagement_id: str) -> list[MeetingSummary] | None:
         """This engagement's meetings, oldest first — or `None` if it has none to have.
@@ -1714,7 +1770,7 @@ def build_app(
         if stored:
             return stored
 
-        engagement_id = backend.meeting_engagement_ids.get(meeting_id)
+        engagement_id = _engagement_of_meeting(backend, meeting_id)
         if engagement_id is None:
             return []
         return [
@@ -1742,7 +1798,7 @@ def build_app(
         if stored:
             return stored
 
-        engagement_id = backend.meeting_engagement_ids.get(meeting_id)
+        engagement_id = _engagement_of_meeting(backend, meeting_id)
         if engagement_id is None:
             return []
         return [
@@ -2081,6 +2137,12 @@ def _include_operational_routers(
                 },
             ),
         ]
+        backend.raised_nudges[nudge_id] = {
+            "meeting_id": meeting_id,
+            "term": hit.term,
+            "category": hit.category,
+            "question": chosen.question,
+        }
         backend.last_nudge_at[meeting_id] = now
         if chosen.candidate_id is not None:
             backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.candidate_id}
@@ -2094,6 +2156,76 @@ def _include_operational_routers(
         )
 
     app.include_router(build_live_utterance_router(observe_utterance))
+
+    async def park_thread(thread_id: str) -> ParkedThread | None:
+        """Defer a surfaced question to the engagement it was asked in (FR-6.8).
+
+        Parked onto the engagement rather than the meeting, because that is
+        where a question outlives the conversation it came from: the next
+        meeting's bank is recompiled against these, so parking is what makes
+        "not now" mean "next time" rather than "never".
+        """
+
+        raised = backend.raised_nudges.get(thread_id)
+        if raised is None:
+            return None
+
+        engagement_id = _engagement_of_meeting(backend, raised["meeting_id"])
+        if engagement_id is None:
+            return None
+
+        standing = list(backend.engagement_open_questions.get(engagement_id, []))
+        backend.next_open_question_id += 1
+        question_id = f"open-question-{backend.next_open_question_id}"
+        # Reassigned whole: these collections are swapped for durable mappings
+        # that only persist through __setitem__.
+        backend.engagement_open_questions[engagement_id] = [
+            *standing,
+            ApiInheritedOpenQuestion(
+                text=raised["question"],
+                # Ranked behind what is already standing rather than ahead of
+                # it. An operator parking a question said "not now"; putting it
+                # at the top of the next meeting's bank would be reading that
+                # as the opposite.
+                impact_rank=len(standing) + 1,
+            ),
+        ]
+        return ParkedThread(open_question_id=question_id)
+
+    async def deepen_thread(thread_id: str) -> FollowOnQuestion | None:
+        """The next question on a thread the operator wants to follow (FR-6.8).
+
+        Selection again, and for the same reason the first question was: the
+        operator tapped this mid-sentence and is waiting. The bank is asked
+        first for another question about the same term, and only when it has
+        none is one templated — which is also what keeps this working when no
+        model can be reached.
+        """
+
+        raised = backend.raised_nudges.get(thread_id)
+        if raised is None:
+            return None
+
+        meeting_id = raised["meeting_id"]
+        surfaced = backend.surfaced_candidates.get(meeting_id, set())
+        term = raised["term"]
+        candidates = [] if base_candidates is None else await base_candidates(meeting_id)
+        further = [
+            candidate
+            for candidate in candidates
+            if candidate.id not in surfaced
+            and mentions_term(term, candidate.phrasing)
+            and candidate.phrasing != raised["question"]
+        ]
+        chosen = min(further, key=lambda candidate: candidate.priority, default=None)
+        if chosen is None:
+            return FollowOnQuestion(question=DEEPER_QUESTIONS[raised["category"]].format(term=term))
+
+        backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.id}
+        return FollowOnQuestion(question=chosen.phrasing)
+
+    app.include_router(build_thread_router(park_thread, deepen_thread))
+
 
     async def get_voiceprint(operator_id: str) -> OperatorVoiceprint | None:
         return backend.operator_voiceprints.get(operator_id)

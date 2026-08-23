@@ -46,6 +46,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/engagements/{engagement_id}/vocabulary/{term_id}", "delete"),
     ("/api/meetings", "post"),
     ("/api/meetings/{meeting_id}", "get"),
+    ("/api/meetings/{meeting_id}", "delete"),
     ("/api/meetings/{meeting_id}", "patch"),
     ("/api/meetings/{meeting_id}/artifacts", "get"),
     ("/api/meetings/{meeting_id}/attendees", "post"),
@@ -63,6 +64,8 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/session/start", "post"),
     ("/api/meetings/{meeting_id}/session/stream", "get"),
     ("/api/meetings/{meeting_id}/live/utterance", "post"),
+    ("/api/threads/{thread_id}/park", "post"),
+    ("/api/threads/{thread_id}/go-deeper", "post"),
     ("/api/meetings/{meeting_id}/slow-lane/tick", "post"),
     # One print per operator, so one resource: read its status, replace it,
     # remove it. The status never returns the embedding itself.

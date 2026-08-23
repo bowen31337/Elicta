@@ -40,6 +40,17 @@ STUBS: dict[str, str] = {
     QUALIFIED_AGREEMENT: "Always, or sometimes?",
 }
 
+#: Asked when the operator wants to follow a thread further, and the bank has
+#: nothing left about it. Deliberately a different question from the first
+#: rather than a rephrasing: "go deeper" that returned the same thing in other
+#: words would read as the product not having understood the tap.
+DEEPER_QUESTIONS: dict[str, str] = {
+    UNQUANTIFIED_AMOUNT: 'You said "{term}" — what is that on a bad day, rather than a typical one?',
+    UNQUANTIFIED_PROPERTY: 'You said "{term}" — what happens today when it is not?',
+    UNQUANTIFIED_TIME: 'You said "{term}" — what is driving that date?',
+    QUALIFIED_AGREEMENT: 'You said "{term}" — what are the exceptions, and how often do they happen?',
+}
+
 #: Used only when the bank has nothing left to offer.
 FALLBACK_QUESTIONS: dict[str, str] = {
     UNQUANTIFIED_AMOUNT: 'You said "{term}" — how many is that, in numbers?',
@@ -70,7 +81,7 @@ class SelectedNudge:
     candidate_id: str | None
 
 
-def _mentions(term: str, phrasing: str) -> bool:
+def mentions_term(term: str, phrasing: str) -> bool:
     """Whether a drafted question is about this term.
 
     Bounded like the gate's own matching, and for the same reason: "some"
@@ -111,7 +122,7 @@ def select(
     # and it costs the reason line its credibility for the rest of the
     # meeting.
     about_this = [
-        candidate for candidate in unused if _mentions(hit.term, candidate.phrasing)
+        candidate for candidate in unused if mentions_term(hit.term, candidate.phrasing)
     ]
     # Lower `priority` ranks higher — the ascending convention `OpenQuestion`
     # and `BankCandidate` already use. Ties keep the order the bank was

@@ -622,6 +622,40 @@
           }
         }
       },
+      "delete": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Delete Meeting Endpoint",
+        "description": "Take a meeting out of view (soft).\n\nOptional for the same reason the engagement router's delete is:\nwhether a removal is even offered belongs to whoever assembles the\napp, and the tests that build this router to exercise create and\nupdate should not have to invent a way to destroy things.\n\nThe row stays, marked, and so does everything hanging off it \u2014 the\nconsent record, the transcripts, the audio-destruction events. A\nremoval here is about a list an operator has to read, not about\nerasing the record of a meeting that actually happened.",
+        "operationId": "delete_meeting_endpoint_api_meetings__meeting_id__delete",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "meetings"
@@ -1940,6 +1974,92 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UtteranceAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/park": {
+      "post": {
+        "tags": [
+          "nudges"
+        ],
+        "summary": "Park Thread",
+        "description": "Defer this question to the debrief rather than dropping it.",
+        "operationId": "park_thread_api_threads__thread_id__park_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkedThread"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/go-deeper": {
+      "post": {
+        "tags": [
+          "nudges"
+        ],
+        "summary": "Deepen Thread",
+        "description": "The next question on the same thread \u2014 never the one already asked.",
+        "operationId": "deepen_thread_api_threads__thread_id__go_deeper_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowOnQuestion"
                 }
               }
             }
@@ -4775,6 +4895,20 @@
         "title": "FillState",
         "description": "How much of a template section the meeting has covered so far (PRD FR-8.2; architecture \u00a74)."
       },
+      "FollowOnQuestion": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "FollowOnQuestion",
+        "description": "The next question on a thread the operator wants to follow.\n\nCarries only the question: the panel renders it under the chip that asked\nfor it, beside the nudge it deepens, and already knows which thread it\nasked about."
+      },
       "FollowUpEmailDraft": {
         "properties": {
           "subject": {
@@ -5537,6 +5671,20 @@
         ],
         "title": "OperatorNudgeDisposition",
         "description": "What an operator explicitly did with a surfaced nudge (PRD FR-6.6/6.7)."
+      },
+      "ParkedThread": {
+        "properties": {
+          "open_question_id": {
+            "type": "string",
+            "title": "Open Question Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open_question_id"
+        ],
+        "title": "ParkedThread",
+        "description": "Where a deferred question went.\n\nThe id is what the panel keeps, so a chip can say the thread was parked\nrather than merely that the request succeeded."
       },
       "ProjectBriefDraft": {
         "properties": {

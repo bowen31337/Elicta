@@ -175,7 +175,21 @@ export interface paths {
         get: operations["get_meeting_detail_endpoint_api_meetings__meeting_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Meeting Endpoint
+         * @description Take a meeting out of view (soft).
+         *
+         *     Optional for the same reason the engagement router's delete is:
+         *     whether a removal is even offered belongs to whoever assembles the
+         *     app, and the tests that build this router to exercise create and
+         *     update should not have to invent a way to destroy things.
+         *
+         *     The row stays, marked, and so does everything hanging off it — the
+         *     consent record, the transcripts, the audio-destruction events. A
+         *     removal here is about a list an operator has to read, not about
+         *     erasing the record of a meeting that actually happened.
+         */
+        delete: operations["delete_meeting_endpoint_api_meetings__meeting_id__delete"];
         options?: never;
         head?: never;
         /** Update Meeting Endpoint */
@@ -676,6 +690,46 @@ export interface paths {
          *     operator's disposition of it, recorded on its own route.
          */
         post: operations["observe_utterance_api_meetings__meeting_id__live_utterance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/park": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Park Thread
+         * @description Defer this question to the debrief rather than dropping it.
+         */
+        post: operations["park_thread_api_threads__thread_id__park_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/go-deeper": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deepen Thread
+         * @description The next question on the same thread — never the one already asked.
+         */
+        post: operations["deepen_thread_api_threads__thread_id__go_deeper_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2067,6 +2121,18 @@ export interface components {
          */
         FillState: "empty" | "partial" | "filled";
         /**
+         * FollowOnQuestion
+         * @description The next question on a thread the operator wants to follow.
+         *
+         *     Carries only the question: the panel renders it under the chip that asked
+         *     for it, beside the nudge it deepens, and already knows which thread it
+         *     asked about.
+         */
+        FollowOnQuestion: {
+            /** Question */
+            question: string;
+        };
+        /**
          * FollowUpEmailDraft
          * @description The BMAD analyst chain's draft follow-up email for the session (PRD FR-8.6).
          */
@@ -2469,6 +2535,17 @@ export interface components {
          * @enum {string}
          */
         OperatorNudgeDisposition: "taken" | "parked";
+        /**
+         * ParkedThread
+         * @description Where a deferred question went.
+         *
+         *     The id is what the panel keeps, so a chip can say the thread was parked
+         *     rather than merely that the request succeeded.
+         */
+        ParkedThread: {
+            /** Open Question Id */
+            open_question_id: string;
+        };
         /**
          * ProjectBriefDraft
          * @description The BMAD analyst chain's draft project brief for the session (PRD FR-8.5).
@@ -3596,6 +3673,35 @@ export interface operations {
             };
         };
     };
+    delete_meeting_endpoint_api_meetings__meeting_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_meeting_endpoint_api_meetings__meeting_id__patch: {
         parameters: {
             query?: never;
@@ -4537,6 +4643,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UtteranceAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    park_thread_api_threads__thread_id__park_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParkedThread"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deepen_thread_api_threads__thread_id__go_deeper_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowOnQuestion"];
                 };
             };
             /** @description Validation Error */
