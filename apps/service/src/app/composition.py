@@ -206,6 +206,11 @@ from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
+from app.modules.trigger.gate import evaluate as evaluate_utterance
+from app.modules.trigger.listener import LiveUtterances
+from app.modules.trigger.models import UtteranceAccepted, UtteranceRequest
+from app.modules.trigger.router import build_live_utterance_router
+from app.modules.trigger.selection import select as select_nudge
 from app.orchestration.anthropic_engines import probe_anthropic_credential
 from app.orchestration.bank_collector import BankCollector
 from app.orchestration.compiler import (
@@ -224,8 +229,17 @@ from app.orchestration.engines import (
     UpstreamUnavailableError,
     upstream_failure_in,
 )
+from app.orchestration.live_transcription import deepgram_live_recogniser
 from app.orchestration.reachability import LaneReachability
 from app.persistence import StateStore
+
+#: How often a held-open stream looks for something new from the live lane.
+#: An in-process list check, not a round trip -- the panel's connection stays
+#: open across all of them. A quarter of a second is inaudible against the
+#: conversational window the nudge has to land in, and it buys the lane
+#: freedom from having to reach into the connection to wake it.
+LIVE_POLL_SECONDS = 0.25
+
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
 _artifacts_models = importlib.import_module("app.modules.debrief.artifacts.models")
@@ -408,6 +422,24 @@ class Backend:
     known_meetings: set[str] = field(default_factory=set)
     # (event name, payload) pairs the session stream replays to the panel.
     session_stream_events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
+    #: What the live lane has produced for a meeting, append-only and in the
+    #: order it was produced. Separate from `session_stream_events`, which is
+    #: a script pushed in by a harness: this one is written by the gate while
+    #: the meeting runs, and every connected panel reads all of it -- draining
+    #: per reader would mean a second panel silently stealing the first one's
+    #: nudge.
+    #:
+    #: Deliberately not durable. A nudge is a question worth asking in the
+    #: next thirty seconds; restoring one after a restart would put a stale
+    #: question in front of a client. What outlives the meeting is the
+    #: operator's disposition of it, which is recorded on its own route.
+    live_events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
+    #: When each meeting last had a nudge surfaced (FR-5.8).
+    last_nudge_at: dict[str, datetime] = field(default_factory=dict)
+    #: Which bank candidates a meeting has already used, so the same question
+    #: is not asked twice.
+    surfaced_candidates: dict[str, set[str]] = field(default_factory=dict)
+    next_nudge_id: int = 0
 
     nudge_dispositions: list[NudgeDispositionResponse] = field(default_factory=list)
 
@@ -950,6 +982,7 @@ def build_app(
     settings_store: SettingsStore | None = None,
     document_transport: HttpTransport | None = None,
     record_path_engines: Sequence[tuple[str, Any]] | None = None,
+    live_recogniser: Any = None,
 ) -> FastAPI:
     """Mount every documented router onto one app, backed by `backend`."""
 
@@ -1761,6 +1794,9 @@ def build_app(
         debrief_engines,
         settings_store=settings_store,
         document_transport=document_transport,
+        base_candidates=get_base_candidates,
+        vocabulary=get_vocabulary,
+        live_recogniser=live_recogniser,
     )
 
     return app
@@ -1794,8 +1830,18 @@ def _include_operational_routers(
     debrief_engines: DebriefEngines | None = None,
     settings_store: SettingsStore | None = None,
     document_transport: HttpTransport | None = None,
+    base_candidates: Any = None,
+    vocabulary: Any = None,
+    live_recogniser: Any = None,
 ) -> None:
-    """Mount every router that the integration-suite assembly left out."""
+    """Mount every router that the integration-suite assembly left out.
+
+    `base_candidates` reads a meeting's compiled bank, and `vocabulary` the
+    engagement's own terms. Both are passed in rather than reached for,
+    because the joins they perform live in `build_app` and the live lane is
+    the second thing to need each -- the first being the bank endpoint and the
+    record path respectively.
+    """
 
     # --- nudge disposition (FR-6.6/6.7) ---------------------------------
     async def record_disposition(
@@ -1918,7 +1964,100 @@ def _include_operational_routers(
         for name, payload in backend.session_stream_events.get(meeting_id, []):
             yield name, payload
 
+        # Then follow the meeting for as long as the panel is connected. The
+        # events a panel exists to show are all produced after it connected --
+        # a stream that stopped here could only ever carry what was already
+        # queued, which at the start of a meeting is nothing.
+        #
+        # Followed by index rather than consumed: every connected panel reads
+        # the whole list, so a second screen does not take a nudge away from
+        # the first, and a panel that reconnects mid-meeting is not left
+        # blank. `yield None` is "still here, nothing to say", which reaches
+        # the panel as a comment frame and costs it nothing.
+        delivered = 0
+        while True:
+            produced = backend.live_events.get(meeting_id, ())
+            if delivered < len(produced):
+                event = produced[delivered]
+                delivered += 1
+                yield event
+                continue
+            yield None
+            await asyncio.sleep(LIVE_POLL_SECONDS)
+
     app.include_router(_live_session_stream.build_session_stream_router(session_events))
+
+    async def observe_utterance(
+        meeting_id: str, payload: UtteranceRequest
+    ) -> UtteranceAccepted | None:
+        """One finalised utterance through the gate (FR-5.1, FR-5.2, FR-5.8).
+
+        The whole live path, and there is deliberately no model in it. The
+        reasoning happened before the meeting -- `get_base_candidates` reads
+        the bank a batch job compiled -- so what happens here is a lexicon
+        match and a choice between questions already written, which is what
+        fits inside the conversational window.
+
+        Answers rather than raises when it declines: an utterance the gate
+        ignored is the ordinary case, not a failure, and a caller feeding a
+        meeting's worth of speech through here must be able to tell a quiet
+        gate from a broken one.
+        """
+
+        if meeting_id not in backend.known_meetings:
+            return None
+
+        hit = evaluate_utterance(payload.text)
+        if hit is None:
+            return UtteranceAccepted(meeting_id=meeting_id, triggered=False)
+
+        now = datetime.now(UTC)
+        surfaced = backend.surfaced_candidates.get(meeting_id, set())
+        chosen = select_nudge(
+            hit,
+            [] if base_candidates is None else await base_candidates(meeting_id),
+            now=now,
+            last_surfaced_at=backend.last_nudge_at.get(meeting_id),
+            already_surfaced=surfaced,
+        )
+        if chosen is None:
+            return UtteranceAccepted(
+                meeting_id=meeting_id, triggered=True, trigger_reason=hit.reason
+            )
+
+        backend.next_nudge_id += 1
+        nudge_id = f"nudge-{backend.next_nudge_id}"
+        # Reassigned rather than appended in place: the collections here are
+        # swapped for durable mappings that only persist through __setitem__,
+        # and an in-place append against one of those writes to memory and
+        # nowhere else.
+        backend.live_events[meeting_id] = [
+            *backend.live_events.get(meeting_id, []),
+            (
+                "nudge",
+                {
+                    "id": nudge_id,
+                    "stub": chosen.stub,
+                    "question": chosen.question,
+                    "trigger_reason": chosen.trigger_reason,
+                    "created_at": int(chosen.created_at.timestamp() * 1000),
+                },
+            ),
+        ]
+        backend.last_nudge_at[meeting_id] = now
+        if chosen.candidate_id is not None:
+            backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.candidate_id}
+
+        return UtteranceAccepted(
+            meeting_id=meeting_id,
+            triggered=True,
+            trigger_reason=hit.reason,
+            surfaced=True,
+            nudge_id=nudge_id,
+        )
+
+    app.include_router(build_live_utterance_router(observe_utterance))
+
 
     # --- slow lane tick --------------------------------------------------
     async def run_tick(meeting_id: str) -> Any:
@@ -2439,9 +2578,61 @@ def _include_operational_routers(
 
         return bool(backend.audio_destruction_events.get(session_id))
 
+    # --- the live lane's tap on the uploaded audio ------------------------
+    #
+    # This is the join the product was missing. Everything either side of it
+    # was built and tested: the capture screen uploads chunks, the gate reads
+    # utterances, the stream carries nudges to the panel. Nothing turned the
+    # first into the second, so a real meeting recorded perfectly and left the
+    # panel at its resting state from the first word to the last.
+    async def _observe_text(session_id: str, text: str) -> None:
+        await observe_utterance(session_id, UtteranceRequest(text=text))
+
+    # Injected like every other inference seam in this service, rather than
+    # imported here. Constructing the vendor client at the composition root
+    # would make the live lane the one path that cannot be exercised without
+    # a speech credential -- which is exactly how the seams above it came to
+    # ship joined to nothing.
+    recognise = live_recogniser
+    if recognise is None and settings_store is not None and vocabulary is not None:
+        recognise = deepgram_live_recogniser(settings_store, vocabulary)
+
+    live_utterances = None if recognise is None else LiveUtterances(recognise, _observe_text)
+
+    async def feed_live_lane(session_id: str, pcm: bytes) -> None:
+        """Offer one chunk to the live lane, if there is a live lane to offer it to.
+
+        The credential is checked here, per chunk, rather than when the app
+        was assembled: a key entered on the Settings screen takes effect
+        without a restart everywhere else in this service, and a live lane
+        that needed one would be the exception nobody remembers.
+
+        Returning quietly when it is unset is the honest answer -- there is no
+        live transcription configured, the recording is unaffected, and the
+        panel says as much through its own lane frame. Letting the recogniser
+        raise instead would log an exception every four seconds of every
+        meeting on a deployment that simply has not bought this.
+        """
+
+        if live_utterances is None:
+            return
+        # Only asked of the vendor-backed default. A recogniser handed in by a
+        # caller answers for its own readiness, and gating it on a Deepgram
+        # credential would make an injected one untestable without buying one.
+        if (
+            live_recogniser is None
+            and settings_store is not None
+            and settings_store.get_secret(SecretKey.DEEPGRAM_API_KEY) is None
+        ):
+            return
+        await live_utterances.feed(session_id, pcm)
+
     app.include_router(
         _audio_hold.build_audio_chunk_router(
-            backend.session_audio, on_audio_retained, audio_was_destroyed
+            backend.session_audio,
+            on_audio_retained,
+            audio_was_destroyed,
+            on_chunk=feed_live_lane,
         )
     )
 

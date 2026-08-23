@@ -27,7 +27,13 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 # Yields (event_name, payload) pairs for one meeting until the session ends.
-SessionEvents = Callable[[str], AsyncIterator[tuple[str, dict[str, Any]]]]
+#
+# A `None` in place of a pair means "still here, nothing to say" -- the shape a
+# live source has whenever the room is quiet, which is most of a meeting. It
+# reaches the panel as a comment frame rather than as an event: an `EventSource`
+# ignores a comment, where an event with an empty payload would be parsed and
+# rendered as a nudge with no question in it.
+SessionEvents = Callable[[str], AsyncIterator[tuple[str, dict[str, Any]] | None]]
 
 #: How often the open connection says something when the meeting is quiet.
 #: Chosen under the shortest idle timeout that tends to sit in front of this
@@ -105,8 +111,19 @@ def build_session_stream_router(
         """Stream coverage and nudges for one meeting."""
 
         async def body() -> AsyncIterator[str]:
-            async for name, payload in events(meeting_id):
-                yield format_sse(name, payload)
+            loop = asyncio.get_running_loop()
+            opened = loop.time()
+
+            async for item in events(meeting_id):
+                if item is None:
+                    yield format_comment("keep-alive")
+                else:
+                    name, payload = item
+                    yield format_sse(name, payload)
+                if loop.time() - opened >= hold:
+                    # Leaving the loop closes the source, which is how a live
+                    # one learns to stop producing for a panel that has gone.
+                    return
 
             # Draining the backlog is not the end of the meeting, and
             # closing here was read by the panel as a dropped connection:

@@ -658,6 +658,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/meetings/{meeting_id}/live/utterance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Observe Utterance
+         * @description Evaluate one utterance, and surface a question if it earns one.
+         *
+         *     202 rather than 201: nothing durable is created here. A nudge lives
+         *     for the meeting it was raised in, and what outlives it is the
+         *     operator's disposition of it, recorded on its own route.
+         */
+        post: operations["observe_utterance_api_meetings__meeting_id__live_utterance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/slow-lane/tick": {
         parameters: {
             query?: never;
@@ -2890,6 +2914,44 @@ export interface components {
          * @enum {string}
          */
         TranscriptionStatus: "complete" | "failed";
+        /**
+         * UtteranceAccepted
+         * @description What the gate did with it.
+         *
+         *     Answers whether it fired *and* whether anything was surfaced, because
+         *     those come apart constantly: FR-5.8 refuses most hits, and an intake that
+         *     reported only "accepted" would make a working rate limit indistinguishable
+         *     from a broken gate.
+         */
+        UtteranceAccepted: {
+            /** Meeting Id */
+            meeting_id: string;
+            /** Triggered */
+            triggered: boolean;
+            /** Trigger Reason */
+            trigger_reason?: string | null;
+            /**
+             * Surfaced
+             * @default false
+             */
+            surfaced: boolean;
+            /** Nudge Id */
+            nudge_id?: string | null;
+        };
+        /**
+         * UtteranceRequest
+         * @description One finalised utterance, as the gate sees it (PRD FR-5.1).
+         *
+         *     Finalised, not interim. FR-5.9's speculative drafting works on interim
+         *     hypotheses, but a nudge raised from a hypothesis the recogniser then
+         *     revises is a question about something nobody said.
+         */
+        UtteranceRequest: {
+            /** Text */
+            text: string;
+            /** Speaker */
+            speaker?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -4353,6 +4415,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    observe_utterance_api_meetings__meeting_id__live_utterance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UtteranceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UtteranceAccepted"];
                 };
             };
             /** @description Validation Error */

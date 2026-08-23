@@ -62,6 +62,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/record/transcribe", "post"),
     ("/api/meetings/{meeting_id}/session/start", "post"),
     ("/api/meetings/{meeting_id}/session/stream", "get"),
+    ("/api/meetings/{meeting_id}/live/utterance", "post"),
     ("/api/meetings/{meeting_id}/slow-lane/tick", "post"),
     ("/api/replay/runs", "get"),
     ("/api/replay/runs", "post"),

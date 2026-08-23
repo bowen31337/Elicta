@@ -219,3 +219,60 @@ def test_a_held_connection_is_still_closed_rather_than_held_for_ever() -> None:
     assert len(beats) > 1, (
         f"the connection was not held open across a heartbeat: {beats}"
     )
+
+
+def test_an_event_produced_after_the_connection_opened_still_reaches_the_panel() -> None:
+    """The whole reason the connection is held: a nudge is raised mid-meeting.
+
+    A backlog-only stream can carry what the meeting had queued when the panel
+    connected, which is nothing at all in the first seconds of a meeting. The
+    events a panel exists to show are all produced later.
+    """
+
+    async def events(meeting_id: str):
+        yield "coverage", {"slots": [], "time_remaining_ms": None}
+        # Nothing to say yet — the shape a live source has while the room is
+        # quiet, and the point at which the old stream gave up and closed.
+        yield None
+        yield "nudge", {
+            "id": "n1",
+            "stub": "In numbers?",
+            "question": "What response time would you consider a failure?",
+            "trigger_reason": 'unquantified adjective — "fast"',
+            "created_at": 1,
+        }
+
+    app = FastAPI()
+    app.include_router(
+        _stream.build_session_stream_router(events, heartbeat_seconds=0.01, hold_seconds=0.05)
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/api/meetings/m1/session/stream").text
+
+    assert "event: nudge" in body
+    assert body.index("event: coverage") < body.index("event: nudge")
+
+
+def test_a_quiet_source_is_reported_as_quiet_rather_than_as_an_event() -> None:
+    """`None` is "still here, nothing to say", and must not reach the panel as data.
+
+    An `EventSource` ignores a comment frame, so a quiet meeting costs the
+    panel nothing. A frame carrying an empty payload would instead be parsed,
+    dispatched, and rendered as a nudge with no question in it.
+    """
+
+    async def events(meeting_id: str):
+        yield None
+        yield None
+
+    app = FastAPI()
+    app.include_router(
+        _stream.build_session_stream_router(events, heartbeat_seconds=0.01, hold_seconds=0.02)
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/api/meetings/m1/session/stream").text
+
+    assert "event:" not in body
+    assert body.count(": keep-alive") >= 2

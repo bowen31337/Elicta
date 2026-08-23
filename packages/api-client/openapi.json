@@ -1904,6 +1904,59 @@
         }
       }
     },
+    "/api/meetings/{meeting_id}/live/utterance": {
+      "post": {
+        "tags": [
+          "live-lane"
+        ],
+        "summary": "Observe Utterance",
+        "description": "Evaluate one utterance, and surface a question if it earns one.\n\n202 rather than 201: nothing durable is created here. A nudge lives\nfor the meeting it was raised in, and what outlives it is the\noperator's disposition of it, recorded on its own route.",
+        "operationId": "observe_utterance_api_meetings__meeting_id__live_utterance_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UtteranceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UtteranceAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/slow-lane/tick": {
       "post": {
         "tags": [
@@ -6264,6 +6317,78 @@
         ],
         "title": "TranscriptionStatus",
         "description": "Terminal state of one record-path batch transcription run."
+      },
+      "UtteranceAccepted": {
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "triggered": {
+            "type": "boolean",
+            "title": "Triggered"
+          },
+          "trigger_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Reason"
+          },
+          "surfaced": {
+            "type": "boolean",
+            "title": "Surfaced",
+            "default": false
+          },
+          "nudge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nudge Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meeting_id",
+          "triggered"
+        ],
+        "title": "UtteranceAccepted",
+        "description": "What the gate did with it.\n\nAnswers whether it fired *and* whether anything was surfaced, because\nthose come apart constantly: FR-5.8 refuses most hits, and an intake that\nreported only \"accepted\" would make a working rate limit indistinguishable\nfrom a broken gate."
+      },
+      "UtteranceRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "UtteranceRequest",
+        "description": "One finalised utterance, as the gate sees it (PRD FR-5.1).\n\nFinalised, not interim. FR-5.9's speculative drafting works on interim\nhypotheses, but a nudge raised from a hypothesis the recogniser then\nrevises is a question about something nobody said."
       },
       "ValidationError": {
         "properties": {

@@ -12,12 +12,15 @@ crashed browser costs the tail rather than the recording.
 from __future__ import annotations
 
 import base64
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class ChunkOutOfOrder(Exception):
@@ -125,6 +128,7 @@ def build_audio_chunk_router(
     held: dict[str, SessionAudio],
     on_audio_retained: Any,
     audio_was_destroyed: Callable[[str], bool] | None = None,
+    on_chunk: Any = None,
 ) -> APIRouter:
     """`POST /api/sessions/{id}/audio-chunk` — one slice of a live recording."""
 
@@ -158,6 +162,22 @@ def build_audio_chunk_router(
         # never lands there is never destroyed and never noticed.
         if first:
             await on_audio_retained(session_id, audio_ref_for(session_id))
+
+        # The live lane reads the same bytes on their way past, and is offered
+        # them only once the hold has taken them: a chunk refused for being
+        # out of order is a real gap in the audio, not something to recognise.
+        #
+        # Swallowed deliberately, and this is the one place in this file that
+        # hides a failure. The recording is what outlives the meeting; a nudge
+        # is worth the next thirty seconds. A recogniser that is refusing a
+        # credential must cost the meeting its nudges and nothing else, where
+        # letting the error out would fail the upload and lose the recording
+        # itself -- a trade nobody would make deliberately.
+        if on_chunk is not None:
+            try:
+                await on_chunk(session_id, base64.b64decode(payload.pcm))
+            except Exception:  # noqa: BLE001
+                logger.exception("the live lane failed on a chunk of %s", session_id)
         return accepted
 
     return router
