@@ -116,6 +116,47 @@ async function connect(port) {
   throw new Error('Chrome did not expose a CDP endpoint');
 }
 
+/**
+ * Refuse to audit a page that is not the app.
+ *
+ * axe will happily audit whatever the tab is showing, and Chrome's network
+ * error page is a real document — one that carries
+ * `maximum-scale=1.0, user-scalable=no` in its own viewport tag. Pointed at a
+ * dev server it cannot reach, this tool therefore reported one confident
+ * meta-viewport violation per scene: 104 findings about a page belonging to
+ * the browser, phrased as findings about Elicta. A pass would be worse than
+ * the failure was, because nobody re-reads a green run.
+ *
+ * The usual cause is protocol, not a stopped server: `start.sh --https` serves
+ * TLS on the same port, and a plain-HTTP request to it returns nothing at all
+ * rather than redirecting.
+ */
+async function assertSceneRendered(cdp, scene) {
+  const { result } = await cdp.send('Runtime.evaluate', {
+    returnByValue: true,
+    expression: `JSON.stringify({
+      url: location.href,
+      mounted: (document.getElementById('root')?.childElementCount ?? 0) > 0,
+    })`,
+  });
+  const { url, mounted } = JSON.parse(result.value);
+
+  if (url.startsWith('chrome-error://')) {
+    throw new Error(
+      `${scene}: ${APP} did not serve the app — the tab is on Chrome's error ` +
+        `page, so every finding below it would be the browser's, not ours. ` +
+        `If the dev server is up, check the protocol: --https serves TLS on ` +
+        `this port and answers plain HTTP with nothing.`,
+    );
+  }
+  if (!mounted) {
+    throw new Error(
+      `${scene}: the page loaded from ${APP} but #root is empty, so axe would ` +
+        `audit a blank document and call it clean.`,
+    );
+  }
+}
+
 async function main() {
   const json = process.argv.includes('--json');
   const port = 9800 + Math.floor(Math.random() * 300);
@@ -159,6 +200,7 @@ async function main() {
     for (const scene of SCENES) {
       await cdp.send('Page.navigate', { url: `${APP}/journeys.html?scene=${scene}` });
       await sleep(700);
+      await assertSceneRendered(cdp, scene);
       await cdp.send('Runtime.evaluate', { expression: AXE });
 
       const { result } = await cdp.send('Runtime.evaluate', {
