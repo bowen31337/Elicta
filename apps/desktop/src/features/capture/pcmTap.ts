@@ -43,6 +43,13 @@ export interface GainLike extends ConnectableNode {
 export interface PcmContextLike {
   readonly sampleRate: number;
   readonly destination: unknown;
+  /**
+   * `"suspended"` until the browser is satisfied the user asked for this.
+   * Optional because it is only read to decide whether to `resume`, and a
+   * context that cannot say is treated as one that does not need it.
+   */
+  readonly state?: string;
+  resume?(): Promise<unknown>;
   createMediaStreamSource(stream: never): ConnectableNode;
   createScriptProcessor(
     bufferSize: number,
@@ -81,6 +88,22 @@ export function openPcmTap(
   // silent gain keeps the graph alive and the room quiet.
   const silence = context.createGain();
   silence.gain.value = 0;
+
+  // Chrome starts a context suspended unless it was constructed inside a user
+  // gesture, and this one never is: the tap opens after the device has been
+  // checked, after the session has been booked and after the consent gate has
+  // answered — three awaits and two network round trips past the click.
+  //
+  // A suspended context does not pump the graph, so `onaudioprocess` never
+  // fires. Nothing throws, so nothing is caught and nothing is reported: the
+  // screen says Recording, the level meter moves — it polls an analyser of its
+  // own rather than waiting to be pumped, on a context opened during the
+  // gesture — and not one byte of the meeting is uploaded.
+  //
+  // Resuming needs only *sticky* activation, which the click that started the
+  // recording already granted. Not awaited: the graph below is connected
+  // either way, and the samples start when the context does.
+  if (context.state === "suspended") void context.resume?.();
 
   let open = true;
 
