@@ -6,19 +6,21 @@ it permission to use them. It is done in the app, once, by whoever administers
 Elicta for the team — not by an engineer editing a server somewhere, because the
 person who needs a key changed is rarely the person who could deploy one.
 
-The screen is a short stack of parts, and each one says whether it is ready
-before you read a single field. Most are an outside service; the rest are
-choices about your own installation, such as where the data is kept and whether
-every meeting asks about recording. The credential for a service sits inside
-that service's own part, named after the company that issued it, so there is no
-list of keys to work out which of them goes where.
+The screen is a row of tabs with one thing behind each, so you set up one
+service at a time instead of scrolling past five you did not come for. Most are
+an outside service; the rest are choices about your own installation, such as
+where the data is kept and whether every meeting asks about recording. The
+credential for a service sits behind that service's own tab, named after the
+company that issued it, so there is no list of keys to work out which of them
+goes where.
 
 ## Before anything is set up
 
 On first run the screen says plainly that nothing is configured, rather than
-looking ready and failing later. Each part carries its own verdict — one needs a
-credential, another needs a key — so what is left to do can be read at a
-glance.
+looking ready and failing later. A tab whose service still needs something
+carries a small mark, so what is left to do can be read from the row of tabs
+before you open any of them; open one and it says which — this needs a
+credential, that needs a key.
 
 ![Before anything is configured](../../docs/journeys/screenshots/settings-first-run.png)
 

@@ -112,7 +112,7 @@ async def test_audio_is_destroyed_once_both_stages_finish() -> None:
     assert event is not None
     assert event.status.value == "complete"
     assert SESSION not in backend.retained_audio, "raw audio outlived both stages"
-    assert backend.audio_destruction_events == [event], (
+    assert backend.audio_destruction_events == {SESSION: [event]}, (
         "the discard must be observable, not silent"
     )
 
@@ -160,7 +160,7 @@ async def test_destruction_is_idempotent() -> None:
 
     assert first is not None
     assert second is None
-    assert len(backend.audio_destruction_events) == 1
+    assert len(backend.audio_destruction_events[SESSION]) == 1
 
 
 async def test_the_gate_fires_when_diarization_finishes_last() -> None:
@@ -180,7 +180,7 @@ async def test_the_gate_fires_when_diarization_finishes_last() -> None:
     await lifecycle.save_diarization(_diarization(DiarizationStatus.COMPLETE))
 
     assert SESSION not in backend.retained_audio
-    assert len(backend.audio_destruction_events) == 1
+    assert len(backend.audio_destruction_events[SESSION]) == 1
 
 
 async def test_the_gate_counts_the_engines_the_app_was_built_with() -> None:

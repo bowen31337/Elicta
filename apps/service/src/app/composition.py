@@ -389,7 +389,13 @@ class Backend:
     #: `test_session_audio_is_never_made_durable` is what keeps it that way.
     session_audio: dict[str, Any] = field(default_factory=dict)  # str -> SessionAudio
     session_diarizations: dict[str, SessionDiarization] = field(default_factory=dict)
-    audio_destruction_events: list[AudioDestructionEvent] = field(default_factory=list)
+    #: Every destruction attempt, keyed by session (NFR-2.4). Session-keyed
+    #: rather than one flat log because that is the question both readers ask
+    #: — "where does *this* session's audio stand" — and because the durable
+    #: form writes one session's list at a time.
+    audio_destruction_events: dict[str, list[AudioDestructionEvent]] = field(
+        default_factory=dict
+    )
     #: How many transcripts a session must collect before the record path is
     #: finished with its audio. Set by `build_app` from the engines it was
     #: actually given, never assumed: it defaults to the two FR-2.6 requires
@@ -896,6 +902,22 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # restart lost the answer to "did we have permission for this?", and the
     # gate it opens with it.
     backend.consent_records = store.consent_records(lambda row: ConsentRecord(**row))
+
+    # The record path's own three. Classified above as pipeline output "rebuilt
+    # from the transcript", which two of them *are* and the third describes
+    # audio NFR-2.4 has already destroyed — so nothing rebuilds any of them. A
+    # meeting that really was recorded came back from a restart answering 404
+    # on its transcripts, its divergences and its destruction record at once,
+    # which reads exactly like a meeting that never happened.
+    backend.record_path_transcripts = store.record_path_transcripts(
+        lambda row: RecordPathTranscript(**row)
+    )
+    backend.session_alignments = store.session_alignments(
+        lambda row: SessionAlignment(**row)
+    )
+    backend.audio_destruction_events = store.audio_destruction_events(
+        lambda row: AudioDestructionEvent(**row)
+    )
     return backend
 
 
@@ -1352,7 +1374,16 @@ def build_app(
     audio_lifecycle = _install_audio_lifecycle(backend)
 
     async def save_transcript(transcript: Any) -> None:
-        backend.record_path_transcripts.setdefault(transcript.session_id, []).append(transcript)
+        # Reassigned whole rather than `setdefault(...).append(...)`: this
+        # collection is a `DurableMapping` once a store is attached, and it
+        # persists through `__setitem__` only — appending in place would write
+        # to memory and nowhere else, which is the failure this table exists
+        # to end.
+        session_id = transcript.session_id
+        backend.record_path_transcripts[session_id] = [
+            *backend.record_path_transcripts.get(session_id, []),
+            transcript,
+        ]
         # Architecture §7 step 1 is done for this engine. Once every engine
         # has finished, the rest of the pipeline (steps 2-8) can run: it is
         # the record path, never the live transcript, that every downstream
@@ -1448,10 +1479,8 @@ def build_app(
         `audio_destruction_events` as the NFR-2.4 audit trail.
         """
 
-        for event in reversed(backend.audio_destruction_events):
-            if event.session_id == session_id:
-                return event
-        return None
+        attempts = backend.audio_destruction_events.get(session_id, [])
+        return attempts[-1] if attempts else None
 
     app.include_router(build_audio_destruction_router(get_audio_destruction))
 
@@ -2408,10 +2437,7 @@ def _include_operational_routers(
         place to disagree with it.
         """
 
-        return any(
-            event.session_id == session_id
-            for event in backend.audio_destruction_events
-        )
+        return bool(backend.audio_destruction_events.get(session_id))
 
     app.include_router(
         _audio_hold.build_audio_chunk_router(
@@ -2446,7 +2472,12 @@ def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:
         _audio_hold.discard(backend.session_audio, session_id)
 
     async def emit(event: AudioDestructionEvent) -> None:
-        backend.audio_destruction_events.append(event)
+        # Whole-list reassignment: see `save_transcript`. A retry follows the
+        # failure it retries rather than replacing it — the pair is the record.
+        backend.audio_destruction_events[event.session_id] = [
+            *backend.audio_destruction_events.get(event.session_id, []),
+            event,
+        ]
 
     async def transcription_is_terminal(session_id: str) -> bool:
         """Every configured engine has reached a terminal state.

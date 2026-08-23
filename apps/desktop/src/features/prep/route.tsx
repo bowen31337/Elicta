@@ -21,6 +21,7 @@ import type {
   DocumentStatus,
   PreparedMeeting,
   QuestionBank,
+  QuestionBankSection,
   ReferenceDocument,
   VocabularyEntry,
   VocabularyTermType,
@@ -129,6 +130,17 @@ export function PrepScreen({
   const [termType, setTermType] = useState<VocabularyTermType>('product_name');
   const [dragging, setDragging] = useState(false);
   const [captureMode, setCaptureMode] = useState<string>(CAPTURE_MODES[0].value);
+  /**
+   * Which bank sections are open, or `null` for "the operator has not said".
+   *
+   * `null` rather than seeding a set on mount, because the bank is not
+   * necessarily there on mount: an engagement compiles later, and a set seeded
+   * from a bank that was still `null` would open nothing and look broken. This
+   * way the default is a rule — the first section — evaluated whenever the
+   * sections actually arrive.
+   */
+  const [openSections, setOpenSections] = useState<ReadonlySet<string> | null>(null);
+  const [bankQuery, setBankQuery] = useState('');
 
   /**
    * Uploads a dropped or chosen batch, one at a time and in the order given.
@@ -160,6 +172,62 @@ export function PrepScreen({
     void write.run(async () => {
       await actions.addTerm(term.trim(), termType);
       setTerm('');
+    });
+  };
+
+  /* --- The bank, as something short enough to read -------------------------
+     A compiled bank is around seventy questions in eight template sections.
+     Rendered flat that was nine thousand pixels — eleven screens — with no
+     section heading in view to say which one you were in, and it pushed the
+     Meetings section below all of it. Two things fix that without hiding the
+     deliverable: the sections are disclosures, and there is one box to search
+     them. */
+  const query = bankQuery.trim().toLowerCase();
+  const filtering = query !== '';
+
+  const sections = bank?.sections ?? [];
+  /** Every section, paired with the candidates the filter leaves in it. */
+  const shownSections = sections
+    .map((section) => ({
+      section,
+      shown: filtering
+        ? section.candidates.filter((candidate) =>
+            candidate.phrasing.toLowerCase().includes(query),
+          )
+        : section.candidates,
+    }))
+    .filter((entry) => entry.shown.length > 0);
+
+  const total = sections.reduce((count, section) => count + section.candidates.length, 0);
+  const matched = shownSections.reduce((count, entry) => count + entry.shown.length, 0);
+
+  const bankSummary = filtering
+    ? `${matched} of ${total} ${total === 1 ? 'question' : 'questions'} contain that. `
+      + 'Reordering is off while the filter is on — a question can only be moved '
+      + 'past one you can see.'
+    : `${total} ${total === 1 ? 'question' : 'questions'} across `
+      + `${sections.length} ${sections.length === 1 ? 'section' : 'sections'}. `
+      + 'Open a section to review it.';
+
+  /**
+   * The default is the first section open and the rest closed. Open, because a
+   * screen whose whole point is the question tree should not arrive as eight
+   * closed rows that could be read as an empty bank; the rest closed, because
+   * that is the length problem.
+   */
+  const isOpen = (name: string): boolean =>
+    openSections === null ? name === sections[0]?.templateSection : openSections.has(name);
+
+  const allOpen = sections.length > 0 && sections.every((s) => isOpen(s.templateSection));
+
+  const toggleSection = (name: string) => {
+    setOpenSections((current) => {
+      const next = new Set(
+        current ?? (sections[0] === undefined ? [] : [sections[0].templateSection]),
+      );
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
     });
   };
 
@@ -404,24 +472,75 @@ export function PrepScreen({
             </div>
           </div>
         ) : (
-          bank.sections.map((section) => (
-            <div className="group bank-section" key={section.templateSection}>
-              <div className="row row--header">
-                <span className="t-headline">{section.templateSection}</span>
-                <span className="t-caption tabular">{section.candidates.length}</span>
+          <>
+            <div className="group">
+              <div className="row row--form">
+                <div className="row-main">
+                  <label className="t-footnote" htmlFor="bank-filter">
+                    Find a question
+                  </label>
+                  <input
+                    id="bank-filter"
+                    className="field"
+                    type="search"
+                    value={bankQuery}
+                    placeholder="A word the question would contain"
+                    aria-describedby="bank-filter-note"
+                    onChange={(event) => setBankQuery(event.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    setOpenSections(
+                      allOpen
+                        ? new Set()
+                        : new Set(bank.sections.map((section) => section.templateSection)),
+                    )
+                  }
+                >
+                  {allOpen ? 'Collapse all' : 'Expand all'}
+                </button>
               </div>
-              {section.candidates.map((candidate, at) => (
-                <CandidateRow
-                  key={candidate.id}
-                  candidate={candidate}
-                  above={at === 0 ? null : section.candidates[at - 1]}
+            </div>
+
+            <p className="t-footnote hint" id="bank-filter-note">
+              {bankSummary}
+            </p>
+
+            {shownSections.length === 0 ? (
+              <div className="group">
+                <div className="row">
+                  <div className="row-main">
+                    <span className="t-body">No question contains that</span>
+                    <span className="t-footnote">
+                      The filter reads the question as it would be asked out
+                      loud, which is the only text a candidate has.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              shownSections.map(({ section, shown }) => (
+                <BankSection
+                  key={section.templateSection}
+                  section={section}
+                  shown={shown}
+                  open={filtering || isOpen(section.templateSection)}
+                  // A filter decides what is open while it is on: a section
+                  // that matched is worth opening, and one that did not is
+                  // gone rather than sitting there as a header to scroll past.
+                  toggleable={!filtering}
+                  reorderable={!filtering}
+                  onToggle={() => toggleSection(section.templateSection)}
                   busy={write.busy}
                   actions={actions}
                   run={write.run}
                 />
-              ))}
-            </div>
-          ))
+              ))
+            )}
+          </>
         )}
       </section>
 
@@ -489,6 +608,88 @@ export function PrepScreen({
       </section>
 
     </main>
+  );
+}
+
+/**
+ * One template section of the bank, as a disclosure.
+ *
+ * The header carries the count because that is what a closed section has to
+ * answer: an operator deciding where to spend the next ten minutes wants to
+ * know that Constraints has twelve questions in it and Volumes has eight.
+ * Under a filter it counts both ways — "3 of 11" — so a section is never
+ * silently showing a subset of itself.
+ *
+ * Wrapped in an `h3` so the closed bank is a list of headings to a screen
+ * reader, which is the same thing it is to the eye.
+ */
+function BankSection({
+  section,
+  shown,
+  open,
+  toggleable,
+  reorderable,
+  onToggle,
+  busy,
+  actions,
+  run,
+}: {
+  readonly section: QuestionBankSection;
+  readonly shown: readonly BankCandidate[];
+  readonly open: boolean;
+  readonly toggleable: boolean;
+  readonly reorderable: boolean;
+  readonly onToggle: () => void;
+  readonly busy: boolean;
+  readonly actions: PrepActions;
+  readonly run: (write: () => Promise<void>) => Promise<void>;
+}) {
+  const bodyId = `bank-body-${section.templateSection.replace(/\W+/g, '-').toLowerCase()}`;
+  const count =
+    shown.length === section.candidates.length
+      ? `${section.candidates.length}`
+      : `${shown.length} of ${section.candidates.length}`;
+
+  return (
+    <div className="group bank-section">
+      <h3 className="bank-section-heading">
+        <button
+          type="button"
+          className="row row--header bank-disclosure"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          disabled={!toggleable}
+          onClick={onToggle}
+        >
+          <span className={`bank-caret${open ? ' is-open' : ''}`} aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                 strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" focusable="false">
+              <path d="M9 5l7 7-7 7" />
+            </svg>
+          </span>
+          <span className="t-headline bank-section-name">{section.templateSection}</span>
+          <span className="t-caption tabular">{count}</span>
+        </button>
+      </h3>
+      {open ? (
+        <div id={bodyId}>
+          {shown.map((candidate, at) => (
+            <CandidateRow
+              key={candidate.id}
+              candidate={candidate}
+              // Only ever the question directly above this one in the list the
+              // operator can see. Under a filter there is no such thing —
+              // promoting past a hidden neighbour would reorder the bank in a
+              // way the screen never showed — so reordering is off instead.
+              above={reorderable && at > 0 ? shown[at - 1] : null}
+              busy={busy}
+              actions={actions}
+              run={run}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -106,9 +106,17 @@ export function useRecording(): RecordingData {
     );
   }, [transcripts.data, alignment.data]);
 
+  const engineTranscripts = transcripts.data ?? [];
+
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
-    engines: (transcripts.data ?? []).map((transcript) => ({
+    // Whether this meeting has been recorded at all, which is a different
+    // question from what the engines found. All three reads 404 for a meeting
+    // that never happened, and a screen built to report a comparison has
+    // nothing true to say about one — so it says *that* instead of rendering
+    // itself with the numbers taken out.
+    recorded: engineTranscripts.length > 0,
+    engines: engineTranscripts.map((transcript) => ({
       name: transcript.engine,
       status: transcript.status === 'complete' ? ('complete' as const) : ('failed' as const),
     })),

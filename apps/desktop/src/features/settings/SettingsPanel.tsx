@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import './SettingsPanel.css';
 import { ScreenEyebrow } from '../../ui/Mark';
@@ -89,9 +89,13 @@ const ANTHROPIC_SECRET_HELP: Record<AuthMode, string> = {
  * becomes a different vendor's credential and only ever does so as the direct
  * result of the operator changing that vendor themselves.
  */
+function speechVendorName(vendor: SpeechVendor, customName: string | null | undefined): string {
+  if (vendor === 'custom') return customName?.trim() || 'Speech service';
+  return VENDOR_LABELS[vendor];
+}
+
 function speechKeyLabel(vendor: SpeechVendor, customName: string | null | undefined): string {
-  if (vendor === 'custom') return `${customName?.trim() || 'Speech service'} key`;
-  return `${VENDOR_LABELS[vendor]} key`;
+  return `${speechVendorName(vendor, customName)} key`;
 }
 
 type Tone = 'ok' | 'warn' | 'idle';
@@ -146,6 +150,7 @@ function SecretField({
   onClear,
   onTest,
   result,
+  blocked,
   inUse = false,
 }: {
   status: SecretStatus;
@@ -156,6 +161,17 @@ function SecretField({
   onClear: () => void;
   onTest: () => void;
   result: string | undefined;
+  /**
+   * Why a test cannot be offered right now, or `null` when it can.
+   *
+   * A test is answered by the service, about the credential and the vendor the
+   * *service* holds -- so the moment this form is showing something else, a
+   * verdict would be an answer to a question the operator did not ask. That is
+   * exactly what "Deepgram rejected the credential" under a field labelled
+   * "AssemblyAI key" was. Blocking it is honest where relabelling would not be:
+   * the form cannot test the thing on screen, and says so.
+   */
+  blocked?: string | null;
   inUse?: boolean;
 }) {
   return (
@@ -181,7 +197,11 @@ function SecretField({
           onChange={(event) => onChange(event.target.value)}
           aria-describedby={`${status.key}-state`}
         />
-        <button type="button" onClick={onTest} disabled={!status.configured}>
+        <button
+          type="button"
+          onClick={onTest}
+          disabled={!status.configured || Boolean(blocked)}
+        >
           Test
         </button>
         {status.configured ? (
@@ -191,7 +211,12 @@ function SecretField({
         ) : null}
       </div>
       <p id={`${status.key}-state`} className="settings-state">
-        {result ??
+        {/* The reason outranks a previous result on purpose: once the form has
+            moved on, the last verdict is about settings that are no longer the
+            ones on screen, and leaving it up is how a stale "Verified" ends up
+            reassuring an operator about the wrong vendor. */}
+        {blocked ??
+          result ??
           (status.configured
             ? `A key is stored. Leave this blank to keep it.`
             : 'No key is stored yet.')}
@@ -228,6 +253,130 @@ function StoredNotInUse({
   );
 }
 
+/* --- Tabs -------------------------------------------------------------------
+   This screen is one form, but it configures five unrelated things, and read
+   top to bottom it meant scrolling past four of them to reach the one you came
+   for. Tabs cut it into those five.
+
+   That costs exactly one thing, and it is the thing this screen was good at: a
+   service that is not set up used to announce itself from its section badge
+   while you were reading some other section, and a hidden tab cannot. The dot
+   below is what pays it back — it is driven by the same `Readiness` the badge
+   inside the tab is driven by, so the two cannot disagree about whether
+   something still needs doing. */
+type TabId = 'claude' | 'speech' | 'recording' | 'documents' | 'storage';
+
+interface Tab {
+  readonly id: TabId;
+  readonly label: string;
+  /** True when something in this tab is not set up and the meeting needs it. */
+  readonly attention: boolean;
+}
+
+function SettingsTabs({
+  tabs,
+  active,
+  onSelect,
+}: {
+  tabs: readonly Tab[];
+  active: TabId;
+  onSelect: (id: TabId) => void;
+}) {
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+
+  /**
+   * Roving tabindex: the whole bar is one stop on the Tab key and the arrow
+   * keys move within it, so reaching the form does not mean tabbing past five
+   * tabs. Selection follows focus, which is what a keyboard operator expects
+   * of a control that costs nothing to switch — so the focus has to move with
+   * it, or the next arrow key would step from the tab left behind.
+   */
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = tabs.length - 1;
+    const next =
+      event.key === 'ArrowRight'
+        ? (index === last ? 0 : index + 1)
+        : event.key === 'ArrowLeft'
+          ? (index === 0 ? last : index - 1)
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    onSelect(tabs[next].id);
+    buttons.current[next]?.focus();
+  };
+
+  return (
+    <div className="settings-tabs">
+      {/* The bar and the track are two elements because they do two jobs: the
+          bar is the opaque ground that content scrolls under, and the track is
+          the control. At a width where five labels will not fit, the track
+          scrolls sideways and the bar must not scroll with it. */}
+      <div className="settings-tabs-track" role="tablist" aria-label="Settings sections">
+        {tabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(node) => {
+              buttons.current[index] = node;
+            }}
+            type="button"
+            role="tab"
+            id={`${tab.id}-tab`}
+            className={`settings-tab${tab.id === active ? ' is-selected' : ''}`}
+            aria-selected={tab.id === active}
+            aria-controls={`${tab.id}-panel`}
+            /* A dot is a colour, and a colour on its own is not a state anyone
+               can read aloud. Said as a label rather than as a second text node
+               beside the first, because the accessible name is those nodes
+               concatenated with nothing between them — "Speech— needs
+               attention". The visible word still opens the name, which is what
+               a voice-control user says to reach the tab. */
+            aria-label={tab.attention ? `${tab.label} — needs attention` : undefined}
+            tabIndex={tab.id === active ? 0 : -1}
+            onClick={() => onSelect(tab.id)}
+            onKeyDown={(event) => onKeyDown(event, index)}
+          >
+            <span>{tab.label}</span>
+            {tab.attention ? <span className="settings-tab-dot" aria-hidden="true" /> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Only the selected panel is mounted, which is the ordinary tabs pattern and
+ * is safe here for a specific reason: every draft the operator has typed lives
+ * in `SettingsPanel`'s own state rather than in the inputs. Unmounting a panel
+ * therefore loses nothing, and one Save still writes edits made across several
+ * tabs together.
+ */
+function TabPanel({
+  id,
+  active,
+  children,
+}: {
+  id: TabId;
+  active: TabId;
+  children: React.ReactNode;
+}) {
+  if (id !== active) return null;
+  return (
+    <div
+      className="settings-tabpanel"
+      role="tabpanel"
+      id={`${id}-panel`}
+      aria-labelledby={`${id}-tab`}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * The operator's admin screen for vendor credentials and endpoints.
  *
@@ -260,6 +409,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const [consent, setConsent] = useState<ConsentSettings | null>(null);
   const [testResults, setTestResults] = useState<Partial<Record<SecretKey, string>>>({});
   const [saved, setSaved] = useState(false);
+  const [tab, setTab] = useState<TabId>('claude');
 
   if (loading) {
     return <p className="settings-loading">Loading settings…</p>;
@@ -325,6 +475,45 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
     ? { tone: 'ok', text: 'Ready' }
     : { tone: 'idle', text: 'Optional' };
 
+  // SQLite is the default, so an unreported storage means a local file — not
+  // "unknown". This badge said "External database" whenever the service had
+  // not mentioned storage, which told every reader, and every documentation
+  // screenshot, the opposite of what a default install does.
+  const storageReadiness: Readiness =
+    storage.database === '' || storage.database.startsWith('sqlite')
+      ? { tone: 'ok', text: 'On this machine' }
+      : { tone: 'ok', text: 'External database' };
+
+  // Deliberately not a warning tone on the permissive setting. It is a
+  // legitimate posture — consent captured once for the engagement — and a
+  // screen that scolded the operator for the default it ships with would train
+  // them to ignore the badge.
+  const consentReadiness: Readiness =
+    currentConsent.model === 'per_meeting'
+      ? { tone: 'ok', text: 'Asks every meeting' }
+      : { tone: 'idle', text: 'Standing' };
+
+  /**
+   * Setup order, not alphabetical: the two credentials a meeting cannot run
+   * without come first, then the choices about the recording itself, then the
+   * two that most deployments never touch.
+   *
+   * Every `attention` reads the tone of the badge the tab's own section shows,
+   * so the dot appears exactly when opening the tab would show a warning and
+   * never drifts from it.
+   */
+  const tabs: readonly Tab[] = [
+    { id: 'claude', label: 'Claude', attention: claudeReadiness.tone === 'warn' },
+    { id: 'speech', label: 'Speech', attention: speechReadiness.tone === 'warn' },
+    {
+      id: 'recording',
+      label: 'Recording',
+      attention: consentReadiness.tone === 'warn' || captureReadiness.tone === 'warn',
+    },
+    { id: 'documents', label: 'Documents', attention: documentsReadiness.tone === 'warn' },
+    { id: 'storage', label: 'Storage', attention: storageReadiness.tone === 'warn' },
+  ];
+
   const dirty =
     inference !== null ||
     model !== null ||
@@ -376,7 +565,34 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
     setTestResults((current) => ({ ...current, [key]: detail }));
   };
 
-  const secretProps = (status: SecretStatus) => ({
+  /**
+   * A test is run by the service, against the credential *and the endpoint the
+   * service holds* -- never against what this form is currently showing. So
+   * every unsaved edit that would change what gets tested has to close the
+   * button, or the verdict answers a question the operator did not ask.
+   *
+   * That is the whole of the bug this guards: switching the vendor above
+   * renamed the field to "AssemblyAI key" while the service still probed
+   * Deepgram, and the operator was told "Deepgram rejected the credential
+   * (401)" about a key they had just labelled as somebody else's.
+   */
+  const UNSAVED_KEY =
+    'Save first — a test checks the key it has stored, not the one you have just typed.';
+
+  const pendingSpeechVendor =
+    currentConnectors.live_vendor === settings.connectors.live_vendor
+      ? null
+      : `Save first — the service is still set up for ${speechVendorName(
+          settings.connectors.live_vendor,
+          settings.connectors.custom_vendor_name,
+        )}, so a test now would check this key against that vendor.`;
+
+  const pendingClaudeEndpoint =
+    currentInference.base_url === settings.inference.base_url
+      ? null
+      : 'Save first — the service is still calling the endpoint it has saved, so a test now would not reach the one above.';
+
+  const secretProps = (status: SecretStatus, pending: string | null = null) => ({
     status,
     value: secretDrafts[status.key] ?? '',
     onChange: (next: string) =>
@@ -384,6 +600,9 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
     onClear: () => void onClear(status.key),
     onTest: () => void onTest(status.key),
     result: testResults[status.key],
+    // The endpoint disagreement is named first: it is the half the operator
+    // cannot see, where a key they just typed is sitting in front of them.
+    blocked: pending ?? ((secretDrafts[status.key] ?? '') !== '' ? UNSAVED_KEY : null),
   });
 
   return (
@@ -404,472 +623,467 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
         </p>
       ) : null}
 
-      <Section
-        id="claude"
-        title="Claude"
-        summary="Drafts the question bank before the meeting and writes the debrief after it. Nothing during the meeting waits on it."
-        status={claudeReadiness}
-      >
-        <div className="settings-field">
-          <label htmlFor="provider">Route Claude calls through</label>
-          <p className="settings-help">{PROVIDER_NOTE[currentInference.provider]}</p>
-          <select
-            id="provider"
-            value={currentInference.provider}
-            onChange={(event) =>
-              setInference({
-                ...currentInference,
-                provider: event.target.value as LlmProvider,
-              })
-            }
-          >
-            {(
-              ['anthropic', 'bedrock', 'vertex', 'foundry', 'anthropic_compatible'] as const
-            ).map((provider) => (
-              <option key={provider} value={provider}>
-                {PROVIDER_LABELS[provider]}
-              </option>
-            ))}
-          </select>
-        </div>
+      <SettingsTabs tabs={tabs} active={tab} onSelect={setTab} />
 
-        {currentInference.provider === 'anthropic_compatible' ? (
+      <TabPanel id="claude" active={tab}>
+        <Section
+          id="claude"
+          title="Claude"
+          summary="Drafts the question bank before the meeting and writes the debrief after it. Nothing during the meeting waits on it."
+          status={claudeReadiness}
+        >
           <div className="settings-field">
-            <label htmlFor="provider-base-url">Endpoint</label>
-            <p className="settings-help">Must speak the Anthropic Messages API.</p>
-            <input
-              id="provider-base-url"
-              type="text"
-              value={currentInference.base_url ?? ''}
-              placeholder="https://llm.internal/v1"
+            <label htmlFor="provider">Route Claude calls through</label>
+            <p className="settings-help">{PROVIDER_NOTE[currentInference.provider]}</p>
+            <select
+              id="provider"
+              value={currentInference.provider}
               onChange={(event) =>
                 setInference({
                   ...currentInference,
-                  base_url: event.target.value || null,
+                  provider: event.target.value as LlmProvider,
                 })
               }
-            />
+            >
+              {(
+                ['anthropic', 'bedrock', 'vertex', 'foundry', 'anthropic_compatible'] as const
+              ).map((provider) => (
+                <option key={provider} value={provider}>
+                  {PROVIDER_LABELS[provider]}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : null}
 
-        {currentInference.provider === 'bedrock' || currentInference.provider === 'vertex' ? (
-          <div className="settings-field">
-            <label htmlFor="provider-region">AI provider region</label>
-            <input
-              id="provider-region"
-              type="text"
-              value={currentInference.region ?? ''}
-              placeholder={currentInference.provider === 'vertex' ? 'global' : 'us-east-1'}
-              onChange={(event) =>
-                setInference({ ...currentInference, region: event.target.value || null })
-              }
-            />
-          </div>
-        ) : null}
-
-        {currentInference.provider === 'vertex' ? (
-          <div className="settings-field">
-            <label htmlFor="provider-project">Google Cloud project</label>
-            <input
-              id="provider-project"
-              type="text"
-              value={currentInference.project_id ?? ''}
-              onChange={(event) =>
-                setInference({ ...currentInference, project_id: event.target.value || null })
-              }
-            />
-          </div>
-        ) : null}
-
-        {currentInference.provider === 'foundry' ? (
-          <div className="settings-field">
-            <label htmlFor="provider-resource">Foundry resource</label>
-            <input
-              id="provider-resource"
-              type="text"
-              value={currentInference.resource ?? ''}
-              onChange={(event) =>
-                setInference({ ...currentInference, resource: event.target.value || null })
-              }
-            />
-          </div>
-        ) : null}
-
-        {takesKey ? (
-          <>
-            <fieldset className="settings-field">
-              <legend>Authenticate with</legend>
-              <p className="settings-help">
-                Whichever your organisation issues. Only the one selected here is
-                sent, and only its field is shown.
-              </p>
-              {/* Two mutually exclusive options with short labels is what a
-                  segmented control is for, so that is what this looks like. The
-                  markup stays a radio group: the input is still there, still
-                  focusable and still announced as a radio — the segment is
-                  painted around it rather than replacing it. */}
-              <div className="settings-segmented">
-                {(['api_key', 'oauth_token'] as const).map((mode) => (
-                  <label key={mode} className="settings-radio">
-                    <input
-                      type="radio"
-                      name="auth-mode"
-                      value={mode}
-                      checked={currentAuthMode === mode}
-                      onChange={() => setAuthMode(mode)}
-                    />
-                    <span>{mode === 'api_key' ? 'API key' : 'OAuth token'}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            {activeStatus ? (
-              <SecretField
-                {...secretProps(activeStatus)}
-                label={ANTHROPIC_SECRET_LABEL[currentAuthMode]}
-                help={ANTHROPIC_SECRET_HELP[currentAuthMode]}
-                // Measured against the *saved* mode, and only for a
-                // credential that actually exists. A mode the operator has
-                // just switched to is not in use until it is saved, and an
-                // empty field is not in use at all — on first run the old
-                // reading would have been "in use" over "No key is stored".
-                inUse={
-                  currentAuthMode === settings.inference.auth_mode && activeStatus.configured
+          {currentInference.provider === 'anthropic_compatible' ? (
+            <div className="settings-field">
+              <label htmlFor="provider-base-url">Endpoint</label>
+              <p className="settings-help">Must speak the Anthropic Messages API.</p>
+              <input
+                id="provider-base-url"
+                type="text"
+                value={currentInference.base_url ?? ''}
+                placeholder="https://llm.internal/v1"
+                onChange={(event) =>
+                  setInference({
+                    ...currentInference,
+                    base_url: event.target.value || null,
+                  })
                 }
               />
-            ) : null}
-          </>
-        ) : null}
+            </div>
+          ) : null}
 
-        {idleStatus?.configured && takesKey ? (
-          <StoredNotInUse
-            status={idleStatus}
-            label={
-              ANTHROPIC_SECRET_LABEL[currentAuthMode === 'api_key' ? 'oauth_token' : 'api_key']
-            }
-            onClear={() => void onClear(idleStatus.key)}
-          />
-        ) : null}
+          {currentInference.provider === 'bedrock' || currentInference.provider === 'vertex' ? (
+            <div className="settings-field">
+              <label htmlFor="provider-region">AI provider region</label>
+              <input
+                id="provider-region"
+                type="text"
+                value={currentInference.region ?? ''}
+                placeholder={currentInference.provider === 'vertex' ? 'global' : 'us-east-1'}
+                onChange={(event) =>
+                  setInference({ ...currentInference, region: event.target.value || null })
+                }
+              />
+            </div>
+          ) : null}
 
-        {!takesKey
-          ? (['api_key', 'oauth_token'] as const)
-              .map((mode) => ({ mode, status: secretOf(AUTH_MODE_SECRET[mode]) }))
-              .filter((entry) => entry.status?.configured)
-              .map(({ mode, status }) => (
-                <StoredNotInUse
-                  key={mode}
-                  status={status as SecretStatus}
-                  label={ANTHROPIC_SECRET_LABEL[mode]}
-                  onClear={() => void onClear(AUTH_MODE_SECRET[mode])}
+          {currentInference.provider === 'vertex' ? (
+            <div className="settings-field">
+              <label htmlFor="provider-project">Google Cloud project</label>
+              <input
+                id="provider-project"
+                type="text"
+                value={currentInference.project_id ?? ''}
+                onChange={(event) =>
+                  setInference({ ...currentInference, project_id: event.target.value || null })
+                }
+              />
+            </div>
+          ) : null}
+
+          {currentInference.provider === 'foundry' ? (
+            <div className="settings-field">
+              <label htmlFor="provider-resource">Foundry resource</label>
+              <input
+                id="provider-resource"
+                type="text"
+                value={currentInference.resource ?? ''}
+                onChange={(event) =>
+                  setInference({ ...currentInference, resource: event.target.value || null })
+                }
+              />
+            </div>
+          ) : null}
+
+          {takesKey ? (
+            <>
+              <fieldset className="settings-field">
+                <legend>Authenticate with</legend>
+                <p className="settings-help">
+                  Whichever your organisation issues. Only the one selected here is
+                  sent, and only its field is shown.
+                </p>
+                {/* Two mutually exclusive options with short labels is what a
+                    segmented control is for, so that is what this looks like. The
+                    markup stays a radio group: the input is still there, still
+                    focusable and still announced as a radio — the segment is
+                    painted around it rather than replacing it. */}
+                <div className="settings-segmented">
+                  {(['api_key', 'oauth_token'] as const).map((mode) => (
+                    <label key={mode} className="settings-radio">
+                      <input
+                        type="radio"
+                        name="auth-mode"
+                        value={mode}
+                        checked={currentAuthMode === mode}
+                        onChange={() => setAuthMode(mode)}
+                      />
+                      <span>{mode === 'api_key' ? 'API key' : 'OAuth token'}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              {activeStatus ? (
+                <SecretField
+                  {...secretProps(activeStatus, pendingClaudeEndpoint)}
+                  label={ANTHROPIC_SECRET_LABEL[currentAuthMode]}
+                  help={ANTHROPIC_SECRET_HELP[currentAuthMode]}
+                  // Measured against the *saved* mode, and only for a
+                  // credential that actually exists. A mode the operator has
+                  // just switched to is not in use until it is saved, and an
+                  // empty field is not in use at all — on first run the old
+                  // reading would have been "in use" over "No key is stored".
+                  inUse={
+                    currentAuthMode === settings.inference.auth_mode && activeStatus.configured
+                  }
                 />
-              ))
-          : null}
+              ) : null}
+            </>
+          ) : null}
 
-        <div className="settings-field">
-          <label htmlFor="model">Model</label>
-          <p className="settings-help">
-            Used for the context compiler and the debrief pipeline.
-          </p>
-          <input
-            id="model"
-            type="text"
-            value={currentModel}
-            onChange={(event) => setModel(event.target.value)}
-          />
-        </div>
-      </Section>
+          {idleStatus?.configured && takesKey ? (
+            <StoredNotInUse
+              status={idleStatus}
+              label={
+                ANTHROPIC_SECRET_LABEL[currentAuthMode === 'api_key' ? 'oauth_token' : 'api_key']
+              }
+              onClear={() => void onClear(idleStatus.key)}
+            />
+          ) : null}
 
-      <Section
-        id="storage"
-        title="Where the data is kept"
-        summary="Engagements, their meetings, the documents you attach and the words you add. A single file on this machine unless you point it somewhere else."
-        // SQLite is the default, so an unreported storage means a local file —
-        // not "unknown". This badge said "External database" whenever the
-        // service had not mentioned storage, which told every reader, and every
-        // documentation screenshot, the opposite of what a default install does.
-        status={
-          storage.database === '' || storage.database.startsWith('sqlite')
-            ? { tone: 'ok', text: 'On this machine' }
-            : { tone: 'ok', text: 'External database' }
-        }
-      >
-        <div className="settings-field">
-          <span className="settings-pseudo-label">In use now</span>
-          <p className="settings-help">
-            Read from the service, with any password removed.
-          </p>
-          <p className="settings-state">
-            {storage.database || 'A file on this machine'}
-          </p>
-        </div>
+          {!takesKey
+            ? (['api_key', 'oauth_token'] as const)
+                .map((mode) => ({ mode, status: secretOf(AUTH_MODE_SECRET[mode]) }))
+                .filter((entry) => entry.status?.configured)
+                .map(({ mode, status }) => (
+                  <StoredNotInUse
+                    key={mode}
+                    status={status as SecretStatus}
+                    label={ANTHROPIC_SECRET_LABEL[mode]}
+                    onClear={() => void onClear(AUTH_MODE_SECRET[mode])}
+                  />
+                ))
+            : null}
 
-        {databaseStatus ? (
-          <SecretField
-            {...secretProps(databaseStatus)}
-            label="Database connection URL"
-            help={
-              'Leave unset to keep everything in the file above, which needs no ' +
-              'database server. A PostgreSQL URL carries a password, so it is ' +
-              'stored write-only and never shown back. ' +
-              (storage.applies_on_restart
-                ? 'A change here takes effect when the service restarts, not straight away.'
-                : '')
-            }
-          />
-        ) : null}
-      </Section>
-
-      <Section
-        id="documents"
-        title="Reference documents"
-        summary="Where a linked SharePoint, OneDrive or Teams document is read from. Dropping a file onto the preparation screen needs none of this — it is only links that have to be fetched."
-        status={documentsReadiness}
-      >
-        <div className="settings-field">
-          <label htmlFor="graph-tenant">Directory (tenant) id</label>
-          <p className="settings-help">
-            The Microsoft 365 tenant the documents live in.
-          </p>
-          <input
-            id="graph-tenant"
-            type="text"
-            value={currentDocuments.tenant_id ?? ''}
-            placeholder="00000000-0000-0000-0000-000000000000"
-            onChange={(event) =>
-              setDocuments({
-                ...currentDocuments,
-                tenant_id: event.target.value === '' ? null : event.target.value,
-              })
-            }
-          />
-        </div>
-
-        <div className="settings-field">
-          <label htmlFor="graph-client">Application (client) id</label>
-          <p className="settings-help">
-            An app registration Elicta reads as. It needs the Files.Read.All
-            permission, and Sites.Read.All to reach a team site.
-          </p>
-          <input
-            id="graph-client"
-            type="text"
-            value={currentDocuments.client_id ?? ''}
-            placeholder="00000000-0000-0000-0000-000000000000"
-            onChange={(event) =>
-              setDocuments({
-                ...currentDocuments,
-                client_id: event.target.value === '' ? null : event.target.value,
-              })
-            }
-          />
-        </div>
-
-        {graphStatus ? (
-          <SecretField
-            {...secretProps(graphStatus)}
-            label="Client secret"
-            help="The registration's own secret. Until all three are set, attaching a link is refused with a message saying so — rather than recording a document nothing can read."
-          />
-        ) : null}
-      </Section>
-
-      <Section
-        id="consent"
-        title="Recording consent"
-        summary="Whether a meeting stops to confirm consent before it starts recording."
-        // Deliberately not a warning tone on the permissive setting. It is a
-        // legitimate posture — consent captured once for the engagement — and
-        // a screen that scolded the operator for the default it ships with
-        // would train them to ignore the badge.
-        status={
-          currentConsent.model === 'per_meeting'
-            ? { tone: 'ok', text: 'Asks every meeting' }
-            : { tone: 'idle', text: 'Standing' }
-        }
-      >
-        <fieldset className="settings-field">
-          <legend>Consent model</legend>
-          <p className="settings-help">
-            Under the standing model no meeting shows the confirmation prompt and{' '}
-            <strong>no consent record is written</strong>, so a recording carries no
-            evidence that anyone was told. That is a claim about how your engagements
-            are contracted, not something Elicta can check.
-          </p>
-          <div className="settings-segmented">
-            {(['engagement_level', 'per_meeting'] as const).map((option) => (
-              <label key={option} className="settings-radio">
-                <input
-                  type="radio"
-                  name="consent-model"
-                  value={option}
-                  checked={currentConsent.model === option}
-                  onChange={() => setConsent({ model: option as ConsentModelSetting })}
-                />
-                <span>
-                  {option === 'engagement_level'
-                    ? 'Standing for the engagement'
-                    : 'Ask before every meeting'}
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      </Section>
-
-      <Section
-        id="speech"
-        title="Speech to text"
-        summary="Turns the meeting into the transcript everything else reads. This is the credential the meeting itself depends on."
-        status={speechReadiness}
-      >
-        <div className="settings-field">
-          <label htmlFor="live-vendor">Live transcription</label>
-          <p className="settings-help">
-            Drives the in-meeting nudges. {LIVE_VENDOR_NOTE[currentConnectors.live_vendor]}
-          </p>
-          <select
-            id="live-vendor"
-            value={currentConnectors.live_vendor}
-            onChange={(event) =>
-              setConnectors({
-                ...currentConnectors,
-                live_vendor: event.target.value as SpeechVendor,
-              })
-            }
-          >
-            {(['assemblyai', 'deepgram', 'custom'] as const).map((vendor) => (
-              <option key={vendor} value={vendor}>
-                {VENDOR_LABELS[vendor]}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="settings-field">
-          <span className="settings-pseudo-label">Recording transcription</span>
-          <p className="settings-help">
-            Two engines transcribe the recording separately after the meeting;
-            where they disagree is flagged for you to check. They must be
-            different vendors — the same engine twice would always agree with
-            itself.
-          </p>
-          <p className="settings-state">
-            {currentConnectors.record_vendors
-              .map((vendor) => VENDOR_LABELS[vendor])
-              .join(' + ')}
-          </p>
-        </div>
-
-        {speechStatus ? (
-          <SecretField
-            {...secretProps(speechStatus)}
-            label={speechKeyLabel(
-              currentConnectors.live_vendor,
-              currentConnectors.custom_vendor_name,
-            )}
-            help="Transcribes the meeting on both the live and the record paths. One key covers both."
-          />
-        ) : null}
-
-        {currentConnectors.live_vendor === 'custom' ||
-        currentConnectors.record_vendors.includes('custom') ? (
           <div className="settings-field">
-            <label htmlFor="custom-stt">Custom speech service endpoint</label>
+            <label htmlFor="model">Model</label>
             <p className="settings-help">
-              Where to reach it. Vocabulary prompting and retention opt-out must
-              be confirmed against that vendor's own API.
+              Used for the context compiler and the debrief pipeline.
             </p>
             <input
-              id="custom-stt"
+              id="model"
               type="text"
-              value={currentConnectors.custom_base_url ?? ''}
-              placeholder="https://stt.internal"
+              value={currentModel}
+              onChange={(event) => setModel(event.target.value)}
+            />
+          </div>
+        </Section>
+      </TabPanel>
+
+      <TabPanel id="speech" active={tab}>
+        <Section
+          id="speech"
+          title="Speech to text"
+          summary="Turns the meeting into the transcript everything else reads. This is the credential the meeting itself depends on."
+          status={speechReadiness}
+        >
+          <div className="settings-field">
+            <label htmlFor="live-vendor">Live transcription</label>
+            <p className="settings-help">
+              Drives the in-meeting nudges. {LIVE_VENDOR_NOTE[currentConnectors.live_vendor]}
+            </p>
+            <select
+              id="live-vendor"
+              value={currentConnectors.live_vendor}
               onChange={(event) =>
                 setConnectors({
                   ...currentConnectors,
-                  custom_base_url: event.target.value || null,
+                  live_vendor: event.target.value as SpeechVendor,
+                })
+              }
+            >
+              {(['assemblyai', 'deepgram', 'custom'] as const).map((vendor) => (
+                <option key={vendor} value={vendor}>
+                  {VENDOR_LABELS[vendor]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings-field">
+            <span className="settings-pseudo-label">Recording transcription</span>
+            <p className="settings-help">
+              Two engines transcribe the recording separately after the meeting;
+              where they disagree is flagged for you to check. They must be
+              different vendors — the same engine twice would always agree with
+              itself.
+            </p>
+            <p className="settings-state">
+              {currentConnectors.record_vendors
+                .map((vendor) => VENDOR_LABELS[vendor])
+                .join(' + ')}
+            </p>
+          </div>
+
+          {speechStatus ? (
+            <SecretField
+              {...secretProps(speechStatus, pendingSpeechVendor)}
+              label={speechKeyLabel(
+                currentConnectors.live_vendor,
+                currentConnectors.custom_vendor_name,
+              )}
+              help="Transcribes the meeting on both the live and the record paths. One key covers both."
+            />
+          ) : null}
+
+          {currentConnectors.live_vendor === 'custom' ||
+          currentConnectors.record_vendors.includes('custom') ? (
+            <div className="settings-field">
+              <label htmlFor="custom-stt">Custom speech service endpoint</label>
+              <p className="settings-help">
+                Where to reach it. Vocabulary prompting and retention opt-out must
+                be confirmed against that vendor's own API.
+              </p>
+              <input
+                id="custom-stt"
+                type="text"
+                value={currentConnectors.custom_base_url ?? ''}
+                placeholder="https://stt.internal"
+                onChange={(event) =>
+                  setConnectors({
+                    ...currentConnectors,
+                    custom_base_url: event.target.value || null,
+                  })
+                }
+              />
+            </div>
+          ) : null}
+
+          <div className="settings-field">
+            <label htmlFor="region">Speech region</label>
+            <p className="settings-help">
+              Where audio is processed. Pin it to the region your engagement
+              requires; closer regions also respond faster.
+            </p>
+            <input
+              id="region"
+              type="text"
+              value={currentConnectors.region ?? ''}
+              placeholder="Vendor default"
+              onChange={(event) =>
+                setConnectors({
+                  ...currentConnectors,
+                  region: event.target.value || null,
                 })
               }
             />
           </div>
-        ) : null}
 
-        <div className="settings-field">
-          <label htmlFor="region">Speech region</label>
-          <p className="settings-help">
-            Where audio is processed. Pin it to the region your engagement
-            requires; closer regions also respond faster.
-          </p>
-          <input
-            id="region"
-            type="text"
-            value={currentConnectors.region ?? ''}
-            placeholder="Vendor default"
-            onChange={(event) =>
-              setConnectors({
-                ...currentConnectors,
-                region: event.target.value || null,
-              })
-            }
-          />
-        </div>
+          <div className="settings-field">
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={currentConnectors.keyterm_prompting}
+                onChange={(event) =>
+                  setConnectors({
+                    ...currentConnectors,
+                    keyterm_prompting: event.target.checked,
+                  })
+                }
+              />
+              Send engagement vocabulary to the transcriber
+            </label>
+            <p className="settings-help">
+              Client and product names are transcribed far more accurately when the
+              engine is told about them in advance.
+            </p>
+          </div>
 
-        <div className="settings-field">
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={currentConnectors.keyterm_prompting}
-              onChange={(event) =>
-                setConnectors({
-                  ...currentConnectors,
-                  keyterm_prompting: event.target.checked,
-                })
-              }
-            />
-            Send engagement vocabulary to the transcriber
-          </label>
-          <p className="settings-help">
-            Client and product names are transcribed far more accurately when the
-            engine is told about them in advance.
-          </p>
-        </div>
-
-        <div className="settings-field">
-          <label className="settings-check">
-            <input
-              type="checkbox"
-              checked={currentConnectors.disable_vendor_retention}
-              onChange={(event) =>
-                setConnectors({
-                  ...currentConnectors,
-                  disable_vendor_retention: event.target.checked,
-                })
-              }
-            />
-            Tell vendors not to retain client audio
-          </label>
-          <p className="settings-help">
-            Sets the opt-out on every request. Your contract may already say
-            this; sending it per request is what an audit can verify.
-          </p>
-        </div>
-      </Section>
-
-      {captureStatus ? (
-        <Section
-          id="capture"
-          title="Meeting capture"
-          summary="Only needed when Elicta joins the call itself to record each participant on their own track. Leave it empty if you capture audio on this machine."
-          status={captureReadiness}
-        >
-          <SecretField
-            {...secretProps(captureStatus)}
-            label="Managed capture vendor key"
-            help="Used to join the meeting and capture per-participant audio."
-          />
+          <div className="settings-field">
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={currentConnectors.disable_vendor_retention}
+                onChange={(event) =>
+                  setConnectors({
+                    ...currentConnectors,
+                    disable_vendor_retention: event.target.checked,
+                  })
+                }
+              />
+              Tell vendors not to retain client audio
+            </label>
+            <p className="settings-help">
+              Sets the opt-out on every request. Your contract may already say
+              this; sending it per request is what an audit can verify.
+            </p>
+          </div>
         </Section>
-      ) : null}
+      </TabPanel>
+
+      <TabPanel id="recording" active={tab}>
+        <Section
+          id="consent"
+          title="Recording consent"
+          summary="Whether a meeting stops to confirm consent before it starts recording."
+          status={consentReadiness}
+        >
+          <fieldset className="settings-field">
+            <legend>Consent model</legend>
+            <p className="settings-help">
+              Under the standing model no meeting shows the confirmation prompt and{' '}
+              <strong>no consent record is written</strong>, so a recording carries no
+              evidence that anyone was told. That is a claim about how your engagements
+              are contracted, not something Elicta can check.
+            </p>
+            <div className="settings-segmented">
+              {(['engagement_level', 'per_meeting'] as const).map((option) => (
+                <label key={option} className="settings-radio">
+                  <input
+                    type="radio"
+                    name="consent-model"
+                    value={option}
+                    checked={currentConsent.model === option}
+                    onChange={() => setConsent({ model: option as ConsentModelSetting })}
+                  />
+                  <span>
+                    {option === 'engagement_level'
+                      ? 'Standing for the engagement'
+                      : 'Ask before every meeting'}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </Section>
+        {captureStatus ? (
+          <Section
+            id="capture"
+            title="Meeting capture"
+            summary="Only needed when Elicta joins the call itself to record each participant on their own track. Leave it empty if you capture audio on this machine."
+            status={captureReadiness}
+          >
+            <SecretField
+              {...secretProps(captureStatus)}
+              label="Managed capture vendor key"
+              help="Used to join the meeting and capture per-participant audio."
+            />
+          </Section>
+        ) : null}
+      </TabPanel>
+
+      <TabPanel id="documents" active={tab}>
+        <Section
+          id="documents"
+          title="Reference documents"
+          summary="Where a linked SharePoint, OneDrive or Teams document is read from. Dropping a file onto the preparation screen needs none of this — it is only links that have to be fetched."
+          status={documentsReadiness}
+        >
+          <div className="settings-field">
+            <label htmlFor="graph-tenant">Directory (tenant) id</label>
+            <p className="settings-help">
+              The Microsoft 365 tenant the documents live in.
+            </p>
+            <input
+              id="graph-tenant"
+              type="text"
+              value={currentDocuments.tenant_id ?? ''}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              onChange={(event) =>
+                setDocuments({
+                  ...currentDocuments,
+                  tenant_id: event.target.value === '' ? null : event.target.value,
+                })
+              }
+            />
+          </div>
+
+          <div className="settings-field">
+            <label htmlFor="graph-client">Application (client) id</label>
+            <p className="settings-help">
+              An app registration Elicta reads as. It needs the Files.Read.All
+              permission, and Sites.Read.All to reach a team site.
+            </p>
+            <input
+              id="graph-client"
+              type="text"
+              value={currentDocuments.client_id ?? ''}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              onChange={(event) =>
+                setDocuments({
+                  ...currentDocuments,
+                  client_id: event.target.value === '' ? null : event.target.value,
+                })
+              }
+            />
+          </div>
+
+          {graphStatus ? (
+            <SecretField
+              {...secretProps(graphStatus)}
+              label="Client secret"
+              help="The registration's own secret. Until all three are set, attaching a link is refused with a message saying so — rather than recording a document nothing can read."
+            />
+          ) : null}
+        </Section>
+      </TabPanel>
+
+      <TabPanel id="storage" active={tab}>
+        <Section
+          id="storage"
+          title="Where the data is kept"
+          summary="Engagements, their meetings, the documents you attach and the words you add. A single file on this machine unless you point it somewhere else."
+          status={storageReadiness}
+        >
+          <div className="settings-field">
+            <span className="settings-pseudo-label">In use now</span>
+            <p className="settings-help">
+              Read from the service, with any password removed.
+            </p>
+            <p className="settings-state">
+              {storage.database || 'A file on this machine'}
+            </p>
+          </div>
+
+          {databaseStatus ? (
+            <SecretField
+              {...secretProps(databaseStatus)}
+              label="Database connection URL"
+              help={
+                'Leave unset to keep everything in the file above, which needs no ' +
+                'database server. A PostgreSQL URL carries a password, so it is ' +
+                'stored write-only and never shown back. ' +
+                (storage.applies_on_restart
+                  ? 'A change here takes effect when the service restarts, not straight away.'
+                  : '')
+              }
+            />
+          ) : null}
+        </Section>
+      </TabPanel>
 
       <div className="settings-actions glass">
         {/* State first, action last: the operator reads what is pending, then

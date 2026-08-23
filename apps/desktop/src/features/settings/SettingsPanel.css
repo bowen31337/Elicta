@@ -22,6 +22,210 @@
   letter-spacing: var(--tracking-tight);
 }
 
+/* --- The tab bar -------------------------------------------------------------
+   Five unrelated services on one screen, shown one at a time. The control is
+   the platform's segmented control rather than an underlined tab strip,
+   because this screen already draws "pick exactly one of these" that way two
+   fields further down — a second, subtly different rendering of the same
+   choice would read as a different *kind* of choice. It shares the two tokens
+   that make that control survive both themes, so the pair cannot drift apart.
+
+   The bar rides the top of the pane: the save bar already rides the bottom,
+   and a screen you switch between five times while setting it up should not
+   ask you to scroll to do it.
+
+   `top: 0`, and the toolbar is already accounted for. The pane scrolls *under*
+   the toolbar — it clears it with its own `padding-top: var(--toolbar-height)`
+   — and a sticky box is constrained by its scroll container's *content* box,
+   not by the scrollport. So zero here already means "just below the toolbar".
+   Naming the toolbar height as well counted it twice: the bar parked 54px too
+   low, and the strip of form above it went on scrolling in the open. */
+.settings-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  /* Bleeds to the panel's padding edge, so nothing scrolls past in the margin
+     beside the track. Painted by a pseudo-element rather than by this box, so
+     the bleed does not become part of the track's scrollable width. */
+  padding-block: var(--space-3);
+  /* The panel's own `gap` already spaces this from the title and the fields;
+     the padding above is only the ground the bar needs while it is stuck, so
+     it is taken back out of the flow. */
+  margin-block: calc(var(--space-3) * -1);
+}
+
+.settings-tabs::before {
+  content: '';
+  position: absolute;
+  inset: 0 calc(var(--space-6) * -1);
+  background: var(--bg-grouped);
+  /* Behind this element's own content but still inside the stacking context it
+     creates, so it covers what scrolls under without falling behind the page. */
+  z-index: -1;
+}
+
+/* Sticky chrome fades the content out beneath it rather than drawing a line
+   across it — the same move the toolbar makes. This surface really does
+   scroll, which is the condition `.scroll-edge` warns about. */
+.settings-tabs::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: calc(var(--space-6) * -1);
+  right: calc(var(--space-6) * -1);
+  height: 12px;
+  background: linear-gradient(var(--bg-grouped), transparent);
+  pointer-events: none;
+}
+
+/* Equal columns, as `.settings-segmented` does it and for the same reason:
+   every tab is as wide as the widest label rather than as wide as its own, so
+   "Claude" and "Documents" do not sit in ragged boxes.
+
+   `minmax(max-content, 1fr)`, though, not plain `1fr` — a tab label must never
+   be truncated. Below the width where five of them fit, the track scrolls
+   sideways instead of shaving letters off the ends. */
+.settings-tabs-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(max-content, 1fr);
+  padding: 2px;
+  gap: 2px;
+  background: var(--tabbar-track);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  /* No scrollbar under the track. On the two engines this ships on it would be
+     an overlay that is invisible at rest anyway; drawing a classic one here
+     puts a permanent grey bar under a 34px control on the one narrow layout
+     that needs to scroll at all. The half-cut segment at the edge is the cue,
+     which is how the platform signals a scrollable row of chips. */
+  scrollbar-width: none;
+}
+.settings-tabs-track::-webkit-scrollbar { display: none; }
+
+/* Its own pair, and not `--segment-track` / `--segment-selected`, even though
+   this is the same control. Those two are solved against a *card*: in dark
+   mode the track is `rgba(0,0,0,0.32)`, which reads as a recess cut into
+   `--bg-tertiary`. This bar sits on the page ground, and in dark mode that
+   ground is #000 — the same track painted black on black, and the control
+   disappeared, leaving one grey chip floating with nothing around it.
+
+   The invariant the pair has to satisfy is the same one stated further down:
+   the selected fill is lighter than the track it sits in. On white that means
+   a grey recess and a white segment; on black it means the recess has to go
+   the other way and be *lighter* than the ground, because nothing is darker
+   than black. */
+:root {
+  --tabbar-track: var(--fill-3);
+  --tabbar-selected: var(--bg-tertiary);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tabbar-track: var(--fill-4);
+    --tabbar-selected: var(--fill-1);
+  }
+}
+[data-theme="dark"] {
+  --tabbar-track: var(--fill-4);
+  --tabbar-selected: var(--fill-1);
+}
+
+/* Scoped under `.settings-panel` deliberately, and this is not decoration.
+   `.settings-panel button` (0,1,1) styles every button on this screen blue,
+   capsule-shaped and semibold, and it outranks a bare `.settings-tab` (0,1,0)
+   — which is the same trap this file already documents one section down for
+   `fieldset`. A tab is not one of that rule's buttons: it is a segment, so it
+   states the properties back rather than inheriting an action's appearance. */
+.settings-panel .settings-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  /* 34px is the macOS segmented-control height, and clears WCAG 2.5.8's 24px
+     floor with room rather than by two pixels. */
+  min-height: 34px;
+  padding-inline: var(--space-4);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-subhead);
+  /* Held constant across selection on purpose. The columns size to their
+     widest label, so a heavier selected label would re-measure the track and
+     shift every tab sideways as the selection moved. The lifted segment is
+     what says which one is chosen; that is how the platform says it too. */
+  font-weight: var(--weight-medium);
+  color: var(--label);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.settings-panel .settings-tab.is-selected {
+  background: var(--tabbar-selected);
+  box-shadow: var(--shadow-1);
+}
+
+/* Feedback on press, not on release — and as a change of fill, not a scale.
+   The generic button rule shrinks its buttons by 4% on press, which is right
+   for a thing you push and wrong for a segment: the track around it would stay
+   put while the segment inside it flinched. */
+.settings-panel .settings-tab:active { background: var(--fill-4); transform: none; }
+.settings-panel .settings-tab.is-selected:active { background: var(--tabbar-selected); }
+
+/* Drawn inside the segment rather than around it: the track is a scroll
+   container at narrow widths, and a ring with a positive offset would be
+   clipped by it on the first and last tab. */
+.settings-panel .settings-tab:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: -2px;
+}
+
+/* A service in a tab you are not looking at cannot show you its badge, so the
+   tab says it instead. `--orange-ink`, not the vivid `--orange`: a 6px mark is
+   the hardest case for the 3:1 floor non-text indicators have to clear, and
+   the vivid fill does not clear it against this track. */
+.settings-tab-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--orange-ink);
+}
+
+/* The panel arrives rather than being swapped, which is what tells the eye
+   that the pane changed and not just the pill. Opacity only, and short: the
+   form behind it is tall, and anything that moves it reads as sluggish. */
+.settings-tabpanel {
+  display: flex;
+  flex-direction: column;
+  /* The rhythm the sections used to get from `.settings-panel`'s own `gap`,
+     now that they are nested one level deeper. */
+  gap: var(--space-7);
+  animation: settings-tab-in var(--duration-fast) var(--ease-out) both;
+}
+
+@keyframes settings-tab-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel .settings-tab { transition-duration: 0.01ms; }
+  .settings-tabpanel { animation: none; }
+}
+
+/* `prefers-contrast: more` wants a real edge, not a difference in fill. */
+@media (prefers-contrast: more) {
+  .settings-tabs-track { outline: 1px solid var(--separator-opaque); }
+  .settings-panel .settings-tab.is-selected {
+    outline: 1px solid var(--label);
+    outline-offset: -1px;
+  }
+}
+
 /* --- Service sections -------------------------------------------------------
    The screen is grouped by the service being configured, so a section title is
    a name — "Claude", "Speech to text" — not a category of setting. That makes

@@ -6,15 +6,19 @@ Elicta relies on outside services to transcribe audio and to do the writing-up.
 Those are configured in the app, not by an engineer editing a server, because
 the person who needs a key changed is not usually the person who could deploy.
 
-The screen is organised by service — one section for the AI work, one for
-transcription, one for managed capture — and each section carries its own
-readiness. A credential lives in the section for the thing it authenticates,
-rather than in a single list of keys that gave no clue which was which.
+The screen is organised by service — one tab for the AI work, one for
+transcription, one for the recording, one for document links, one for storage —
+and each carries its own readiness. A credential lives with the thing it
+authenticates, rather than in a single list of keys that gave no clue which was
+which. Tabs rather than one long scroll: an operator setting up transcription
+has no reason to page past four services first.
 
 ## First run
 
-Nothing is set up, and the screen says so plainly rather than looking ready:
-every section reads "needs a credential" or "needs a key" beside its title.
+Nothing is set up, and the screen says so plainly rather than looking ready.
+A tab whose service is not configured carries a dot, so the row of tabs answers
+"what is left?" before anything is opened; the section behind it says which —
+"needs a credential", "needs a key" — beside its title.
 
 ![Before anything is configured](screenshots/settings-first-run.png)
 

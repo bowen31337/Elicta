@@ -42,16 +42,23 @@ const CHROME =
  *  screenshots honest about how much actually fits on screen. */
 const PANEL = { width: 420, height: 720 };
 /**
- * Settings is taller than any window it is read in, so its screenshots show
- * the top and `stopAfter` decides where they end.
+ * Settings shows one service at a time now, so a screenshot is one tab and
+ * `stopAfter` names the section that tab holds.
  *
- * A fixed height is what broke here: the box stayed 1000 while the screen
- * grew credentials, storage, documents, speech, capture and consent, so the
- * picture came to end partway down a card with a floating Save bar across it
- * — which reads as a broken screen rather than a cropped one. A boundary
- * named in words survives the next section being added; a number does not.
+ * A fixed height is what broke here before: the box stayed 1000 while the
+ * screen grew credentials, storage, documents, speech, capture and consent,
+ * so the picture came to end partway down a card with a floating Save bar
+ * across it — which reads as a broken screen rather than a cropped one. A
+ * boundary named in words survives the next section being added; a number
+ * does not. It also survived the sections being dealt into tabs: what changed
+ * is only *which* section each shot ends at.
+ *
+ * The width moved from 480 to 520 for the tabs. Below about 507px the row of
+ * five does not fit and scrolls sideways, which is right in a narrow window
+ * and wrong in a picture: a documentation screenshot ending mid-word on the
+ * last tab reads as a rendering fault rather than as a scrollable row.
  */
-const SETTINGS = { width: 480, height: 1000 };
+const SETTINGS = { width: 520, height: 1000 };
 /** The review screens are read at desk width, not in the meeting panel. */
 const SCREEN = { width: 820, height: 1100 };
 
@@ -69,38 +76,49 @@ const SCENES = [
        .find(b => b.textContent.includes('Asked it'))?.click()`,
   },
   { scene: 'degraded', name: 'panel-degraded', ...PANEL },
-  // Taller than the other review screens: preparation grew documents,
-  // vocabulary, the bank, meetings and engagement management, and a picture
-  // cropped above half of what the chapter describes is worse than no picture.
   { scene: 'engagements', name: 'engagements-list', ...SCREEN },
-  { scene: 'prep', name: 'prep-question-tree', ...SCREEN, height: 2000 },
+  // Taller than the other review screens: preparation carries documents,
+  // vocabulary, the bank and meetings, and a picture cropped above half of
+  // what the chapter describes is worse than no picture. Measured to the last
+  // section rather than given a number — the number was 2000 while the bank
+  // was one flat list, and left a screen of dead space under the page once the
+  // sections became disclosures.
+  { scene: 'prep', name: 'prep-question-tree', ...SCREEN, height: 2000,
+    stopAfter: 'Meetings' },
   { scene: 'consent-pending', name: 'consent-pending', ...SCREEN },
   { scene: 'consent-confirmed', name: 'consent-confirmed', ...SCREEN },
   { scene: 'consent-not-required', name: 'consent-not-asked', ...SCREEN },
   { scene: 'recording', name: 'recording-divergences', ...SCREEN },
+  { scene: 'recording-empty', name: 'recording-not-recorded', ...SCREEN, height: 900 },
   { scene: 'debrief', name: 'debrief-artifacts', ...SCREEN },
   { scene: 'debrief-chat', name: 'debrief-conversation', ...SCREEN },
   { scene: 'debrief-chat-empty', name: 'debrief-conversation-start', ...SCREEN },
   { scene: 'arc', name: 'arc-carried-forward', ...SCREEN },
   { scene: 'replay', name: 'replay-passing', ...SCREEN },
   { scene: 'replay-failing', name: 'replay-failing', ...SCREEN },
+  { scene: 'checking', name: 'capture-checking', ...SCREEN },
   { scene: 'capturing', name: 'capture-recording', ...SCREEN },
   { scene: 'paused', name: 'capture-paused', ...SCREEN },
   { scene: 'capture-acoustic', name: 'capture-acoustic-warning', ...SCREEN },
   { scene: 'about-managed', name: 'about-managed', ...SCREEN },
   { scene: 'about-unmanaged', name: 'about-unmanaged', ...SCREEN },
+  // The tab the screen opens on is Claude's, so these three end where that
+  // section does rather than five sections further down.
   { scene: 'settings-first-run', name: 'settings-first-run', ...SETTINGS,
-    stopAfter: 'Where the data is kept' },
+    stopAfter: 'Claude' },
   { scene: 'settings-configured', name: 'settings-configured', ...SETTINGS,
-    stopAfter: 'Where the data is kept' },
+    stopAfter: 'Claude' },
   { scene: 'settings-compatible', name: 'settings-compatible-endpoint', ...SETTINGS,
-    stopAfter: 'Where the data is kept' },
+    stopAfter: 'Claude' },
   {
     scene: 'settings-configured',
     name: 'settings-speech-vendors',
     ...SETTINGS,
-    action: `document.querySelector('#live-vendor')
-       ?.scrollIntoView({ block: 'center' })`,
+    // Opened rather than scrolled to. The vendor menu is not below the fold
+    // any more; it is behind the Speech tab, and clicking that tab is what an
+    // operator does to reach it.
+    action: `document.querySelector('#speech-tab')?.click()`,
+    stopAfter: 'Speech to text',
   },
 ];
 

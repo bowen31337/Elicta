@@ -49,6 +49,7 @@ const SCENES = [
   'consent-confirmed',
   'consent-not-required',
   'recording',
+  'recording-empty',
   'debrief',
   'debrief-chat',
   'debrief-chat-empty',

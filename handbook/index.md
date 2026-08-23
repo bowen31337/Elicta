@@ -34,7 +34,7 @@ voice as a fact.
 | Chapter | What it covers |
 |---|---|
 | [Preparing for an Engagement](chapters/10-preparing.md) | Documents, the client's own words, and reviewing the questions. |
-| [Starting a Meeting](chapters/11-starting-a-meeting.md) | The consent gate, and what happens to the audio. |
+| [Starting a Meeting](chapters/11-starting-a-meeting.md) | The consent gate, what happens to the audio, and checking the microphone. |
 
 ## During the Meeting
 

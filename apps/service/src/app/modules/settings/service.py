@@ -15,6 +15,7 @@ from .models import (
     ServiceSettings,
     SettingsUpdateRequest,
 )
+from .probes import ProbeFailed
 from .store import SettingsStore
 
 
@@ -68,9 +69,18 @@ async def check_secret_connection(
 
     try:
         await probe(secret.reveal())  # type: ignore[operator]
+    except ProbeFailed as exc:
+        # The probe ran and came back with a verdict. Its message is already
+        # written for an operator -- it names the vendor and what the vendor
+        # said -- so it is passed through as-is. Prefixing the exception class
+        # put `ProbeFailed:` into a form field, which reads as a crash rather
+        # than an answer and tells the operator nothing they can act on.
+        return ConnectionCheck(key=key, reachable=False, detail=str(exc))
     except Exception as exc:
-        # The vendor's error, never the credential. `exc` is formatted by
-        # type and message; a credential is not part of either.
+        # Anything else is the probe itself misbehaving rather than the vendor
+        # answering, and there the type is the only clue worth keeping. The
+        # vendor's error, never the credential: `exc` is formatted by type and
+        # message, and a credential is not part of either.
         return ConnectionCheck(
             key=key, reachable=False, detail=f"{type(exc).__name__}: {exc}"
         )

@@ -96,8 +96,12 @@ part = "Before a Meeting"
 file = "chapters/11-starting-a-meeting.md"
 title = "Starting a Meeting"
 kind = "prose"
-summary = "The consent gate, and what happens to the audio."
-watches = ["apps/desktop/src/features/consent"]
+summary = "The consent gate, what happens to the audio, and checking the microphone."
+# Watches capture as well as consent: the chapter follows the operator past the
+# gate and into the microphone check, because that is where a meeting now
+# begins. The consent screen used to carry a Start button of its own, and the
+# chapter described it here.
+watches = ["apps/desktop/src/features/consent", "apps/desktop/src/features/capture"]
 
 # ── During the meeting ───────────────────────────────────────────────────
 
@@ -146,7 +150,7 @@ file = "chapters/30-checking-the-recording.md"
 title = "Checking the Recording"
 kind = "prose"
 summary = "Two transcriptions, their disagreements, and destroying the audio."
-watches = ["apps/desktop/src/features/replay", "apps/service/src/app/modules/asr-record"]
+watches = ["apps/desktop/src/features/recording", "apps/desktop/src/features/replay", "apps/service/src/app/modules/asr-record"]
 
 [[chapter]]
 id = "write-up"

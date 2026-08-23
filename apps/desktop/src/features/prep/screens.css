@@ -26,6 +26,59 @@
 
 .bank-section + .bank-section { margin-top: var(--space-3); }
 
+/* ---- The question bank as disclosures ----------------------------------
+   A compiled bank runs to around seventy questions in eight sections. Flat,
+   that is nine thousand pixels of rows with no heading in view to say which
+   section you are in, and the Meetings section sits below all of it. Each
+   section is a disclosure instead, so the bank reads as the tree it is and
+   opens one part at a time. */
+.bank-section-heading { margin: 0; font: inherit; }
+
+/* The header row *is* the control, so it is a real button rather than a row
+   with a click handler: it comes with the keyboard, the focus ring and the
+   pressed state already, and `aria-expanded` on anything else would be a
+   claim no assistive technology could act on. It has to state the properties
+   a UA gives a button and this list idiom does not want — `.row` supplies the
+   layout, and everything below undoes the chrome. */
+.bank-disclosure {
+  width: 100%;
+  font: inherit;
+  color: var(--label);
+  text-align: left;
+  border: 0;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.bank-disclosure:hover:not(:disabled) {
+  background: var(--fill-3);
+}
+/* Feedback on press, not on release — but no scale. The row is the full width
+   of the group and shrinking it would lift its own corners off the group's. */
+.bank-disclosure:active:not(:disabled) { background: var(--fill-2); }
+/* Disabled only while a filter decides what is open, which is not a control
+   that has gone wrong. It keeps its ink rather than grey-ing out, because the
+   heading is still the section's name and still has to be read. */
+.bank-disclosure:disabled { cursor: default; color: var(--label); }
+
+/* The section name takes the slack so the count sits at the trailing edge,
+   where the eye can compare the column of them down the page. */
+.bank-section-name { flex: 1; min-width: 0; }
+
+.bank-caret {
+  display: inline-flex;
+  flex: none;
+  color: var(--label-supporting);
+  /* Rotated about its own centre, so a chevron pointing right becomes one
+     pointing down rather than swinging around a corner. */
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.bank-caret.is-open { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bank-caret,
+  .bank-disclosure { transition-duration: 0.01ms; }
+}
+
 /* A quoted utterance is evidence, so it is set apart rather than run in. */
 .quote {
   margin: 0;
@@ -123,3 +176,63 @@ label.dropzone-pick { cursor: pointer; }
    the audit, which exempts disabled controls, and not legible to a person. It
    reads as a live button that has gone wrong; a muted fill reads as waiting. */
 .btn--filled:disabled { background: var(--fill-4); color: var(--label-tertiary); }
+
+/* ---- A screen whose subject has not happened yet ------------------------
+   Distinct from `ScreenState`, which covers the states a screen shares with
+   every other one (loading, unreachable, nothing selected). This is the state
+   only *this* screen has: the meeting exists, and the thing the screen reports
+   on has not occurred. It is a composition rather than a sentence because the
+   alternative — the real screen with its numbers removed — reads as a result,
+   which is the specific mistake being corrected. */
+.screen .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-4);
+  padding: var(--space-10) var(--space-6) var(--space-9);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
+}
+
+/* A tinted disc, not an illustration. The symbol is the one the sidebar uses
+   for this screen, so the empty state and the destination that leads here are
+   recognisably the same place. `--fill-4` is the thinnest fill in the set:
+   enough to seat the glyph on a surface, not enough to become the subject. */
+.empty-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: var(--radius-capsule);
+  background: var(--fill-4);
+  /* Ink, not the vivid accent: this sits on a card, and the vivid system
+     colours are for fills. */
+  color: var(--accent-ink);
+}
+
+.empty-title { margin: 0; }
+
+/* Held to a readable measure. A centred paragraph the full 720px of the screen
+   is a banner, and the eye loses the line ends. `balance` because centred text
+   is where a short last line reads as a mistake — the raggedness is symmetrical
+   about the axis, so the eye sees the shape before it reads the words. */
+.empty-body {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--label-supporting);
+  text-wrap: balance;
+}
+
+/* The anchor has to state what a `<button>` gets for free — `.btn` sets a
+   min-height that an inline box ignores, and a link's underline is chrome this
+   control does not want. */
+.empty-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--space-2);
+  text-decoration: none;
+}

@@ -38,6 +38,7 @@ import {
   RECORDING,
   REPLAY,
   REPLAY_FAILING,
+  RECORDING_NOT_RECORDED,
 } from './synthetic';
 
 /**
@@ -56,6 +57,7 @@ const SCREENS: Record<string, () => JSX.Element> = {
   'consent-confirmed': () => <ConsentScreen {...CONSENT_CONFIRMED} />,
   'consent-not-required': () => <ConsentScreen {...CONSENT_NOT_REQUIRED} />,
   recording: () => <RecordingScreen {...RECORDING} />,
+  'recording-empty': () => <RecordingScreen {...RECORDING_NOT_RECORDED} />,
   debrief: () => <DebriefScreen {...DEBRIEF} />,
   'debrief-chat': () => <DebriefChatScreen {...DEBRIEF_CHAT} />,
   'debrief-chat-empty': () => <DebriefChatScreen {...DEBRIEF_CHAT_EMPTY} />,

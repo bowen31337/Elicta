@@ -194,6 +194,7 @@ export const CONSENT_NOT_REQUIRED: ConsentScreenProps = {
 
 export const RECORDING: RecordingScreenProps = {
   meetingTitle: MEETING,
+  recorded: true,
   engines: [
     { name: 'Deepgram Nova-3', status: 'complete' },
     { name: 'AssemblyAI Universal-2', status: 'complete' },
@@ -232,6 +233,21 @@ export const RECORDING: RecordingScreenProps = {
     },
   ],
   audioDestroyedAt: '18 Aug 2026, 11:42',
+};
+
+/**
+ * The same screen for a meeting nobody has recorded yet — the state every
+ * meeting is in until it happens, and the one the service answers with three
+ * 404s. Kept as its own scene because it is the version an operator meets
+ * first, and it went unlooked-at while only the populated one had a picture.
+ */
+export const RECORDING_NOT_RECORDED: RecordingScreenProps = {
+  meetingTitle: MEETING,
+  recorded: false,
+  engines: [],
+  agreementPercent: null,
+  divergences: [],
+  audioDestroyedAt: null,
 };
 
 export const DEBRIEF: DebriefScreenProps = {

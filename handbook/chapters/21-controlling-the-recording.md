@@ -33,9 +33,19 @@ instant because the microphone is never actually closed.
 
 ## Starting, and choosing what to listen to
 
-Before anything is recording, the screen offers the inputs it can see and a
-single button to begin. Where there is more than one, you pick which before you
-start rather than discovering afterwards that it took the wrong one.
+Before anything is recording, the screen offers the inputs it can see and two
+controls: one to check a microphone, and one to start recording. Where there is
+more than one input, you pick which before you start rather than discovering
+afterwards that it took the wrong one.
+
+Checking opens the input and shows you the level moving, and records nothing.
+It is worth doing every time. A muted or unplugged microphone produces a screen
+that looks exactly like a working one, and without a level to watch the failure
+only surfaces in the transcript, long after the meeting.
+
+Take the choice seriously at this point, because it sticks: once a recording is
+running the input cannot be swapped. Changing it means stopping and starting
+again, and that leaves a hole in the recording.
 
 Running Elicta in a web browser rather than as an installed application, the
 microphone is the browser's to give, and browsers only hand it over on a secure
@@ -43,11 +53,18 @@ page. On an address that is not secure, the screen says so plainly rather than
 claiming the feature is missing — the difference matters, because that one is
 yours to fix and takes a moment.
 
-The browser also asks your permission the first time, and it asks when you
-press the button to start rather than the moment the screen opens. Until you
-have allowed it, the browser will not tell Elicta the names of your
-microphones, so the list shows a single unnamed input; allow it once and the
-real names, and any other inputs, appear from then on.
+The browser also asks your permission the first time, and it asks when you press
+the button to check rather than the moment the screen opens. Until you have
+allowed it, the browser will not tell Elicta the names of your microphones, so
+the list shows a single unnamed input; allow it once and the real names, and any
+other inputs, appear from then on. That is the practical reason the check exists
+as its own step — it is what turns the list into a choice.
+
+Starting the recording is also what registers the meeting. The input is opened
+first, so if it cannot be opened, no meeting is registered at all and you are
+free to fix the problem and try again. If you were already checking a
+microphone, that is the one that records, with no second permission prompt and
+no gap.
 
 ## It will argue for a better microphone
 

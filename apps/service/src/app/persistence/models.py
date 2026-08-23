@@ -5,20 +5,29 @@ specific gap: `migrations/versions/` described twenty tables that nothing in
 the running product ever read or wrote, so engagement state lived only in
 process memory and died with the service (PRD G4, FR-8.9).
 
-Scope is deliberate. The seven tables here are exactly the ones an engagement's
-memory is made of — the client, its meetings, the questions a meeting left
-open, the standing requirements state, the compiled candidate bank, and the two
-things the operator types in before any of it: the reference documents and the
-client vocabulary. The remaining thirteen tables hold per-run pipeline output
-that is rebuilt from the transcript on demand; they get their models when
-something needs to read them back, not before, because an unused model is a
-schema claim nobody checks.
+Scope is deliberate. The tables here are the ones an engagement's memory is
+made of — the client, its meetings, the questions a meeting left open, the
+standing requirements state, the compiled candidate bank, the two things the
+operator types in before any of it (the reference documents and the client
+vocabulary), the consent confirmations, and what the record path produced. The
+remaining tables hold per-run pipeline output that really is rebuilt from the
+transcript on demand; they get their models when something needs to read them
+back, not before, because an unused model is a schema claim nobody checks.
 
-The last two were in that "rebuilt on demand" group and should never have been.
-Nothing rebuilds a document somebody uploaded or a keyterm somebody typed, so
-the classification quietly meant "lost on restart" — a live run came back with
-zero documents and zero vocabulary against engagements that had both, with no
-warning, while the screen still offered to add more.
+Five of the tables here arrived by being moved *out* of that "rebuilt on
+demand" group, which for them quietly meant "lost on restart". Nothing rebuilds
+a document somebody uploaded or a keyterm somebody typed — a live run came back
+with zero of both against engagements that had them, with no warning, while the
+screen still offered to add more. Nothing rebuilds a consent confirmation
+either; it describes a moment. And nothing rebuilds the record path's
+transcripts or the alignment computed from them, because NFR-2.4 destroys the
+raw audio the moment transcription and diarization finish — by the time the
+destruction event is written, the thing that could regenerate them is gone.
+
+The lesson each time is the same, and worth applying before adding a model
+here: "rebuilt on demand" is a claim about what would actually do the
+rebuilding. If the answer is nothing, the classification is a way of saying the
+data is lost and no one has noticed yet.
 
 **Column types are portable on purpose.** The migration chain is written for
 PostgreSQL (`JSONB`, `UUID`, `ARRAY`), which is the deployment target. But the
@@ -250,3 +259,103 @@ class VocabularyTermRow(Base):
     pronunciation_hint: Mapped[str | None] = mapped_column(sa.String(256), nullable=True)
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
     deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(), nullable=True)
+
+
+class RecordPathTranscriptRow(Base):
+    """One engine's full-session transcript for one session (FR-2.5/2.6).
+
+    The third arrival into this schema from the "rebuilt on demand" group at
+    the top of this file, and the one where that description was furthest from
+    true. A record-path transcript is not derived from anything still on the
+    machine: NFR-2.4 destroys the raw audio the moment transcription and
+    diarization both finish, so once this row is gone the recording it came
+    from is gone with it and no amount of re-running rebuilds it.
+
+    Losing it took the two reads above it down as well — a session with no
+    transcript reports no alignment and no destruction record, so a meeting
+    that really was recorded came back looking exactly like one that never
+    happened. The desktop service runs under `--reload`, which made that every
+    file save.
+
+    No foreign key to `meetings`, for the reason `ConsentRecordRow` gives: the
+    id here is a *session* id, which the record path and the live path both
+    key on, and cascading a transcript away with a meeting row would destroy
+    the only surviving account of what was said.
+
+    `segments` is JSON rather than a child table. The list is produced whole by
+    one batch run and read whole by the screen; a row per segment would be
+    thousands of rows nothing ever queries individually.
+    """
+
+    __tablename__ = "record_path_transcripts"
+
+    # `{session_id}:{ordinal}` — one session's transcripts are rewritten whole
+    # (one per engine), so the pair is stable and unique without a sequence.
+    id: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    engine: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    # `complete` or `failed`. A failed run is persisted deliberately: a session
+    # with no transcript at all cannot be told from one nobody has transcribed.
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    segments: Mapped[list] = mapped_column(sa.JSON(), nullable=False, default=list)
+    text: Mapped[str] = mapped_column(sa.Text(), nullable=False, default="")
+    # ISO-8601 text, not `DateTime`, for the reason `ConsentRecordRow` records:
+    # these are `datetime.now(UTC)` and SQLite's DateTime stores naive, so a
+    # round trip would drop the offset and read back as ambiguous local time.
+    requested_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    completed_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    error: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    # Which engine finished first, kept because the first is the alignment's
+    # reference and the screen names it as such.
+    ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
+
+
+class SessionAlignmentRow(Base):
+    """What comparing one session's two transcripts found (FR-2.6/2.8).
+
+    One row per session — the alignment is computed once both engines finish,
+    and recomputing it is only possible while both transcripts still exist.
+    They are in the table above for the same reason, so the pair stands or
+    falls together.
+
+    `spans` is JSON on the same reasoning as `segments`: produced whole,
+    read whole, never queried span by span.
+    """
+
+    __tablename__ = "session_alignments"
+
+    session_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    reference_engine: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    other_engine: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    spans: Mapped[list] = mapped_column(sa.JSON(), nullable=False, default=list)
+    computed_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+
+
+class AudioDestructionEventRow(Base):
+    """That a session's raw audio was destroyed, and whether it worked (NFR-2.4).
+
+    The privacy control's own evidence. A failed attempt matters more than a
+    successful one — it means the audio may still be sitting there — so both
+    are persisted, and losing them on restart lost the ability to tell a
+    session whose audio was destroyed from one whose audio was never held.
+
+    Every attempt is kept rather than only the latest: a retry after a failure
+    describes where the audio stands now, and the pair together describe what
+    happened. No foreign key, and no `deleted_at`, for the reasons
+    `ConsentRecordRow` sets out — this is a record *about* a session id, and
+    nothing about it is an operator's to withdraw.
+    """
+
+    __tablename__ = "audio_destruction_events"
+
+    # `{session_id}:{ordinal}`, as above.
+    id: Mapped[str] = mapped_column(sa.String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    audio_ref: Mapped[str] = mapped_column(sa.String(512), nullable=False, default="")
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    requested_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    completed_at: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    error: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    # Attempt order for one session. Which came last is the answer to "where
+    # does the audio stand now", so it has to survive the restart too.
+    ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)

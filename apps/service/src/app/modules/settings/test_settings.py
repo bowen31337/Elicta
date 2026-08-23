@@ -21,6 +21,7 @@ from .models import (
     SettingsUpdateRequest,
     VendorSettings,
 )
+from .probes import ProbeFailed
 from .router import build_settings_router
 from .service import apply_settings_update, check_secret_connection
 from .store import InMemorySettingsStore
@@ -218,6 +219,25 @@ async def test_a_failing_probe_reports_the_vendor_error_not_the_credential() -> 
     assert check.reachable is False
     assert "invalid x-api-key" in check.detail
     assert REAL_KEY not in check.detail
+
+
+async def test_a_probe_failure_reads_as_the_vendor_speaking_not_a_python_class() -> None:
+    """`ProbeFailed:` is an internal type name, and an operator reads this string.
+
+    The detail is rendered verbatim next to the field in the settings form, so
+    a leaked class name is operator-facing copy that means nothing to them.
+    """
+
+    store = _store()
+    store.set_secret(SecretKey.ASR_VENDOR_API_KEY, REAL_KEY)
+
+    async def probe(_key: str) -> None:
+        raise ProbeFailed("Deepgram rejected the credential (401)")
+
+    check = await check_secret_connection(store, SecretKey.ASR_VENDOR_API_KEY, probe)
+
+    assert check.reachable is False
+    assert check.detail == "Deepgram rejected the credential (401)"
 
 
 async def test_a_successful_probe_reports_the_credential_as_verified() -> None:

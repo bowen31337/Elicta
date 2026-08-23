@@ -135,7 +135,7 @@ def test_a_chunk_is_refused_once_the_audio_has_been_destroyed() -> None:
     )
 
     now = datetime.now(UTC)
-    backend.audio_destruction_events.append(
+    backend.audio_destruction_events["meeting-1"] = [
         AudioDestructionEvent(
             session_id="meeting-1",
             audio_ref="session:meeting-1",
@@ -143,7 +143,7 @@ def test_a_chunk_is_refused_once_the_audio_has_been_destroyed() -> None:
             requested_at=now,
             completed_at=now,
         )
-    )
+    ]
     backend.retained_audio.pop("meeting-1", None)
     backend.session_audio.pop("meeting-1", None)
 
@@ -176,7 +176,7 @@ def test_another_session_is_unaffected_by_a_destroyed_one() -> None:
     client = TestClient(build_app(backend))
 
     now = datetime.now(UTC)
-    backend.audio_destruction_events.append(
+    backend.audio_destruction_events["meeting-1"] = [
         AudioDestructionEvent(
             session_id="meeting-1",
             audio_ref="session:meeting-1",
@@ -184,7 +184,7 @@ def test_another_session_is_unaffected_by_a_destroyed_one() -> None:
             requested_at=now,
             completed_at=now,
         )
-    )
+    ]
 
     accepted = client.post(
         "/api/sessions/meeting-2/audio-chunk",

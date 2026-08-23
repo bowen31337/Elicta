@@ -188,16 +188,30 @@ describe('the recording review screen', () => {
     expect(await screen.findByText('Destroyed')).toBeInTheDocument();
   });
 
-  it('renders an empty review for a meeting that was never transcribed', async () => {
+  it('says a meeting was never recorded instead of reviewing nothing', async () => {
+    // A 404 on every source is content, not failure: this meeting has not
+    // happened yet. It used to render the review with its values taken out —
+    // two cards reading "—" and "0", an empty box under Engines — which is
+    // indistinguishable from a comparison that ran and found nothing.
     stubService(BASE);
     render(<RecordingRoute />);
 
-    // A 404 on every source is content, not failure: this meeting has not
-    // happened yet.
-    expect(await screen.findByText('Where they disagreed')).toBeInTheDocument();
+    expect(await screen.findByText('Not recorded yet')).toBeInTheDocument();
+    expect(screen.queryByText('Where they disagreed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Engines agreed')).not.toBeInTheDocument();
   });
 
-  it('says nothing was compared rather than reporting nought per cent', async () => {
+  it('offers the step that would fill the screen', async () => {
+    // An empty state that names no way forward is a dead end. Capture is a
+    // real destination in this shell, addressed by fragment.
+    stubService(BASE);
+    render(<RecordingRoute />);
+
+    const action = await screen.findByRole('link', { name: /go to capture/i });
+    expect(action).toHaveAttribute('href', '#/capture');
+  });
+
+  it('reports no count at all for a meeting that was never recorded', async () => {
     /**
      * A live run photographed "Engines agreed 0%" beside "Needs a look 0" —
      * two engines that both finished, no disagreements between them, and a
@@ -206,27 +220,46 @@ describe('the recording review screen', () => {
      *
      * 100% would be the more flattering lie and 0% is the more alarming one;
      * neither is a measurement. Nothing was aligned, so there is nothing to
-     * take a share of, and the honest answer is that it cannot be told yet —
-     * which is what this journey already promises about the same measurement
-     * made against real recordings.
+     * take a share of. The screen now declines to show the cards rather than
+     * showing them empty, so neither number can be read off it.
      */
     stubService(BASE);
     render(<RecordingRoute />);
 
-    await screen.findByText('Where they disagreed');
+    await screen.findByText('Not recorded yet');
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
-    expect(screen.getByText(/not compared/i)).toBeInTheDocument();
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
   });
 
   it('tells an empty disagreement list apart from an uncompared one', async () => {
-    // Same ambiguity as the headline number, one section down: a bare heading
-    // with nothing under it reads as "they agreed on everything", which is the
-    // conclusion an operator would act on and the one nothing here supports.
-    stubService(BASE);
+    // Same ambiguity as the headline number, one section down, and the case
+    // that keeps the review's own empty text honest: the recording exists and
+    // the engines ran, but nothing has been aligned yet. That is still the
+    // review screen — a meeting that *was* recorded — not the empty state.
+    stubService({
+      ...BASE,
+      '/api/sessions/meeting-1/record-path-transcript': TRANSCRIPTS,
+    });
     render(<RecordingRoute />);
 
     await screen.findByText('Where they disagreed');
     expect(screen.getByText(/nothing has been compared/i)).toBeInTheDocument();
+    expect(screen.queryByText('Not recorded yet')).not.toBeInTheDocument();
+  });
+
+  it('gives no divergence count while there is nothing to count', async () => {
+    // The other half of the 0% bug, and the half still on screen: a recording
+    // whose engines have not been aligned showed "Needs a look 0", which reads
+    // as "reviewed, nothing to flag" rather than "not compared".
+    stubService({
+      ...BASE,
+      '/api/sessions/meeting-1/record-path-transcript': TRANSCRIPTS,
+    });
+    render(<RecordingRoute />);
+
+    await screen.findByText('Needs a look');
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
+    expect(screen.getByText(/nothing to compare/i)).toBeInTheDocument();
   });
 
   it('says so plainly when the engines were compared and agreed throughout', async () => {

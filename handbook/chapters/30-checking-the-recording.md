@@ -29,6 +29,38 @@ agreement and say nothing. It is the numbers and the names that decide what
 gets built, and they are exactly what two services disagree about, so those
 are the ones put in front of you.
 
+## Before there is anything to check
+
+Most of the time you will open this page for a meeting that has not been
+recorded yet, and that is the version of it you will see first.
+
+![A meeting that has not been recorded yet](../../docs/journeys/screenshots/recording-not-recorded.png)
+
+It used to answer that by drawing the full page with the values taken out — two
+figures reading "—" and "0", an empty box where the two services would be
+named, and nothing to do next. That is the same picture the page would draw
+after a comparison that ran and found nothing wrong, and those two situations
+could not be further apart: one is work still to come, the other is a result.
+
+It now says which one it is, says plainly that nothing has gone wrong, and
+offers the one step that would fill it. What is listed underneath is what the
+page will hold once a recording exists — worth saying while there is room to
+say it.
+
+## It is still there tomorrow
+
+A checked recording is not something you have to deal with in one sitting.
+Closing Elicta and coming back to it later leaves the two transcriptions, the
+list of disagreements and the record of the audio being destroyed exactly where
+they were.
+
+That is worth stating because it was not always true. Those three were held
+only for as long as the program was running, on the reasoning that they could
+be worked out again from the recording — which they could not, because the
+recording is deleted as soon as the transcribing finishes. Reopening the app
+showed a meeting you had certainly recorded as one that had never been
+recorded at all.
+
 ## Then the audio is destroyed
 
 The moment both transcriptions and the speaker identification have finished —
@@ -55,6 +87,10 @@ count of nought disagreements — two numbers contradicting each other in the sa
 row. Neither was a measurement. Where nothing has been compared it now says so,
 and that reads differently from two engines that were compared and matched
 throughout.
+
+The count beside it took longer to correct than the percentage did. A nought in
+that place is a claim about a review that happened and turned nothing up, so
+where there is nothing to count no count is offered.
 
 There is also a way to measure how much the pairing catches, once it runs: given
 a recording and a known-correct transcript, it reports what share of the mistakes

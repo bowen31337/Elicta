@@ -196,6 +196,18 @@ def _backfill_clause(column: sa.Column, dialect: Any) -> str | None:
     return f" NOT NULL DEFAULT {literal}"
 
 
+def _enum_text(value: Any) -> str:
+    """The stored form of a status column.
+
+    `TranscriptionStatus` and friends are `str`-valued enums, but `str()` on
+    one renders `TranscriptionStatus.COMPLETE` rather than `complete`, which
+    reads back as an invalid value. Taking `.value` is the difference between
+    a row that decodes and one that raises on the next start.
+    """
+
+    return str(getattr(value, "value", value))
+
+
 def _refuse_to_forget(key: Any) -> None:
     """The `forget` for a collection nothing may delete from."""
 
@@ -701,6 +713,166 @@ class StateStore:
             forget=_refuse_to_forget,
             lock=self._lock,
         )
+
+    # -- the record path's own artifacts ----------------------------------
+    #
+    # These three arrived together, and for one reason: they were classified
+    # as pipeline output "rebuilt from the transcript", and two of them *are*
+    # the transcript while the third describes audio NFR-2.4 has already
+    # destroyed. Nothing rebuilds any of them. A meeting that really was
+    # recorded came back after a restart answering 404 on all three reads,
+    # which is indistinguishable from a meeting that never happened — and the
+    # desktop service runs under `--reload`, so "a restart" meant every save.
+
+    def record_path_transcripts(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """Every engine's transcript for a session, in the order they finished.
+
+        Keyed by session and holding the whole list because that is how the
+        record path produces and reads them: FR-2.6 runs two engines over the
+        same audio and the pair is the unit of meaning — one transcript alone
+        cannot be compared against anything.
+        """
+
+        table = metadata.tables["record_path_transcripts"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.session_id, r.ordinal)):
+            loaded.setdefault(row.session_id, []).append(
+                decode(
+                    {
+                        "session_id": row.session_id,
+                        "engine": row.engine,
+                        "status": row.status,
+                        "segments": row.segments or [],
+                        "text": row.text or "",
+                        # Pydantic parses the ISO-8601 text back, offset and
+                        # all, which is why it was stored as text.
+                        "requested_at": row.requested_at,
+                        "completed_at": row.completed_at,
+                        "error": row.error,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            rows = [
+                {
+                    "id": f"{key}:{ordinal}",
+                    "session_id": key,
+                    "engine": entry.engine,
+                    "status": _enum_text(entry.status),
+                    "segments": [segment.model_dump() for segment in entry.segments],
+                    "text": entry.text,
+                    "requested_at": entry.requested_at.isoformat(),
+                    "completed_at": entry.completed_at.isoformat(),
+                    "error": entry.error,
+                    "ordinal": ordinal,
+                }
+                for ordinal, entry in enumerate(value)
+            ]
+            self._replace_children(table, "session_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
+    def session_alignments(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """What comparing a session's two transcripts found. One row per session."""
+
+        table = metadata.tables["session_alignments"]
+        loaded: dict[str, V] = {
+            row.session_id: decode(
+                {
+                    "session_id": row.session_id,
+                    "reference_engine": row.reference_engine,
+                    "other_engine": row.other_engine,
+                    "spans": row.spans or [],
+                    "computed_at": row.computed_at,
+                }
+            )
+            for row in self._rows(table)
+        }
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "session_id",
+                key,
+                {
+                    "reference_engine": value.reference_engine,
+                    "other_engine": value.other_engine,
+                    "spans": [span.model_dump() for span in value.spans],
+                    "computed_at": value.computed_at.isoformat(),
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
+    def audio_destruction_events(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """Every attempt to destroy a session's raw audio, oldest first.
+
+        Keyed by session rather than kept as one flat log, which is how both
+        readers ask about it: "where does this session's audio stand" and "was
+        this session's audio destroyed". The flat list they used to scan was
+        the same answer at O(every event ever).
+
+        The whole list is kept, not the latest. A retry after a failure says
+        where the audio stands now; the pair together says what happened, and
+        NFR-2.4 is a control whose evidence is the point.
+        """
+
+        table = metadata.tables["audio_destruction_events"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.session_id, r.ordinal)):
+            loaded.setdefault(row.session_id, []).append(
+                decode(
+                    {
+                        "session_id": row.session_id,
+                        "audio_ref": row.audio_ref or "",
+                        "status": row.status,
+                        "requested_at": row.requested_at,
+                        "completed_at": row.completed_at,
+                        "error": row.error,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            rows = [
+                {
+                    "id": f"{key}:{ordinal}",
+                    "session_id": key,
+                    "audio_ref": entry.audio_ref,
+                    "status": _enum_text(entry.status),
+                    "requested_at": entry.requested_at.isoformat(),
+                    "completed_at": entry.completed_at.isoformat(),
+                    "error": entry.error,
+                    "ordinal": ordinal,
+                }
+                for ordinal, entry in enumerate(value)
+            ]
+            self._replace_children(table, "session_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
 
     def document_texts(self) -> DurableMapping[str, str]:
         """The text read out of each document, keyed by document id.

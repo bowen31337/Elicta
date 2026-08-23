@@ -70,6 +70,14 @@ ones that matter up the list, and prune the ones that miss. A pruned question
 stays pruned: it is recorded as your judgement rather than deleted, so it does
 not come back the next time the bank is drafted.
 
+A real bank runs to seventy-odd questions across the eight sections, so the
+sections open one at a time and each says how many are inside it before you
+open it. There is also a box that filters the whole bank by what a question
+says, which is how you find the four that mention a particular system without
+reading the other seventy. Reordering is off while that filter is on: moving a
+question up means moving it past the one above it, and under a filter the
+question above on screen is not the one above in the bank.
+
 ![The preparation screen: documents, client vocabulary, and the question bank grouped by section](screenshots/prep-question-tree.png)
 
 This review is worth doing even if you never open Elicta during the meeting.

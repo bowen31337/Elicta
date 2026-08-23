@@ -44,6 +44,16 @@ function controller(overrides: Partial<UseSettingsResult> = {}): UseSettingsResu
   };
 }
 
+/**
+ * The screen shows one service at a time, so a test about the transcriber has
+ * to open the transcriber's tab the way an operator would. Matched on a prefix
+ * because a tab whose service is not set up carries "— needs attention" in its
+ * accessible name.
+ */
+async function openTab(label: string) {
+  await userEvent.click(screen.getByRole('tab', { name: new RegExp(`^${label}\\b`) }));
+}
+
 describe('SettingsPanel', () => {
   it('never prefills a secret input, because the service never returns one', () => {
     render(<SettingsPanel controller={controller()} />);
@@ -62,12 +72,14 @@ describe('SettingsPanel', () => {
     expect(field).toHaveAttribute('placeholder', 'Configured — ends abcd');
   });
 
-  it('distinguishes a configured credential from an unset one', () => {
+  it('distinguishes a configured credential from an unset one', async () => {
     render(<SettingsPanel controller={controller()} />);
 
     expect(screen.getByText('A key is stored. Leave this blank to keep it.')).toBeInTheDocument();
-    // Several credentials are unset, so this state appears more than once.
-    expect(screen.getAllByText('No key is stored yet.').length).toBeGreaterThan(0);
+
+    await openTab('Speech');
+
+    expect(screen.getByText('No key is stored yet.')).toBeInTheDocument();
   });
 
   it('does not send a secret the operator did not type', async () => {
@@ -111,13 +123,16 @@ describe('SettingsPanel', () => {
     expect(screen.getAllByRole('button', { name: 'Clear' })).toHaveLength(1);
   });
 
-  it('cannot test a credential that has not been configured', () => {
+  it('cannot test a credential that has not been configured', async () => {
     render(<SettingsPanel controller={controller()} />);
 
-    const [anthropicTest, asrTest] = screen.getAllByRole('button', { name: 'Test' });
+    // Claude's key is stored in this fixture; the transcriber's is not, and
+    // now lives a tab away rather than four fields down.
+    expect(screen.getByRole('button', { name: 'Test' })).toBeEnabled();
 
-    expect(anthropicTest).toBeEnabled();
-    expect(asrTest).toBeDisabled();
+    await openTab('Speech');
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
   });
 
   it('reports the outcome of a credential test next to the field', async () => {
@@ -250,6 +265,7 @@ describe('SettingsPanel', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={controller({ save })} />);
 
+    await openTab('Speech');
     await userEvent.selectOptions(
       screen.getByLabelText('Live transcription'),
       'deepgram',
@@ -260,22 +276,28 @@ describe('SettingsPanel', () => {
     expect(save.mock.calls[0][0].connectors.live_vendor).toBe('deepgram');
   });
 
-  it('explains the live vendor choice in the operator\'s terms', () => {
+  it('explains the live vendor choice in the operator\'s terms', async () => {
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Speech');
 
     expect(
       screen.getByText(/Ends a turn when the sentence sounds finished/),
     ).toBeInTheDocument();
   });
 
-  it('shows the two recording engines that cross-check each other', () => {
+  it('shows the two recording engines that cross-check each other', async () => {
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Speech');
 
     expect(screen.getByText('Deepgram + AssemblyAI')).toBeInTheDocument();
   });
 
-  it('defaults to sending vocabulary and opting out of vendor retention', () => {
+  it('defaults to sending vocabulary and opting out of vendor retention', async () => {
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Speech');
 
     expect(
       screen.getByLabelText('Send engagement vocabulary to the transcriber'),
@@ -289,6 +311,7 @@ describe('SettingsPanel', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={controller({ save })} />);
 
+    await openTab('Speech');
     await userEvent.click(
       screen.getByLabelText('Tell vendors not to retain client audio'),
     );
@@ -302,6 +325,7 @@ describe('SettingsPanel', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={controller({ save })} />);
 
+    await openTab('Speech');
     await userEvent.type(screen.getByLabelText('Speech region'), 'eu');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -382,6 +406,7 @@ describe('SettingsPanel', () => {
   it('lets the operator bring a speech service we do not ship support for', async () => {
     render(<SettingsPanel controller={controller()} />);
 
+    await openTab('Speech');
     await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'custom');
 
     expect(
@@ -400,31 +425,40 @@ describe('SettingsPanel', () => {
  * password field.
  */
 describe('reading the screen at a glance', () => {
-  it('says whether each service is set up', () => {
+  it('says whether each service is set up', async () => {
     render(<SettingsPanel controller={controller()} />);
 
-    const claude = screen.getByRole('region', { name: 'Claude' });
-    const speech = screen.getByRole('region', { name: 'Speech to text' });
+    expect(
+      within(screen.getByRole('region', { name: 'Claude' })).getByText('Ready'),
+    ).toBeInTheDocument();
 
-    expect(within(claude).getByText('Ready')).toBeInTheDocument();
-    expect(within(speech).getByText('Needs a key')).toBeInTheDocument();
+    await openTab('Speech');
+
+    expect(
+      within(screen.getByRole('region', { name: 'Speech to text' })).getByText('Needs a key'),
+    ).toBeInTheDocument();
   });
 
-  it('puts each credential in the section for the thing it authenticates', () => {
+  it('puts each credential in the section for the thing it authenticates', async () => {
     render(<SettingsPanel controller={controller()} />);
 
     const claude = screen.getByRole('region', { name: 'Claude' });
-    const speech = screen.getByRole('region', { name: 'Speech to text' });
-
     expect(within(claude).getByLabelText('Anthropic API key')).toBeInTheDocument();
     expect(within(claude).queryByLabelText(/AssemblyAI/)).not.toBeInTheDocument();
+
+    await openTab('Speech');
+
+    const speech = screen.getByRole('region', { name: 'Speech to text' });
     expect(within(speech).getByLabelText('AssemblyAI key')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
   });
 
   it('names the speech key after the vendor that issues it', async () => {
     // "Speech-to-text vendor key" named a category. An operator has a tab open
     // on a vendor's console, and that is the name they are looking for.
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Speech');
 
     expect(screen.getByLabelText('AssemblyAI key')).toBeInTheDocument();
 
@@ -433,7 +467,64 @@ describe('reading the screen at a glance', () => {
     expect(screen.getByLabelText('Deepgram key')).toBeInTheDocument();
   });
 
-  it('calls meeting capture optional, because it is', () => {
+  /**
+   * A speech key that the service already holds, so the Test button is live.
+   * The bug this guards needs both halves: a testable key, and a vendor the
+   * operator can change out from under it.
+   */
+  const WITH_SPEECH_KEY: ServiceSettings = {
+    ...CONFIGURED,
+    secrets: CONFIGURED.secrets.map((secret) =>
+      secret.key === 'asr_vendor_api_key'
+        ? { ...secret, configured: true, hint: '8285' }
+        : secret,
+    ),
+  };
+
+  it('will not test a speech key against a vendor the service has not been told about', async () => {
+    // The field is renamed the moment the dropdown changes, but the service
+    // probes whichever vendor it has *saved*. Testing across that gap answered
+    // "Deepgram rejected the credential (401)" underneath a field labelled
+    // "AssemblyAI key" -- an answer about a question the operator never asked.
+    const test = vi.fn().mockResolvedValue('Deepgram rejected the credential (401)');
+    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY, test })} />);
+
+    await openTab('Speech');
+    expect(screen.getByRole('button', { name: 'Test' })).toBeEnabled();
+
+    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
+
+    expect(screen.getByLabelText('Deepgram key')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
+    expect(test).not.toHaveBeenCalled();
+  });
+
+  it('says why a speech key cannot be tested yet, rather than greying out silently', async () => {
+    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY })} />);
+
+    await openTab('Speech');
+    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
+
+    expect(
+      screen.getByText(/Save first .* still set up for AssemblyAI/),
+    ).toBeInTheDocument();
+  });
+
+  it('will not test a stored key while an unsaved one is in the box', async () => {
+    // A test checks the key the service holds. With a new key typed in and not
+    // saved, a verdict about the old one reads as a verdict about the new one.
+    const test = vi.fn();
+    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY, test })} />);
+
+    await openTab('Speech');
+    await userEvent.type(screen.getByLabelText('AssemblyAI key'), 'a-new-key');
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
+    expect(screen.getByText(/Save first .* the key it has stored/)).toBeInTheDocument();
+    expect(test).not.toHaveBeenCalled();
+  });
+
+  it('calls meeting capture optional, because it is', async () => {
     render(
       <SettingsPanel
         controller={controller({
@@ -448,6 +539,8 @@ describe('reading the screen at a glance', () => {
       />,
     );
 
+    await openTab('Recording');
+
     const capture = screen.getByRole('region', { name: 'Meeting capture' });
     expect(within(capture).getByText('Optional')).toBeInTheDocument();
   });
@@ -460,6 +553,119 @@ describe('reading the screen at a glance', () => {
     await userEvent.type(screen.getByLabelText('Model'), 'x');
 
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The tab bar.
+ *
+ * Splitting the screen into five is only an improvement if nothing is lost by
+ * hiding four of them. Two things could be: a service that needs setting up
+ * can no longer announce itself from its own badge, and an edit made on one
+ * tab could go missing when the operator moves to another. These assert that
+ * neither does.
+ */
+describe('the tab bar', () => {
+  it('shows one service at a time', () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByRole('region', { name: 'Claude' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Speech to text' })).not.toBeInTheDocument();
+  });
+
+  it('says from the bar which service still needs setting up', () => {
+    // The fixture has Claude's key and not the transcriber's. Read from the
+    // tab, this is the whole answer to "what is left to do?" without opening
+    // anything.
+    render(<SettingsPanel controller={controller()} />);
+
+    expect(screen.getByRole('tab', { name: /^Speech/ })).toHaveAccessibleName(
+      'Speech — needs attention',
+    );
+    expect(screen.getByRole('tab', { name: /^Claude/ })).toHaveAccessibleName('Claude');
+  });
+
+  it('stops flagging a tab once its credential is stored', () => {
+    render(
+      <SettingsPanel
+        controller={controller({
+          settings: {
+            ...CONFIGURED,
+            secrets: CONFIGURED.secrets.map((secret) =>
+              secret.key === 'asr_vendor_api_key'
+                ? { ...secret, configured: true, hint: 'wxyz' }
+                : secret,
+            ),
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: /^Speech/ })).toHaveAccessibleName('Speech');
+  });
+
+  it('keeps an edit made on a tab the operator has since left', async () => {
+    // Every draft lives in the panel rather than in the inputs, which is what
+    // makes unmounting the hidden tabs safe. One Save writes both edits.
+    const save = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel controller={controller({ save })} />);
+
+    await userEvent.type(screen.getByLabelText('Model'), '-x');
+    await openTab('Speech');
+    await userEvent.type(screen.getByLabelText('Speech region'), 'eu');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].inference.model).toBe('claude-opus-5-x');
+    expect(save.mock.calls[0][0].connectors.region).toBe('eu');
+  });
+
+  it('still says there are unsaved changes from a tab that has none', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    await userEvent.type(screen.getByLabelText('Model'), 'x');
+    await openTab('Storage');
+
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  });
+
+  it('moves between tabs with the arrow keys', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    screen.getByRole('tab', { name: /^Claude/ }).focus();
+    await userEvent.keyboard('{ArrowRight}');
+
+    expect(screen.getByRole('tab', { name: /^Speech/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'speech-tab');
+  });
+
+  it('wraps round rather than stopping at the ends', async () => {
+    render(<SettingsPanel controller={controller()} />);
+
+    screen.getByRole('tab', { name: /^Claude/ }).focus();
+    await userEvent.keyboard('{ArrowLeft}');
+
+    expect(screen.getByRole('tab', { name: /^Storage/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('is one stop on the Tab key rather than five', () => {
+    // A roving tabindex. Without it, reaching the first field would mean
+    // tabbing past every tab on the bar.
+    render(<SettingsPanel controller={controller()} />);
+
+    const reachable = screen
+      .getAllByRole('tab')
+      .filter((tab) => tab.getAttribute('tabindex') === '0');
+
+    expect(reachable).toHaveLength(1);
+    expect(reachable[0]).toHaveAttribute('aria-selected', 'true');
   });
 });
 
@@ -483,15 +689,19 @@ describe('the Microsoft 365 document connector', () => {
     return controller({ settings: WITH_DOCUMENTS, ...overrides });
   }
 
-  it('offers the tenant and the app registration', () => {
+  it('offers the tenant and the app registration', async () => {
     render(<SettingsPanel controller={documentsController()} />);
+
+    await openTab('Documents');
 
     expect(screen.getByLabelText(/directory \(tenant\) id/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/application \(client\) id/i)).toBeInTheDocument();
   });
 
-  it('keeps the client secret write-only, like every other secret here', () => {
+  it('keeps the client secret write-only, like every other secret here', async () => {
     render(<SettingsPanel controller={documentsController()} />);
+
+    await openTab('Documents');
 
     const field = screen.getByLabelText(/client secret/i) as HTMLInputElement;
 
@@ -503,6 +713,7 @@ describe('the Microsoft 365 document connector', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={documentsController({ save })} />);
 
+    await openTab('Documents');
     await userEvent.type(screen.getByLabelText(/directory \(tenant\) id/i), 'tenant-1');
     await userEvent.type(screen.getByLabelText(/application \(client\) id/i), 'client-1');
     await userEvent.type(screen.getByLabelText(/client secret/i), 'shhh');
@@ -517,8 +728,10 @@ describe('the Microsoft 365 document connector', () => {
     });
   });
 
-  it('says plainly that uploading needs none of this', () => {
+  it('says plainly that uploading needs none of this', async () => {
     render(<SettingsPanel controller={documentsController()} />);
+
+    await openTab('Documents');
 
     expect(screen.getByText(/dropp?ing a file|uploaded|upload/i)).toBeInTheDocument();
   });
@@ -546,14 +759,18 @@ describe('where the data is kept', () => {
     return controller({ settings: WITH_STORAGE, ...overrides });
   }
 
-  it('says which database the data is in', () => {
+  it('says which database the data is in', async () => {
     render(<SettingsPanel controller={storageController()} />);
+
+    await openTab('Storage');
 
     expect(screen.getByText(/sqlite:\/\/\/\/home\/ubuntu\/\.elicta\/state\.db/)).toBeInTheDocument();
   });
 
-  it('keeps the connection URL write-only, because it carries a password', () => {
+  it('keeps the connection URL write-only, because it carries a password', async () => {
     render(<SettingsPanel controller={storageController()} />);
+
+    await openTab('Storage');
 
     const field = screen.getByLabelText(/database connection url/i) as HTMLInputElement;
 
@@ -561,8 +778,10 @@ describe('where the data is kept', () => {
     expect(field.type).toBe('password');
   });
 
-  it('says a restart is needed rather than implying the move is immediate', () => {
+  it('says a restart is needed rather than implying the move is immediate', async () => {
     render(<SettingsPanel controller={storageController()} />);
+
+    await openTab('Storage');
 
     expect(screen.getByText(/restart/i)).toBeInTheDocument();
   });
@@ -571,6 +790,7 @@ describe('where the data is kept', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={storageController({ save })} />);
 
+    await openTab('Storage');
     await userEvent.type(
       screen.getByLabelText(/database connection url/i),
       'postgresql://elicta:pw@db.internal/elicta',
@@ -604,30 +824,38 @@ describe('the storage badge', () => {
     return controller({ settings });
   }
 
-  it('says the data is on this machine when it is a local file', () => {
+  it('says the data is on this machine when it is a local file', async () => {
     render(<SettingsPanel controller={withStorage('sqlite:////home/x/.elicta/state.db')} />);
+
+    await openTab('Storage');
 
     expect(screen.getByText('On this machine')).toBeInTheDocument();
   });
 
-  it('says external only when it really is external', () => {
+  it('says external only when it really is external', async () => {
     render(<SettingsPanel controller={withStorage('postgresql://elicta@db/elicta')} />);
+
+    await openTab('Storage');
 
     expect(screen.getByText('External database')).toBeInTheDocument();
   });
 
-  it('falls back to a file on this machine, which is the default', () => {
+  it('falls back to a file on this machine, which is the default', async () => {
     // Not "unknown": a deployment that has not been pointed anywhere keeps its
     // data in a local file, so that is what an unreported storage means. The
     // badge saying "External database" told every reader the opposite.
     render(<SettingsPanel controller={withStorage(undefined)} />);
 
+    await openTab('Storage');
+
     expect(screen.getByText('On this machine')).toBeInTheDocument();
     expect(screen.queryByText('External database')).not.toBeInTheDocument();
   });
 
-  it('names the default in words rather than inventing a path for it', () => {
+  it('names the default in words rather than inventing a path for it', async () => {
     render(<SettingsPanel controller={withStorage(undefined)} />);
+
+    await openTab('Storage');
 
     expect(screen.getByText(/a file on this machine/i)).toBeInTheDocument();
   });
@@ -641,15 +869,19 @@ describe('the consent model', () => {
    * Python. The default is unchanged — what this screen adds is that the
    * person accountable for the choice can see it and reverse it.
    */
-  it('shows which consent model is in force', () => {
+  it('shows which consent model is in force', async () => {
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Recording');
 
     const chosen = screen.getByRole('radio', { name: /standing for the engagement/i });
     expect(chosen).toBeChecked();
   });
 
-  it('says plainly that nobody is prompted under the standing model', () => {
+  it('says plainly that nobody is prompted under the standing model', async () => {
     render(<SettingsPanel controller={controller()} />);
+
+    await openTab('Recording');
 
     // A screen that offered this as two unexplained words would be asking an
     // operator to pick a legal posture from a label.
@@ -660,6 +892,7 @@ describe('the consent model', () => {
     const save = vi.fn().mockResolvedValue(true);
     render(<SettingsPanel controller={controller({ save })} />);
 
+    await openTab('Recording');
     await userEvent.click(screen.getByRole('radio', { name: /ask before every meeting/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -667,7 +900,7 @@ describe('the consent model', () => {
     expect(save.mock.calls[0][0].consent.model).toBe('per_meeting');
   });
 
-  it('follows the stored model when the service already asks per meeting', () => {
+  it('follows the stored model when the service already asks per meeting', async () => {
     render(
       <SettingsPanel
         controller={controller({
@@ -675,6 +908,8 @@ describe('the consent model', () => {
         })}
       />,
     );
+
+    await openTab('Recording');
 
     expect(screen.getByRole('radio', { name: /ask before every meeting/i })).toBeChecked();
   });

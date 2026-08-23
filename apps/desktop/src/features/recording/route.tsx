@@ -1,5 +1,6 @@
 import '../prep/screens.css';
 
+import { Glyph } from '../../shell/Glyph';
 import { ScreenEyebrow } from '../../ui/Mark';
 import { ScreenState } from '../../ui/ScreenState';
 import { useRecording } from './useRecording';
@@ -22,6 +23,12 @@ export interface Divergence {
 
 export interface RecordingScreenProps {
   readonly meetingTitle: string;
+  /**
+   * Whether this meeting was ever recorded. `false` is not a degenerate case
+   * of the review — it is a different screen, because every number this one
+   * reports would be a measurement of something that did not happen.
+   */
+  readonly recorded: boolean;
   readonly engines: readonly { name: string; status: 'complete' | 'failed' }[];
   /** `null` when nothing was aligned — see `useRecording`. */
   readonly agreementPercent: number | null;
@@ -35,22 +42,102 @@ function timestamp(seconds: number): string {
   return `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
-export function RecordingScreen({
-  meetingTitle,
+/**
+ * What this screen will hold, said while it holds nothing.
+ *
+ * An empty state earns its space by teaching what the screen is for. This one
+ * is not obvious — "two engines, and only their disagreements" is a design
+ * decision a reader has to be told about — so the three rows are the argument
+ * for the screen, not filler standing in for rows that do not exist.
+ */
+const PROMISES: readonly { title: string; detail: string }[] = [
+  {
+    title: 'Two transcripts, made independently',
+    detail:
+      'Two engines transcribe the same audio without seeing each other’s work, so the mistakes they make are different mistakes.',
+  },
+  {
+    title: 'Only where they disagreed',
+    detail:
+      'Agreement needs no review. What lands here is the short list of moments the two readings part company.',
+  },
+  {
+    title: 'Then the audio is destroyed',
+    detail:
+      'As soon as transcription and diarization have both finished, the recording itself is deleted and this screen says when.',
+  },
+];
+
+/**
+ * The screen for a meeting that was never recorded.
+ *
+ * Deliberately *not* the review screen with its data removed. That version
+ * shipped, and it read as a result: two cards saying “—” and “0”, an empty
+ * rounded box under Engines, and no way forward. An operator cannot tell a
+ * finished comparison with nothing to flag from a comparison that never ran,
+ * and the difference is the whole point of the screen.
+ *
+ * There is no entrance animation on purpose. The journey harness screenshots
+ * these screens, and motion mid-flight is what makes a picture non-reproducible
+ * — plus this is a state a reader arrives at, not an event worth marking.
+ */
+function RecordingEmpty() {
+  return (
+    <>
+      <section className="empty" aria-labelledby="rec-empty-title">
+        <span className="empty-mark" aria-hidden="true">
+          <Glyph name="record" size={28} />
+        </span>
+        <h2 className="t-title-3 empty-title" id="rec-empty-title">
+          Not recorded yet
+        </h2>
+        <p className="t-body empty-body">
+          This meeting has not been captured, so there is no pair of transcripts
+          to set against each other. Nothing has gone wrong — every meeting sits
+          here until it happens.
+        </p>
+        {/* The action, not a description of one that lives elsewhere: the shell
+            addresses screens by URL fragment, so an anchor is the whole of
+            navigation here and keeps the keyboard and focus ring for free. */}
+        <a className="btn btn--filled empty-action" href="#/capture">
+          Go to Capture
+        </a>
+      </section>
+
+      <section aria-labelledby="promise-title">
+        <h2 className="t-section" id="promise-title">
+          What will appear here
+        </h2>
+        <div className="group">
+          {PROMISES.map((promise) => (
+            <div className="row" key={promise.title}>
+              <div className="row-main">
+                <span className="t-body">{promise.title}</span>
+                <span className="t-footnote">{promise.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+/**
+ * The review proper: what two engines made of one recording.
+ *
+ * Split out from `RecordingScreen` so the not-recorded state is a sibling of
+ * this rather than this with its values blanked — the shape the screen took
+ * before, and the reason it read as a finished comparison that found nothing.
+ */
+function RecordingReview({
   engines,
   agreementPercent,
   divergences,
   audioDestroyedAt,
-}: RecordingScreenProps) {
+}: Omit<RecordingScreenProps, 'meetingTitle' | 'recorded'>) {
   return (
-    <main className="screen" aria-labelledby="rec-title">
-      <header className="screen-head">
-        <ScreenEyebrow>Recording</ScreenEyebrow>
-        <h1 className="t-large-title" id="rec-title">
-          {meetingTitle}
-        </h1>
-      </header>
-
+    <>
       <div className="stat-row">
         <div className="stat">
           <span className="t-caption">Engines agreed</span>
@@ -65,7 +152,17 @@ export function RecordingScreen({
         </div>
         <div className="stat">
           <span className="t-caption">Needs a look</span>
-          <span className="stat-value">{divergences.length}</span>
+          {/* The other half of the bug the card beside this one already fixed.
+              A hard 0 here reads "reviewed, nothing to flag"; when nothing was
+              compared the honest answer is that there is no count to give. */}
+          {agreementPercent === null ? (
+            <>
+              <span className="stat-value">—</span>
+              <span className="t-footnote">Nothing to compare</span>
+            </>
+          ) : (
+            <span className="stat-value">{divergences.length}</span>
+          )}
         </div>
       </div>
 
@@ -152,6 +249,37 @@ export function RecordingScreen({
           </div>
         </section>
       ) : null}
+    </>
+  );
+}
+
+export function RecordingScreen({
+  meetingTitle,
+  recorded,
+  engines,
+  agreementPercent,
+  divergences,
+  audioDestroyedAt,
+}: RecordingScreenProps) {
+  return (
+    <main className="screen" aria-labelledby="rec-title">
+      <header className="screen-head">
+        <ScreenEyebrow>Recording</ScreenEyebrow>
+        <h1 className="t-large-title" id="rec-title">
+          {meetingTitle}
+        </h1>
+      </header>
+
+      {recorded ? (
+        <RecordingReview
+          engines={engines}
+          agreementPercent={agreementPercent}
+          divergences={divergences}
+          audioDestroyedAt={audioDestroyedAt}
+        />
+      ) : (
+        <RecordingEmpty />
+      )}
     </main>
   );
 }
@@ -160,8 +288,8 @@ export function RecordingScreen({
  * The mounted screen, over the service.
  *
  * A meeting that was never transcribed reads back as a 404 on all three of
- * this screen's sources, and that is content rather than failure — so it
- * renders the screen with nothing in it. Only a service that cannot be
+ * this screen's sources, and that is content rather than failure — so the
+ * screen renders, and says so in its own words. Only a service that cannot be
  * reached at all takes the screen away.
  */
 export default function RecordingRoute() {
@@ -181,6 +309,7 @@ export default function RecordingRoute() {
   return (
     <RecordingScreen
       meetingTitle={recording.meetingTitle}
+      recorded={recording.recorded}
       engines={recording.engines}
       agreementPercent={recording.agreementPercent}
       divergences={recording.divergences}

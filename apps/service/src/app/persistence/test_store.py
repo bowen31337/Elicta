@@ -9,6 +9,7 @@ a shared object a test fixture kept alive.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -913,3 +914,161 @@ def test_the_gate_stays_open_after_a_restart(database: str) -> None:
             "the gate shut again on restart, so the meeting would be asked to "
             "confirm consent it has already given"
         )
+
+
+# ── The record path's own artifacts ──────────────────────────────────────
+#
+# These three were classified as pipeline output "rebuilt from the transcript",
+# which two of them are and the third describes audio NFR-2.4 has already
+# destroyed. Nothing rebuilds any of them, so the classification meant "lost on
+# restart" — and because all three key on the session, they were lost together:
+# a meeting that really was recorded came back answering 404 on its transcripts,
+# its divergences and its destruction record at once, which is exactly what a
+# meeting that never happened answers.
+
+
+def _recorded_session(client: TestClient) -> str:
+    """A meeting whose audio has been through both record-path engines."""
+
+    engagement_id = _engagement(client, "Ridgeway Health")
+    meeting = client.post(
+        "/api/meetings",
+        json={"engagement_id": engagement_id, "capture_mode": "record"},
+    )
+    assert meeting.status_code == 201, meeting.text
+    session_id = meeting.json()["meeting_id"]
+
+    transcribed = client.post(
+        f"/api/sessions/{session_id}/record-path-transcript",
+        json={"audio_ref": f"audio://{session_id}"},
+    )
+    assert transcribed.status_code == 201, transcribed.text
+    return session_id
+
+
+def test_a_record_path_transcript_survives_a_restart(database: str) -> None:
+    """The one artifact that cannot be regenerated.
+
+    NFR-2.4 destroys the raw audio the moment transcription and diarization
+    finish, so a lost transcript is not a lost cache — it is the only surviving
+    account of what was said in the meeting.
+    """
+
+    with client_for(database) as first:
+        session_id = _recorded_session(first)
+        engines = [entry["engine"] for entry in first.get(
+            f"/api/sessions/{session_id}/record-path-transcript"
+        ).json()]
+
+    with client_for(database) as second:
+        response = second.get(f"/api/sessions/{session_id}/record-path-transcript")
+
+    assert response.status_code == 200, response.text
+    assert [entry["engine"] for entry in response.json()] == engines
+    # Not merely a list of engine names: the words have to come back too, or
+    # the row is a claim that a recording was transcribed with nothing in it.
+    assert all(entry["segments"] for entry in response.json())
+
+
+def test_the_divergences_survive_a_restart(database: str) -> None:
+    """Read through the meeting-keyed route the recording screen actually uses."""
+
+    with client_for(database) as first:
+        session_id = _recorded_session(first)
+        before = first.get(f"/api/meetings/{session_id}/record/divergences")
+        assert before.status_code == 200, before.text
+
+    with client_for(database) as second:
+        response = second.get(f"/api/meetings/{session_id}/record/divergences")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["spans"] == before.json()["spans"]
+    assert response.json()["reference_engine"] == before.json()["reference_engine"]
+
+
+def test_the_audio_destruction_record_survives_a_restart(database: str) -> None:
+    """The evidence for a privacy control, which is the whole point of having it.
+
+    Seeded through the collection rather than driven over HTTP: destruction is
+    gated on diarization as well as transcription, so producing one for real
+    needs the whole debrief pipeline and its engines. What is being proved here
+    is the round trip through the file, and the seeding still fails on the old
+    code — the field was a list, which has no place to put a session key.
+    """
+
+    from app.modules.debrief.pipeline.models import (
+        AudioDestructionEvent,
+        AudioDestructionStatus,
+    )
+
+    moment = datetime(2026, 8, 20, 10, 0, tzinfo=UTC)
+    first = attach_state_store(Backend(), open_state_store(database))
+    first.audio_destruction_events["session-9"] = [
+        AudioDestructionEvent(
+            session_id="session-9",
+            audio_ref="audio://session-9",
+            status=AudioDestructionStatus.FAILED,
+            requested_at=moment,
+            completed_at=moment,
+            error="the object store refused the delete",
+        ),
+        # The retry, which is what describes where the audio stands now. Both
+        # are kept: the pair is the record, and a failure that vanished behind
+        # its retry would hide that the audio was ever at risk.
+        AudioDestructionEvent(
+            session_id="session-9",
+            audio_ref="audio://session-9",
+            status=AudioDestructionStatus.COMPLETE,
+            requested_at=moment,
+            completed_at=moment,
+        ),
+    ]
+
+    with client_for(database) as second:
+        response = second.get("/api/sessions/session-9/audio-destruction")
+
+    assert response.status_code == 200, response.text
+    # The latest attempt, not the first.
+    assert response.json()["status"] == "complete"
+    assert (
+        len(attach_state_store(Backend(), open_state_store(database)).audio_destruction_events[
+            "session-9"
+        ])
+        == 2
+    ), "the failed attempt is part of the record and must not be dropped"
+
+
+def test_a_never_recorded_meeting_still_404s_after_a_restart(database: str) -> None:
+    """The mirror, and the one that keeps the fix honest.
+
+    Durability that answered 200 for a meeting nobody recorded would be worse
+    than losing the data: the recording screen reads these three 404s as "not
+    recorded yet", and a stored empty would read as a comparison that ran.
+    """
+
+    with client_for(database) as first:
+        engagement_id = _engagement(first, "Ridgeway Health")
+        meeting = first.post(
+            "/api/meetings",
+            json={"engagement_id": engagement_id, "capture_mode": "record"},
+        )
+        session_id = meeting.json()["meeting_id"]
+
+    with client_for(database) as second:
+        assert second.get(
+            f"/api/sessions/{session_id}/record-path-transcript"
+        ).status_code == 404
+        assert second.get(
+            f"/api/meetings/{session_id}/record/divergences"
+        ).status_code == 404
+        assert second.get(
+            f"/api/sessions/{session_id}/audio-destruction"
+        ).status_code == 404
+
+
+def test_the_record_path_artifacts_are_now_continuity_not_scratch() -> None:
+    backend = attach_state_store(Backend(), open_state_store("sqlite://"))
+
+    assert isinstance(backend.record_path_transcripts, DurableMapping)
+    assert isinstance(backend.session_alignments, DurableMapping)
+    assert isinstance(backend.audio_destruction_events, DurableMapping)

@@ -90,8 +90,10 @@ describe('journey scenes', () => {
     expect(screen.getByLabelText('Endpoint')).toHaveValue('https://llm.internal/v1');
   });
 
-  it('the recording pair is two different vendors', () => {
+  it('the recording pair is two different vendors', async () => {
     render(<SettingsPanel controller={STUB_SETTINGS_CONTROLLER['settings-configured']} />);
+
+    await userEvent.click(screen.getByRole('tab', { name: /^Speech/ }));
 
     expect(screen.getByText('Deepgram + AssemblyAI')).toBeInTheDocument();
   });

@@ -116,6 +116,14 @@ Elicta reads everything and drafts the questions worth asking, grouped by the
 section of your requirements template that each one serves. You read them, move
 the ones that matter up the list, and prune the ones that miss.
 
+A drafted bank runs to seventy-odd questions, so the sections open one at a time
+rather than arriving as one very long page, and each says how many questions are
+inside it before you open it. There is also a box that filters the whole bank by
+what a question says — the way to find the four that mention one system without
+reading the other seventy. While that filter is on you can still prune, but not
+reorder: moving a question up means moving it past the one above it, and under a
+filter the question above on screen is not the one above in the bank.
+
 Pruning is not deletion. A pruned question is kept as a record of your judgement
 and left out of the list, so redrafting the bank later does not bring it back for
 you to reject a second time.

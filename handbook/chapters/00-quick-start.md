@@ -41,17 +41,19 @@ Two things you do *not* need:
 *Settings. Once, per machine. Five minutes.*
 
 On first run the Settings screen says plainly that nothing is configured,
-rather than looking ready and failing later. Each part carries its own verdict,
-so what is left to do can be read at a glance.
+rather than looking ready and failing later. A tab whose service still needs
+something carries a small mark, so what is left to do can be read from the row
+of tabs before you open any of them.
 
 ![Before anything is configured](../../docs/journeys/screenshots/settings-first-run.png)
 
-The screen is a stack of parts. Most are an outside service, and that service's
-credential sits inside its own part under the name of the company that issued it
-— there is no list of keys to work out which goes where. The rest are choices
-about your own installation, and you can leave those as they are for now.
+The screen is a row of tabs with one thing behind each. Most are an outside
+service, and that service's credential sits behind its own tab under the name of
+the company that issued it — there is no list of keys to work out which goes
+where. The rest are choices about your own installation, and you can leave those
+as they are for now.
 
-Fill in the **AI provider** part. You can point Elicta at the company that makes
+Fill in the first tab, which is the service that does the writing-up. You can point Elicta at the company that makes
 the service directly, at Amazon's, Google's or Microsoft's hosted versions, or
 at your organisation's own gateway. Choose Amazon or Google and no key is asked
 for at all — Elicta uses the permissions your cloud account already grants it,
@@ -219,7 +221,11 @@ deletion is itself recorded — and the transcription service is told with every
 request not to keep it.
 
 **Starting.** Pick the input before you start, rather than discovering afterwards
-that it took the wrong one. Elicta will argue for a better microphone: a wired
+that it took the wrong one, and press *Check microphone* first: it opens the input
+and shows the level moving without recording anything, which is also what makes a
+browser tell Elicta the real names of your microphones. Starting the recording is
+what registers the meeting, and the input is opened before that happens, so a
+microphone that will not open registers nothing. Elicta will argue for a better microphone: a wired
 input or a silent join is markedly more accurate than a mic in the middle of the
 table, because people talking over each other causes more transcription errors
 than the choice of service does. A room mic earns a warning that stays on screen.
@@ -334,7 +340,7 @@ Worth knowing on day one, because each is a choice rather than a gap:
 
 ## The five-minute version
 
-1. Settings → fill in the AI provider → **Test**.
+1. Settings → first tab → fill it in → **Test**.
 2. Add the client. Add a meeting to it.
 3. Drop your documents on the Preparation screen. Tag them.
 4. Type the client's product names and jargon into the vocabulary list.

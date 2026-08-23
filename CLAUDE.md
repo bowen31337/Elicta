@@ -217,7 +217,7 @@ embarrassment gates, plus signing/release workflows.
   PDF via `zlib`) and is best-effort on PDFs — a scanned page yields nothing
   rather than noise.
 - **State is SQLite by default, and everything an operator types is in it.**
-  `persistence/models.py` owns the seven durable tables; `resolve_database_url`
+  `persistence/models.py` owns the eleven durable tables; `resolve_database_url`
   decides which database: a URL saved in Settings (secret `state_database_url`,
   shown back with the password stripped) beats `DATABASE_URL`, which beats a
   SQLite file under `ELICTA_STATE_DIR`. A change applies **on restart** — the
@@ -226,9 +226,13 @@ embarrassment gates, plus signing/release workflows.
   `x.setdefault(k, []).append(v)` writes to memory and nowhere else — reassign
   the whole list; and adding a column to a model without a matching revision
   fails `test_migrations`, which exists because such a column works on SQLite
-  and is missing on PostgreSQL. Documents and vocabulary were classified as
-  "rebuilt on demand" and were not — nothing rebuilds what somebody typed, and
-  a live restart came back with zero of both.
+  and is missing on PostgreSQL. Five collections have been moved out of the
+  "rebuilt on demand" group after that classification turned out to mean "lost
+  on restart": documents and vocabulary, because nothing rebuilds what somebody
+  typed; consent records, because they describe a moment; and the record path's
+  transcripts, alignments and audio-destruction events, because two of them
+  *are* the transcript and NFR-2.4 destroys the audio the third describes. Ask
+  what would actually rebuild a collection before leaving it off the store.
 - **Deletion is soft, everywhere it exists.** Engagements, reference documents
   and vocabulary terms carry `deleted_at`; set, the row stops loading and
   disappears from every list, and nothing erases. Two traps: `_replace_children`
