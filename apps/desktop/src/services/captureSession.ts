@@ -227,6 +227,49 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
   let bridge: AudioBridge | null = null;
   /** Whether samples reaching the tap are passed on — false while paused. */
   let feeding = false;
+  /** Samples seen since the watchdog last looked. */
+  let samplesSinceCheck = 0;
+  let silenceTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * How long a recording may read nothing before the screen says so.
+   *
+   * Samples arrive several times a second, so this is many missed buffers
+   * rather than a slow one — long enough that opening the graph, or a device
+   * that takes a moment to deliver its first frame, does not raise a false
+   * alarm, and short enough that an operator learns inside the first exchange
+   * of a meeting rather than after it.
+   */
+  const SILENCE_CHECK_MS = 5_000;
+
+  /** Counts one arrival of audio, from either backend. */
+  function sawSamples(): void {
+    samplesSinceCheck += 1;
+  }
+
+  function startSilenceWatch(): void {
+    stopSilenceWatch();
+    samplesSinceCheck = 0;
+    silenceTimer = setInterval(() => {
+      if (samplesSinceCheck > 0) {
+        samplesSinceCheck = 0;
+        // Taken back down only if it is ours. A warning left standing over a
+        // recording that is now uploading is the same lie in the other
+        // direction — and clearing indiscriminately would wipe the uploader's
+        // own note, which is about a different problem and still true.
+        if (snapshot.uploadNote === NO_AUDIO_READ) publish({ uploadNote: null });
+        return;
+      }
+      if (snapshot.uploadNote !== NO_AUDIO_READ) publish({ uploadNote: NO_AUDIO_READ });
+    }, SILENCE_CHECK_MS);
+  }
+
+  function stopSilenceWatch(): void {
+    if (silenceTimer === null) return;
+    clearInterval(silenceTimer);
+    silenceTimer = null;
+    samplesSinceCheck = 0;
+  }
   let meterTimer: ReturnType<typeof setInterval> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -378,6 +421,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
             if (!feeding || open === null) return;
             const { pcm } = (event.payload ?? {}) as { pcm?: string };
             if (typeof pcm !== 'string' || pcm === '') return;
+            sawSamples();
             open.push(int16OfBase64(pcm));
           });
           await listen('capture://disconnected', (event) => {
@@ -410,6 +454,21 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    * them. An operator who is not told finds out from a meeting that produced
    * no transcript, which reads as a broken product rather than as a browser.
    */
+  /**
+   * Said when a recording is reading nothing, which no other signal shows.
+   *
+   * Every visible sign of a working microphone can be present while not one
+   * sample is read: the device is open so the state word says Recording, and
+   * the level meter moves because it polls an analyser of its own rather than
+   * waiting for the audio graph to be pumped. The uploader announces its own
+   * failures; this is the absence of anything to upload, and the only way to
+   * notice it is to wait for it.
+   */
+  const NO_AUDIO_READ =
+    'The microphone is open but no audio is being read from it, so nothing is ' +
+    'being uploaded and this meeting will not be transcribed. Stop and start ' +
+    'the recording again.';
+
   const NO_PCM_TAP =
     'This browser cannot read the recorded audio, so nothing is being uploaded ' +
     'and this meeting will not be transcribed. Use the desktop app, or a ' +
@@ -452,6 +511,10 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       // before the bridge is told there is any.
       await openShellChannel();
       await startBridge();
+      // Watched on this backend too. The cause differs — a Rust device that
+      // opens and then emits nothing rather than a graph that will not run --
+      // and what the operator needs told is the same either way.
+      startSilenceWatch();
       return;
     }
 
@@ -469,8 +532,14 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       // no samples are read and silently dropped while the question of whether
       // they may be sent is still open.
       tap = openPcmTap(makeContext(), stream, (samples) => {
+        // Counted before the pause gate: a paused recording still reads
+        // samples — the track is disabled, which makes the graph produce
+        // digital silence rather than stopping it — so counting after the
+        // gate would raise the alarm on every pause.
+        sawSamples();
         if (feeding) open.push(samples);
       });
+      startSilenceWatch();
     } catch {
       // A context that will not open costs the transcript, not the meeting.
       tap = null;
@@ -489,6 +558,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    */
   function detachTap(): AudioBridge | null {
     feeding = false;
+    stopSilenceWatch();
     tap?.close();
     tap = null;
     const open = bridge;
