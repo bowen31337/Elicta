@@ -137,7 +137,7 @@ harness wants the `asyncpg` driver and the service strips that marker.
 
 Run the service:
 ```bash
-cd apps/service && uv run uvicorn app.main:app --reload    # serves 54 API paths
+cd apps/service && uv run uvicorn app.main:app --reload    # serves 55 API paths
 ```
 
 Run the whole system as a web app on `0.0.0.0` (service + panel, both processes, network-reachable

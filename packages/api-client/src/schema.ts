@@ -736,6 +736,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live Sessions
+         * @description Sessions this process started, with what is known about each.
+         */
+        get: operations["live_sessions_api_sessions_live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/voiceprint": {
         parameters: {
             query?: never;
@@ -2230,6 +2250,33 @@ export interface components {
              * @default true
              */
             clears_m2_gate: boolean;
+        };
+        /**
+         * LiveSession
+         * @description One session, and the evidence for calling it live.
+         */
+        LiveSession: {
+            /** Session Id */
+            session_id: string;
+            /** Meeting Id */
+            meeting_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Last Audio At */
+            last_audio_at?: string | null;
+            /** Receiving Audio */
+            receiving_audio: boolean;
+        };
+        /**
+         * LiveSessions
+         * @description Every session this process has started, freshest audio first.
+         */
+        LiveSessions: {
+            /** Sessions */
+            sessions: components["schemas"]["LiveSession"][];
         };
         /**
          * LlmProvider
@@ -4714,6 +4761,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    live_sessions_api_sessions_live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveSessions"];
                 };
             };
         };

@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial, wraps
@@ -467,6 +467,11 @@ class Backend:
     #: the question it asked and cannot say which meeting asked it.
     raised_nudges: dict[str, dict[str, Any]] = field(default_factory=dict)
     next_open_question_id: int = 0
+    #: When each session last had audio uploaded to it. The only evidence that
+    #: separates a meeting being recorded from one started and walked away
+    #: from: sessions are never ended, and a meeting's state does not move
+    #: while it is being captured.
+    last_audio_at: dict[str, datetime] = field(default_factory=dict)
 
     nudge_dispositions: list[NudgeDispositionResponse] = field(default_factory=list)
 
@@ -805,17 +810,6 @@ def _creation_order(entity_id: str) -> tuple[int, str]:
 
     _, _, tail = entity_id.rpartition("-")
     return (int(tail), entity_id) if tail.isdigit() else (1 << 31, entity_id)
-
-
-def _highest_ordinal(ids: Iterable[str], prefix: str) -> int:
-    """The largest `<prefix>N` suffix among `ids`, or 0 if there is none."""
-
-    suffixes = [
-        int(candidate.removeprefix(prefix))
-        for candidate in ids
-        if candidate.startswith(prefix) and candidate.removeprefix(prefix).isdigit()
-    ]
-    return max(suffixes, default=0)
 
 
 DEFAULT_CONSENT_MODEL = ConsentModel.ENGAGEMENT_LEVEL
@@ -1893,6 +1887,7 @@ def build_app(
 _live_session_models = importlib.import_module("app.modules.live-session.models")
 _live_session_router = importlib.import_module("app.modules.live-session.router")
 _live_session_stream = importlib.import_module("app.modules.live-session.stream")
+_live_sessions = importlib.import_module("app.modules.live-session.sessions")
 _slow_lane_models = importlib.import_module("app.modules.slow-lane.models")
 _slow_lane_router = importlib.import_module("app.modules.slow-lane.router")
 
@@ -2225,6 +2220,24 @@ def _include_operational_routers(
         return FollowOnQuestion(question=chosen.phrasing)
 
     app.include_router(build_thread_router(park_thread, deepen_thread))
+
+    def started_sessions() -> list[dict[str, Any]]:
+        """Every session this process started, with what has been heard on it."""
+
+        return [
+            {
+                "session_id": session.session_id,
+                "meeting_id": session.meeting_id,
+                "started_at": session.started_at,
+                # Keyed by the id the chunks were uploaded under, which the
+                # desktop sends as the meeting id rather than the session id.
+                "last_audio_at": backend.last_audio_at.get(session.meeting_id)
+                or backend.last_audio_at.get(session.session_id),
+            }
+            for session in backend.live_sessions.values()
+        ]
+
+    app.include_router(_live_sessions.build_live_sessions_router(started_sessions))
 
 
     async def get_voiceprint(operator_id: str) -> OperatorVoiceprint | None:
@@ -2818,6 +2831,13 @@ def _include_operational_routers(
         raise instead would log an exception every four seconds of every
         meeting on a deployment that simply has not bought this.
         """
+
+        # Stamped before anything else, and whatever else follows. This is
+        # the record of audio having arrived at all, which is worth keeping on
+        # a deployment that has no live transcription configured — the
+        # question "is this meeting being recorded" is not the same question
+        # as "can this meeting raise a nudge".
+        backend.last_audio_at[session_id] = datetime.now(UTC)
 
         if live_utterances is None:
             return

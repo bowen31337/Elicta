@@ -317,3 +317,41 @@ def test_a_meeting_from_before_a_restart_still_has_its_bank(client: TestClient, 
     assert parked.status_code == 200, (
         "parking fell through the same in-memory join and answered 404: " + parked.text
     )
+
+
+def test_the_meeting_being_recorded_can_be_found_from_outside_the_browser(
+    client: TestClient,
+) -> None:
+    """Which meeting has a microphone open, answered from evidence.
+
+    The panel and the capture screen keep their meeting in the browser's own
+    storage, where nothing else can reach it, and the service could not answer
+    either: sessions are started and never ended, and a meeting's state stays
+    `planned` while it is being recorded. So a second window, or any tool
+    outside the browser, had to be told the meeting by hand.
+    """
+
+    import base64
+
+    quiet = _meeting(client)
+    recording = _meeting(client)
+    for meeting_id in (quiet, recording):
+        assert client.post(f"/api/meetings/{meeting_id}/session/start").status_code == 200
+
+    client.post(
+        f"/api/sessions/{recording}/audio-chunk",
+        json={"sequence": 0, "pcm": base64.b64encode(b"\x00" * 3_200).decode()},
+    )
+
+    live = client.get("/api/sessions/live")
+
+    assert live.status_code == 200, live.text
+    sessions = live.json()["sessions"]
+    assert sessions[0]["meeting_id"] == recording, sessions
+    assert sessions[0]["receiving_audio"] is True
+    # The one that was started and heard nothing is reported, and is not
+    # claimed to be recording — pressing Start with a microphone that reads
+    # nothing is exactly this, and it is worth being able to see.
+    started_only = next(row for row in sessions if row["meeting_id"] == quiet)
+    assert started_only["receiving_audio"] is False
+    assert started_only["last_audio_at"] is None

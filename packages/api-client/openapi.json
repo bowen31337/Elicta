@@ -2077,6 +2077,28 @@
         }
       }
     },
+    "/api/sessions/live": {
+      "get": {
+        "tags": [
+          "live-session"
+        ],
+        "summary": "Live Sessions",
+        "description": "Sessions this process started, with what is known about each.",
+        "operationId": "live_sessions_api_sessions_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveSessions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/operator/voiceprint": {
       "get": {
         "tags": [
@@ -5091,6 +5113,65 @@
         ],
         "title": "LanguagePrecision",
         "description": "M1 and M2 for one language, over its rated suggestions."
+      },
+      "LiveSession": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "last_audio_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Audio At"
+          },
+          "receiving_audio": {
+            "type": "boolean",
+            "title": "Receiving Audio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "meeting_id",
+          "started_at",
+          "receiving_audio"
+        ],
+        "title": "LiveSession",
+        "description": "One session, and the evidence for calling it live."
+      },
+      "LiveSessions": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/LiveSession"
+            },
+            "type": "array",
+            "title": "Sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "title": "LiveSessions",
+        "description": "Every session this process has started, freshest audio first."
       },
       "LlmProvider": {
         "type": "string",

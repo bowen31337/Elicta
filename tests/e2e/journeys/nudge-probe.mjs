@@ -15,18 +15,23 @@
  *   node tests/e2e/journeys/nudge-probe.mjs --quiet-check    # lines that must NOT fire
  *   node tests/e2e/journeys/nudge-probe.mjs --script         # the whole script, paced
  *   node tests/e2e/journeys/nudge-probe.mjs --list          # meetings, newest last
+ *   node tests/e2e/journeys/nudge-probe.mjs --current       # the one being recorded now
  *
  *   SERVICE=http://127.0.0.1:8000  the service to talk to
  *
  * **Which meeting.** The panel and the capture screen read their meeting from
  * the browser's own storage, on the machine running the browser — which this
- * cannot see. Neither can the service: a meeting's state stays `planned` while
- * it is being recorded, so nothing on the wire says which one is live. So the
- * meeting is named on the command line, `--list` shows what there is to name,
- * and without one the newest is used and printed. Check the printed id against
- * the toolbar picker before believing a quiet panel: pointing this at one
- * meeting while watching another is the likeliest way to conclude wrongly that
- * nothing works.
+ * cannot see. `--current` asks the service instead, which answers from audio
+ * actually arriving rather than from a session having been started: a meeting
+ * receiving chunks in the last half-minute is being recorded, and one that was
+ * started and walked away from is not. That is the option to use while the
+ * capture screen is running.
+ *
+ * Otherwise the meeting is named on the command line, `--list` shows what
+ * there is to name, and without one the newest is used and printed. Check the
+ * printed id against the toolbar picker before believing a quiet panel:
+ * pointing this at one meeting while watching another is the likeliest way to
+ * conclude wrongly that nothing works.
  *
  * **No audio is involved, and nothing is billed.** This posts finalised text
  * to the same intake a recogniser posts to, so it exercises the gate, the bank
@@ -108,6 +113,20 @@ async function allMeetings() {
   return rows.sort((a, b) => Number(a.id.split('-').pop()) - Number(b.id.split('-').pop()));
 }
 
+/**
+ * The meeting with a microphone open, or `null` if none has one.
+ *
+ * Answered from audio arriving rather than from a session existing: sessions
+ * are started and never ended, so "has a session" is true of every meeting
+ * this service has ever been asked about.
+ */
+async function recordingNow() {
+  const live = await api('GET', '/api/sessions/live');
+  if (live.status !== 200) return null;
+  const recording = (live.json?.sessions ?? []).filter((row) => row.receiving_audio);
+  return recording.length === 0 ? null : recording[0].meeting_id;
+}
+
 /** The most recently created meeting, across every engagement. */
 async function newestMeeting() {
   const engagements = await api('GET', '/api/engagements');
@@ -185,8 +204,25 @@ async function main() {
     return;
   }
 
-  const meetingId = named ?? (await newestMeeting());
-  console.log(`meeting: ${meetingId}${named ? '' : '   (newest — check this against the picker)'}`);
+  let meetingId = named;
+  let how = '';
+  if (meetingId === null && flags.has('--current')) {
+    meetingId = await recordingNow();
+    if (meetingId === null) {
+      console.error(
+        'no meeting is receiving audio. Start recording on the capture screen, or\n' +
+          'name a meeting — `--list` shows them. A recording that reads no audio\n' +
+          'looks like this too, and the capture screen says so when it happens.',
+      );
+      process.exit(1);
+    }
+    how = '   (recording now)';
+  }
+  if (meetingId === null) {
+    meetingId = await newestMeeting();
+    how = '   (newest — check this against the picker)';
+  }
+  console.log(`meeting: ${meetingId}${how}`);
   console.log(`service: ${SERVICE}\n`);
 
   if (!flags.has('--listen')) {
