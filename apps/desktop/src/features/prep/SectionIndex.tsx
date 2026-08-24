@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
-import type { IndexEntry } from './sectionIndex';
-import { flattenEntries, revealOffset } from './sectionIndex';
+import type { IndexEntry } from './sectionNavigation';
+import { flattenEntries, revealOffset } from './sectionNavigation';
 
 /**
  * The page's table of contents, pinned beside it.

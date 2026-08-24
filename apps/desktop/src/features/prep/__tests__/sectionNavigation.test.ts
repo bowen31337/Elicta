@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { currentSectionId, jumpBehaviour, revealOffset } from '../sectionIndex';
+import { currentSectionId, jumpBehaviour, revealOffset } from '../sectionNavigation';
 
 /**
  * Which section the reader is in, from where the scroll is.

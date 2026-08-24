@@ -30,8 +30,8 @@ import type {
 } from './types';
 import { CAPTURE_MODES } from './types';
 import { SectionIndex } from './SectionIndex';
-import type { IndexEntry } from './sectionIndex';
-import { bankSectionId, flattenEntries, jumpBehaviour } from './sectionIndex';
+import type { IndexEntry } from './sectionNavigation';
+import { bankSectionId, flattenEntries, jumpBehaviour } from './sectionNavigation';
 import { useCurrentSection } from './useCurrentSection';
 import { usePrep } from './usePrep';
 
