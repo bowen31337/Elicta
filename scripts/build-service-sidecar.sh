@@ -26,52 +26,83 @@ trap 'rm -rf "$WORK"' EXIT
 # or one without `venv` at all.
 PYTHON="${PYTHON:-python3}"
 
-ARCH_FLAG=()
+# macOS wants one binary covering both architectures, and it cannot be got by
+# asking PyInstaller for `universal2`: the packages this service is built on —
+# pydantic-core, cryptography, asyncpg, jiter, rpds-py, cffi — publish no
+# universal2 wheels at all, only one per architecture. So each architecture is
+# frozen on its own and the two are joined with `lipo`, which is what a
+# universal binary is anyway.
+#
+# The second architecture is built through Rosetta on an Apple Silicon
+# machine. Where that is not available the arm64 half is shipped alone and
+# said so: a bundle that works on most Macs and reports it honestly is better
+# than no bundle, and far better than one that claims to be universal.
+UNIVERSAL=0
 case "$TRIPLE" in
-  universal-apple-darwin) ARCH_FLAG=(--target-arch universal2) ;;
+  universal-apple-darwin) UNIVERSAL=1 ;;
 esac
 
-echo "==> building the service for $TRIPLE with $("$PYTHON" --version) ($PYTHON)"
+freeze() {
+  # freeze <output-path> [arch-prefix...]
+  local output="$1"; shift
+  local venv="$WORK/venv-$(basename "$output")"
 
-"$PYTHON" -m venv "$WORK/venv"
-"$WORK/venv/bin/pip" install --quiet --upgrade pip
-# Installed from the service's own metadata rather than a second list, so the
-# frozen binary carries what the service declares and not a copy that drifts.
-"$WORK/venv/bin/pip" install --quiet "$ROOT/apps/service"
-"$WORK/venv/bin/pip" install --quiet pyinstaller
+  "$@" "$PYTHON" -m venv "$venv"
+  "$@" "$venv/bin/pip" install --quiet --upgrade pip
+  # Installed from the service's own metadata rather than a second list, so the
+  # frozen binary carries what the service declares and not a copy that drifts.
+  "$@" "$venv/bin/pip" install --quiet "$ROOT/apps/service"
+  "$@" "$venv/bin/pip" install --quiet pyinstaller
 
-# `uvicorn[standard]` brings three native extras that a frozen service has no
-# use for, and one of them cannot be frozen at all: `watchfiles` exists to
-# power `--reload`, ships no universal2 wheel, and stops a universal build with
-# "is not a fat binary". `uvloop` and `httptools` are speed-ups for a server
-# under load; this one serves a single operator on the loopback address, and
-# uvicorn falls back to asyncio and h11 without them.
-#
-# Removed after the install rather than avoided in the dependency list,
-# because that list is the service's own and the reload extra is genuinely
-# wanted by everybody running it from a terminal.
-"$WORK/venv/bin/pip" uninstall --quiet --yes watchfiles uvloop httptools || true
+  # `uvicorn[standard]` brings native extras a frozen service has no use for,
+  # and one of them cannot be frozen at all: `watchfiles` exists to power
+  # `--reload`. `uvloop` and `httptools` are speed-ups for a server under
+  # load; this one serves a single operator over the loopback address, and
+  # uvicorn falls back to asyncio and h11 without them. Removed after the
+  # install rather than dropped from the dependency list, because that list is
+  # the service's own and the reload extra is wanted by everybody running it
+  # from a terminal.
+  "$@" "$venv/bin/pip" uninstall --quiet --yes watchfiles uvloop httptools || true
+
+  "$@" "$venv/bin/pyinstaller" \
+    --onefile \
+    --noconfirm \
+    --name "$(basename "$output")" \
+    --distpath "$(dirname "$output")" \
+    --workpath "$WORK/build-$(basename "$output")" \
+    --specpath "$WORK" \
+    --paths "$ROOT/apps/service/src" \
+    `# The service reaches its hyphenated module directories through importlib,` \
+    `# so nothing static points at them and the freezer cannot see them.` \
+    --collect-submodules app \
+    --collect-all uvicorn \
+    `# Excluded as well as uninstalled, so a transitive reinstall cannot` \
+    `# quietly put an unfreezable binary back.` \
+    --exclude-module watchfiles \
+    --exclude-module uvloop \
+    --exclude-module httptools \
+    "$ROOT/apps/service/service_main.py"
+}
 
 mkdir -p "$OUT"
-"$WORK/venv/bin/pyinstaller" \
-  --onefile \
-  --noconfirm \
-  --name "elicta-service-$TRIPLE" \
-  --distpath "$OUT" \
-  --workpath "$WORK/build" \
-  --specpath "$WORK" \
-  --paths "$ROOT/apps/service/src" \
-  `# The service reaches its hyphenated module directories through importlib,` \
-  `# so nothing static points at them and the freezer cannot see them.` \
-  --collect-submodules app \
-  --collect-all uvicorn \
-  `# Belt and braces: excluded as well as uninstalled, so a transitive` \
-  `# reinstall does not quietly put the unfreezable binary back.` \
-  --exclude-module watchfiles \
-  --exclude-module uvloop \
-  --exclude-module httptools \
-  "${ARCH_FLAG[@]}" \
-  "$ROOT/apps/service/service_main.py"
+echo "==> building the service for $TRIPLE with $("$PYTHON" --version) ($PYTHON)"
+
+if [ "$UNIVERSAL" = "1" ]; then
+  freeze "$WORK/elicta-service-arm64"
+  if arch -x86_64 /usr/bin/true 2>/dev/null; then
+    echo "==> building the second architecture through Rosetta"
+    freeze "$WORK/elicta-service-x86_64" arch -x86_64
+    lipo -create -output "$OUT/elicta-service-$TRIPLE" \
+      "$WORK/elicta-service-arm64" "$WORK/elicta-service-x86_64"
+    echo "==> joined: $(lipo -archs "$OUT/elicta-service-$TRIPLE")"
+  else
+    echo "!!! Rosetta is unavailable, so the bundled service covers arm64 only." >&2
+    echo "!!! The app will run on an Intel Mac; its service will not start there." >&2
+    cp "$WORK/elicta-service-arm64" "$OUT/elicta-service-$TRIPLE"
+  fi
+else
+  freeze "$OUT/elicta-service-$TRIPLE"
+fi
 
 BINARY="$OUT/elicta-service-$TRIPLE"
 test -x "$BINARY" || { echo "the freezer produced nothing at $BINARY" >&2; exit 1; }
