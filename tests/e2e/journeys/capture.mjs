@@ -142,16 +142,46 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
  * clean run. `waitForApp` does not cover it: it proves the server answers, not
  * that the tab in front of us is showing what the server said. A TLS
  * interstitial in particular passes the fetch and fails the tab.
+ *
+ * It waits for the mount rather than being told when to look. The caller used
+ * to sleep a flat 900ms and ask once, which is a bet that the dev server can
+ * compile a route it has never served in under a second — and it loses that
+ * bet under load, or straight after a CSS edit invalidates the module graph.
+ * `audit-a11y.mjs` had the same line and aborted two runs on scenes that
+ * render perfectly well. Here it would be worse than an abort: this tool
+ * rewrites `docs/journeys/screenshots/` as it goes, so failing in the middle
+ * leaves half a set regenerated and half not.
+ *
+ * The deadline is what keeps it a check rather than a wait: a scene that never
+ * mounts still fails the run, it just gets ten seconds to prove it.
  */
 async function assertSceneRendered(cdp, scene, name) {
-  const { result } = await cdp.send('Runtime.evaluate', {
-    expression: `JSON.stringify({
-      origin: location.origin,
-      mounted: document.querySelector('#root')?.childElementCount ?? 0,
-    })`,
-    returnByValue: true,
-  });
-  const { origin, mounted } = JSON.parse(result.value);
+  const read = async () => {
+    const { result } = await cdp.send('Runtime.evaluate', {
+      expression: `JSON.stringify({
+        origin: location.origin,
+        mounted: document.querySelector('#root')?.childElementCount ?? 0,
+      })`,
+      returnByValue: true,
+    });
+    return JSON.parse(result.value);
+  };
+
+  let state = await read();
+  const deadline = Date.now() + 10_000;
+  // `about:blank` is what the tab reports for the moment between the navigate
+  // and the document arriving, so the origin has to be waited for too — not
+  // only the mount. Chrome's own error page is the exception: it is a document
+  // that will never mount, so stop asking and let the message below name it.
+  while (
+    (!APP.startsWith(state.origin) || state.mounted === 0) &&
+    !state.origin.startsWith('chrome-error://') &&
+    Date.now() < deadline
+  ) {
+    await sleep(250);
+    state = await read();
+  }
+  const { origin, mounted } = state;
   if (!APP.startsWith(origin)) {
     throw new Error(
       `${name}: the tab is on ${origin}, not ${APP} — Chrome never reached the ` +
@@ -283,8 +313,12 @@ async function main() {
       mobile: false,
     });
     await cdp.send('Page.navigate', { url: `${APP}/journeys.html?scene=${scene}` });
-    await sleep(900);
+    // Mount first, then settle. The wait used to come first and cover both,
+    // which gave a slow scene *less* time to finish painting than a fast one —
+    // exactly backwards. Now every scene gets the same settling time after it
+    // has actually rendered: web fonts swapped in, transitions finished.
     await assertSceneRendered(cdp, scene, name);
+    await sleep(900);
 
     if (action) {
       await cdp.send('Runtime.evaluate', { expression: action });
