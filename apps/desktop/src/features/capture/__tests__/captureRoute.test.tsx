@@ -316,7 +316,7 @@ describe('the level meter', () => {
   it('says so when the browser cannot measure a level, rather than drawing a zero', () => {
     // A meter stuck at zero reads as "the room is silent", which is a finding
     // an operator would act on. Absence of a reading is a different claim.
-    render(screenWith({ metering: { level: null, waveform: [] } }));
+    render(screenWith({ metering: { level: null, waveform: [], unmeasurable: true } }));
 
     expect(screen.queryByRole('meter')).not.toBeInTheDocument();
     expect(screen.getByText(/cannot measure/i)).toBeInTheDocument();

@@ -54,6 +54,11 @@ export interface UseCapture {
    * drawn at zero for want of a meter would be that finding invented.
    */
   readonly level: AudioLevel | null;
+  /**
+   * Whether a level is impossible here rather than merely absent. The screen
+   * says two different things, and only the store knows which is true.
+   */
+  readonly levelUnmeasurable: boolean;
   /** Recent levels, oldest first, for the scrolling wave. Empty when idle. */
   readonly waveform: readonly number[];
   /**
@@ -106,6 +111,7 @@ export function useCapture(store: CaptureStore = captureSession): UseCapture {
     error: snapshot.error,
     elapsedSeconds: snapshot.elapsedSeconds,
     level: snapshot.level,
+    levelUnmeasurable: snapshot.levelUnmeasurable,
     waveform: snapshot.waveform,
     uploadNote: snapshot.uploadNote,
     start,

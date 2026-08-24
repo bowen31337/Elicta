@@ -332,7 +332,7 @@ describe('the "Your voice" section', () => {
         enrolment={enrolment({
           phase: 'recording',
           seconds: 6,
-          metering: { level: null, waveform: [] },
+          metering: { level: null, waveform: [], unmeasurable: true },
         })}
       />,
     );

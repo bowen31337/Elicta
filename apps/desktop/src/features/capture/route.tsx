@@ -48,10 +48,24 @@ export interface CaptureSource {
  * announce that the browser cannot measure sound.
  */
 export interface CaptureMetering {
-  /** The current reading, or `null` where none can be taken. */
+  /** The current reading, or `null` where there is none. */
   readonly level: AudioLevel | null;
   /** Recent meter positions, oldest first, for the scrolling wave. */
   readonly waveform: readonly number[];
+  /**
+   * Whether a reading is impossible here, as opposed to not having arrived.
+   *
+   * The two look identical on screen and are not the same thing. Impossible
+   * means the meter is gone for this session and the operator should carry
+   * on without it. Not arrived means the device is still opening, or is
+   * producing nothing at all — which during a meeting is the more expensive
+   * of the two to misread.
+   *
+   * Absent means not known, which is treated as not arrived: claiming a
+   * capability is missing is a stronger statement than the screen is
+   * entitled to make.
+   */
+  readonly unmeasurable?: boolean;
 }
 
 /**
@@ -206,9 +220,17 @@ function CaptureLevel({
   if (metering.level === null) {
     // Not a meter pinned at zero: zero says the room is silent, which is a
     // finding an operator would act on. "No reading" is a different claim.
+    //
+    // And which of the two claims is made matters. This said "This browser
+    // cannot measure the input level" in a desktop application, to an
+    // operator who never opened a browser — naming an implementation detail
+    // as the cause, and asserting a permanent incapacity from the single fact
+    // that nothing had arrived yet.
     return (
       <p className="capture-meter-absent t-footnote" role="status">
-        This browser cannot measure the input level. Recording is unaffected.
+        {metering.unmeasurable === true
+          ? 'Elicta cannot measure the input level here. Recording is unaffected.'
+          : 'No input level has arrived from the microphone. Recording is unaffected.'}
       </p>
     );
   }
@@ -767,7 +789,11 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
       metering={
         state === 'stopped'
           ? undefined
-          : { level: capture.level, waveform: capture.waveform }
+          : {
+              level: capture.level,
+              waveform: capture.waveform,
+              unmeasurable: capture.levelUnmeasurable,
+            }
       }
       // `blockedReason` is the whole message now, not a flag the screen turns
       // into one: the old sentence blamed the desktop app for a page served

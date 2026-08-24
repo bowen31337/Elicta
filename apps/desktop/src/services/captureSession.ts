@@ -93,6 +93,14 @@ export interface CaptureSnapshot {
    * invented.
    */
   readonly level: AudioLevel | null;
+  /**
+   * Whether a level is impossible on this backend, as opposed to not having
+   * arrived. Only the browser path can answer yes: it knows when there is no
+   * Web Audio to open. In the shell the level comes from Rust, and its
+   * absence is always "none yet" — which may mean the device is opening, or
+   * that it is producing nothing at all.
+   */
+  readonly levelUnmeasurable: boolean;
   /** Recent levels, oldest first, for the scrolling wave. Empty when idle. */
   readonly waveform: readonly number[];
   /**
@@ -169,6 +177,7 @@ const EMPTY: CaptureSnapshot = {
   error: null,
   elapsedSeconds: 0,
   level: null,
+  levelUnmeasurable: false,
   waveform: [],
   uploadNote: null,
 };
@@ -632,6 +641,11 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
         reader = null;
       }
     }
+    // Recorded rather than left to be guessed from an absent reading. Without
+    // it the screen has one fact — no level — and two possible causes, and it
+    // used to assert the wrong one in the shell, where this path is not even
+    // the one in use.
+    publish({ levelUnmeasurable: reader === null });
     publish({
       status: {
         ...snapshot.status,
