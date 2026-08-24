@@ -207,6 +207,47 @@ def _engagement(client: TestClient, organisation: str) -> str:
     return created.json()["engagement_id"]
 
 
+def test_a_vocabulary_term_created_after_a_restart_does_not_collide(
+    database: str,
+) -> None:
+    """The same counter bug as meetings and documents, in the third collection.
+
+    `vocabulary_terms` was moved to durable storage because nothing rebuilds
+    what somebody typed, but `next_vocabulary_term_id` stayed a field on
+    `Backend` that starts at 0 — so a restarted service mints `term-1` again.
+    `vocabulary_terms.id` is a primary key, so it is not a quiet overwrite: it
+    is `UNIQUE constraint failed: vocabulary_terms.id`, reaching the operator
+    as a 500 on the first word they add after a restart. Found on a live
+    service holding `term-1` through `term-18`, where every attempt to add a
+    word failed and the list stayed empty.
+    """
+
+    with client_for(database) as first:
+        engagement_id = _engagement(first, "Northwind Logistics")
+        created = first.post(
+            f"/api/engagements/{engagement_id}/vocabulary",
+            json={"term": "Freightlink", "term_type": "internal_system"},
+        )
+        assert created.status_code == 201, created.text
+        original = created.json()["term_id"]
+
+    with client_for(database) as second:
+        again = second.post(
+            f"/api/engagements/{engagement_id}/vocabulary",
+            json={"term": "NAVISTOCK", "term_type": "product_name"},
+        )
+        assert again.status_code == 201, again.text
+        assert again.json()["term_id"] != original
+
+        # And the first word is still itself, not the second wearing its id.
+        listed = second.get(f"/api/engagements/{engagement_id}/vocabulary")
+        assert listed.status_code == 200, listed.text
+        assert [row["term"] for row in listed.json()["terms"]] == [
+            "Freightlink",
+            "NAVISTOCK",
+        ]
+
+
 def test_a_meeting_created_after_a_restart_does_not_overwrite_an_earlier_one(
     database: str,
 ) -> None:

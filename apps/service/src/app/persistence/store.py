@@ -510,6 +510,31 @@ class StateStore:
         ]
         return max(ordinals, default=0)
 
+    def highest_vocabulary_term_ordinal(self) -> int:
+        """The largest `term-N` suffix on record, or 0 for an empty database.
+
+        Vocabulary was moved onto the store because nothing rebuilds what
+        somebody typed, and the counter that mints its ids was left behind on
+        `Backend`, starting at 0 every time the process does. The consequence
+        is the one `highest_document_ordinal` describes, and it was found in
+        the field rather than reasoned about: a service holding `term-1`
+        through `term-18` answered 500 to every word an operator tried to add,
+        `UNIQUE constraint failed: vocabulary_terms.id`, while the list beside
+        the box stayed empty.
+
+        Soft-deleted rows count. A removed term keeps its id — `deleted_at` is
+        a mark, not an erasure — so a counter derived from what loaded would
+        hand back an id the table is still holding.
+        """
+
+        table = metadata.tables["vocabulary_terms"]
+        ordinals = [
+            int(row.id.removeprefix("term-"))
+            for row in self._rows(table)
+            if row.id.startswith("term-") and row.id.removeprefix("term-").isdigit()
+        ]
+        return max(ordinals, default=0)
+
     def highest_document_ordinal(self) -> int:
         """The largest `doc-N` suffix on record, or 0 for an empty database.
 

@@ -1025,6 +1025,13 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
     )
+    # The fourth, and the one that was actually caught happening. A live
+    # service holding `term-1` through `term-18` answered 500 to every word
+    # added after a restart, and the vocabulary list beside the box stayed
+    # empty — which reads as the words not saving rather than as an id
+    # collision. Seeded from the rows, soft-deleted ones included, because a
+    # removed term is still holding its id.
+    backend.next_vocabulary_term_id = store.highest_vocabulary_term_ordinal()
     # The legally significant one, and the last to get a table. Losing this on
     # restart lost the answer to "did we have permission for this?", and the
     # gate it opens with it.
