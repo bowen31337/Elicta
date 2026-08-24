@@ -422,4 +422,94 @@ describe('in the desktop shell', () => {
     expect(store.getSnapshot().status.state).toBe('idle');
     expect(store.getSnapshot().error).toMatch(/unplugged/);
   });
+
+  it('feeds the shell\'s pcm event to the uploader instead of reading nothing', async () => {
+    // The seam nothing covered: Rust normalises and emits `capture://pcm`,
+    // and only this path carries a desktop recording to the service. When it
+    // does not connect, every visible sign of health is still present -- the
+    // device is open, the state word says Recording, the meter moves off
+    // `capture://frame` -- and the only symptom is the silence watch firing
+    // five seconds later to say nothing was read.
+    const emit: Record<string, (payload: unknown) => void> = {};
+    const pushed: Int16Array[] = [];
+    const store = createCaptureStore({
+      ...shellDeps(async (command: string) =>
+        command === 'start_capture'
+          ? { state: 'capturing', source: null, frames: 0 }
+          : command === 'list_audio_sources'
+            ? []
+            : null,
+      ),
+      listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
+        emit[name] = (payload) => handler({ payload });
+        return () => undefined;
+      },
+      createBridge: () => ({
+        start: async () => undefined,
+        push: (samples: Int16Array) => {
+          pushed.push(samples);
+        },
+        stop: async () => undefined,
+        reportFailure: () => undefined,
+        get note() {
+          return null;
+        },
+      }),
+    });
+
+    await store.refresh();
+    await store.beginRecording();
+
+    // "AQA=" is one sample of value 1 -- the encoding pcm_payload produces.
+    emit['capture://pcm']?.({ sequence: 1, pcm: 'AQA=' });
+
+    expect(pushed.length).toBe(1);
+    expect(Array.from(pushed[0] ?? [])).toEqual([1]);
+    expect(store.getSnapshot().uploadNote).toBeNull();
+  });
+
+
+  it('keeps feeding the uploader when recording follows a microphone check', async () => {
+    // The operator's actual sequence, and a different branch: from `checking`
+    // the store deliberately does not reopen the device, so the recording runs
+    // on the session the check already started.
+    const emit: Record<string, (payload: unknown) => void> = {};
+    const pushed: Int16Array[] = [];
+    const store = createCaptureStore({
+      ...shellDeps(async (command: string) =>
+        command === 'start_capture'
+          ? { state: 'capturing', source: null, frames: 0 }
+          : command === 'list_audio_sources'
+            ? []
+            : null,
+      ),
+      listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
+        emit[name] = (payload) => handler({ payload });
+        return () => undefined;
+      },
+      createBridge: () => ({
+        start: async () => undefined,
+        push: (samples: Int16Array) => {
+          pushed.push(samples);
+        },
+        stop: async () => undefined,
+        reportFailure: () => undefined,
+        get note() {
+          return null;
+        },
+      }),
+    });
+
+    await store.refresh();
+    await store.check();
+    emit['capture://pcm']?.({ sequence: 1, pcm: 'AQA=' });
+    expect(pushed.length).toBe(0); // a check uploads nothing
+
+    await store.beginRecording();
+    emit['capture://pcm']?.({ sequence: 2, pcm: 'AQA=' });
+
+    expect(pushed.length).toBe(1);
+    expect(store.getSnapshot().uploadNote).toBeNull();
+  });
+
 });
