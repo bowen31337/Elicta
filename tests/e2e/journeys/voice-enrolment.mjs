@@ -1,5 +1,6 @@
 /**
- * Does pressing "Enrol" on the Capture screen actually enrol a voice?
+ * Does pressing "Enrol" on the Capture screen actually enrol a voice, and does
+ * pressing "Remove" actually erase one?
  *
  * Nothing in CI answers that. The embedder is unit-tested, the route is
  * tested, the hook is tested against a fake `AudioContext`, and the join
@@ -12,7 +13,10 @@
  * service. It needs the panel and the service running (`./start.sh --https`),
  * and it enrols against whatever state database that service is using — so it
  * un-enrols again at the end unless something was already enrolled before it
- * started, which it leaves exactly as it found.
+ * started, which it leaves exactly as it found. That last rule is why the
+ * removal leg is conditional: `DELETE` pops the record and nothing anywhere
+ * restores it, so this drives Remove only when the print on screen is the one
+ * this run just made.
  *
  *   node tests/e2e/journeys/voice-enrolment.mjs
  *
@@ -297,6 +301,55 @@ async function main() {
       /baseline/i.test(settled),
       'the screen still says what the voice comparison actually is',
     );
+
+    // --- and removing it again, through the screen rather than the API ---
+    //
+    // Skipped when this machine arrived already enrolled. `DELETE` pops the
+    // record and nothing restores it, so driving this leg against somebody's
+    // existing print would destroy it — and the promise at the top of this
+    // file is that the run leaves the service as it found it.
+    if (before.enrolled) {
+      console.log('skipping the removal checks: this run did not create the print it would erase\n');
+    } else {
+      const asked = await cdp.eval(clickButton('Remove'));
+      expect(asked === 'clicked', `removing the sample is offered once there is one (${asked})`);
+
+      await sleep(300);
+      const asking = await cdp.eval(VOICE_SECTION);
+      console.log('--- asked ---\n' + asking + '\n');
+      expect(/for good/i.test(asking), 'the screen asks before erasing, and says it cannot be undone');
+      expect(
+        (await status()).enrolled === true,
+        'one press destroys nothing — the service still holds the print',
+      );
+
+      expect((await cdp.eval(clickButton('Keep'))) === 'clicked', 'the question can be answered no');
+      await sleep(300);
+      expect(
+        (await status()).enrolled === true,
+        'answering no leaves the print exactly where it was',
+      );
+
+      await cdp.eval(clickButton('Remove'));
+      await sleep(300);
+      const erased = await cdp.eval(clickButton('Remove for good'));
+      expect(erased === 'clicked', `the second press is the one that acts (${erased})`);
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (!(await status()).enrolled) break;
+        await sleep(250);
+      }
+      expect((await status()).enrolled === false, 'the service no longer holds a voiceprint');
+
+      await sleep(1_000);
+      const gone = await cdp.eval(VOICE_SECTION);
+      console.log('--- removed ---\n' + gone + '\n');
+      expect(/Not enrolled/.test(gone), 'the screen says so without being reloaded');
+      expect(
+        /Record up to 60 seconds/.test(gone),
+        'and offers to enrol again rather than leaving the row empty',
+      );
+    }
   } finally {
     close();
     if (!before.enrolled) {

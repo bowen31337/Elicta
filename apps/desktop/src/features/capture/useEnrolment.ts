@@ -61,8 +61,13 @@ export interface EnrolmentStatus {
  * `saving` is a state rather than a flag because it is genuinely slow: the
  * service embeds a sixty-second sample in around a second, and a button that
  * looked idle for that long would be pressed twice.
+ *
+ * `removing` is here rather than being a second flag for the same reason, and
+ * because the four are genuinely exclusive: there is one enrolment, and it
+ * cannot be recorded and erased at once. A separate boolean would make that
+ * state representable and every reader would have to rule it out.
  */
-export type EnrolmentPhase = 'idle' | 'recording' | 'saving';
+export type EnrolmentPhase = 'idle' | 'recording' | 'saving' | 'removing';
 
 export interface UseEnrolment {
   readonly phase: EnrolmentPhase;
@@ -95,6 +100,21 @@ export interface UseEnrolment {
   readonly start: (sourceId?: string) => void;
   readonly stop: () => void;
   readonly cancel: () => void;
+  /**
+   * Erases the enrolled print, so the operator's speech stops being told
+   * apart from the client's.
+   *
+   * Unlike every other deletion in this product this one is not soft — there
+   * is no `deleted_at` on a voiceprint and nothing rebuilds one, so what this
+   * removes is gone. That is the point rather than an oversight: the thing
+   * being erased is biometric material, and an operator who asks for it to
+   * stop existing is owed exactly that.
+   *
+   * Ignored unless idle. A recording in flight owns the device and the phase,
+   * and erasing underneath it would land a status change on a screen that is
+   * still counting seconds.
+   */
+  readonly forget: () => void;
 }
 
 export interface EnrolmentDeps {
@@ -238,6 +258,53 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     setSeconds(0);
   }, [release]);
 
+  const forget = useCallback(() => {
+    // Guarded on the phase rather than on the recording ref, because `saving`
+    // owns no device and still must not be erased out from under: the POST
+    // would land after the DELETE and re-enrol the print just removed.
+    if (phase !== 'idle') return;
+    setPhase('removing');
+    setError(null);
+
+    void (async () => {
+      try {
+        const response = await fetchImpl(PATH, {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          setError(await failureMessage(response));
+          return;
+        }
+        // 204 with no body, so the new status is derived rather than read.
+        // Re-fetching would be the obvious alternative and is the wrong one:
+        // `refresh` deliberately swallows a failed read and leaves the last
+        // answer standing, so a service that dropped the follow-up GET would
+        // leave the screen saying "Enrolled" about a print that is gone.
+        //
+        // The two second-counts are kept. They are caps the service enforces
+        // on the *next* enrolment, not facts about the one just erased, and
+        // dropping them would reset the screen's countdown to the fallback.
+        setStatus((held) =>
+          held === null
+            ? held
+            : {
+                ...held,
+                enrolled: false,
+                sample_seconds: null,
+                embedding_model: null,
+                enrolled_at: null,
+                usable: false,
+              },
+        );
+      } catch {
+        setError('The service could not be reached, so nothing was removed.');
+      } finally {
+        setPhase('idle');
+      }
+    })();
+  }, [fetchImpl, phase]);
+
   const start = useCallback((sourceId = '') => {
     if (recording.current !== null) return;
     setError(null);
@@ -372,5 +439,6 @@ export function useEnrolment(deps: EnrolmentDeps = {}): UseEnrolment {
     start,
     stop,
     cancel,
+    forget,
   };
 }

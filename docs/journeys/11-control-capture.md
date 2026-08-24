@@ -52,6 +52,15 @@ What is kept is a small numerical description of your voice; the recording
 itself is never stored. You can re-record whenever you like, and each one
 replaces the last.
 
+You can also remove it. Re-recording replaces a voiceprint; Remove erases it,
+for the operator who is handing the laptop on or who would simply rather
+nothing describing their voice sat on it. It asks once before it does, because
+this is the one thing here that does not come back — every other Remove in
+Elicta stops a row loading and erases nothing, and there is no copy of a
+voiceprint to restore from. Nothing else goes with it: the meeting still
+records and still becomes a transcript, it just stops separating your speech
+from the client's.
+
 ## Where this stands
 
 | | |
@@ -62,4 +71,5 @@ replaces the last.
 | ✅ Ready | **A check before the meeting, and a choice of input.** Check microphone opens the chosen input, shows a live level and records nothing — which is also what makes a browser reveal the real names of its microphones, since it withholds ids and labels until the first permission grant and the picker before that reads "Microphone 1". The checked device is promoted to recording rather than reopened, so there is no second prompt and no gap. It matters that the choice is made here: capture refuses a second session on either backend, so swapping input mid-meeting means stopping and restarting |
 | ✅ Ready | **Starting a recording is what books the meeting.** The consent screen used to carry a Start button that registered a session and opened no microphone, so an operator was told a meeting had begun while nothing was listening — and it offered no way to pick an input, being a screen that cannot show one working. Both moved here. The device is opened before the meeting is registered, so an input that will not open books nothing |
 | ✅ Ready | **Recording your own voice.** The button used to do nothing, and the words above it said "Not enrolled" however many times you had enrolled — there was no route behind it to enrol against. Recording now works: up to a minute, counted out loud as it runs, capped by the service rather than by the screen, and the recording itself is turned into a voiceprint and thrown away rather than stored. During a meeting your own sentences are no longer interrogated as though a client had said them |
+| ✅ Ready | **Removing the voice sample again.** The route to erase a voiceprint had been there since enrolment was built, and no screen reached it — the only thing the panel could do with an enrolment was record over it, which leaves a description of somebody's voice on the machine either way. Remove now sits beside Re-record whenever there is something to remove. It asks once first, because this deletion is the exception to the rule the rest of the product follows: everything else marked removed is only hidden, and a voiceprint is genuinely destroyed |
 | ⏳ Not yet | **Telling two similar voices apart.** What compares voices is a baseline built from the shape of a voice, not the learned speaker model the design asks for — nothing in the product could run one, and adding it is its own piece of work. It separates voices that sound clearly different and may not separate two that sound alike. It leans towards treating speech as the client's when it is unsure, so the cost of being wrong is one question you did not need rather than a client requirement silently passed over. The screen says all of this where you enrol |

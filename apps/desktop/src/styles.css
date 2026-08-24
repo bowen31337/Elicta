@@ -1,8 +1,106 @@
 @import "./tokens.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* ==========================================================================
+   Reset.
+
+   This was `@tailwind base` — Tailwind's Preflight — until Tailwind was
+   removed. Nothing in this app used a utility class (one `p-4 text-sm` in the empty
+   router, since replaced), so the framework was earning its keep entirely
+   through this reset, invisibly, and dropping it wholesale would have moved
+   every screen.
+
+   Ported deliberately rather than copied whole: only the rules this app's own
+   CSS is written against. Two are load-bearing in ways that are easy to miss.
+   Headings inherit their size and weight, so an `<h1>` with no `t-*` role
+   reads at body size — `#settings-heading` and the dialog title are both
+   written that way. And the type roles set size on the *element*, so a control
+   inheriting `font: inherit` is what keeps a button in a row matching the text
+   beside it.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* No `body { line-height: … }` here, deliberately.
+ *
+ * tokens.css sets `body { line-height: var(--leading-normal) }` — 1.35, its
+ * "body-ish" value. Preflight then set `body { line-height: inherit }`,
+ * inheriting 1.5 from `html`; it loaded after the `@import` above, so it won
+ * on source order, and every screen this app ever showed was laid out at 1.5.
+ * The token's own value had never once rendered.
+ *
+ * Removing the framework is what let it through, and it stays through: body
+ * text is 1.35 now, `--leading-relaxed` (1.5) is for the long-form blocks that
+ * ask for it by name. Restating either number here would only re-create the
+ * override that hid the token in the first place.
+ */
+
+/* The vertical rhythm here is built from `gap` and padding on the container,
+   never from the user agent's margins on the child. */
+h1, h2, h3, h4, h5, h6,
+p, figure, blockquote, dl, dd, pre, fieldset, ol, ul, menu { margin: 0; }
+fieldset, legend { padding: 0; }
+
+/* A heading is a landmark for the accessibility tree; what it looks like is
+   the `t-*` role's business (tokens.css), not the level's. */
+h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+
+/* Lists here are semantic — the nudge history, the coverage slots — and are
+   laid out as flex columns, so the marker and its indent are never wanted. */
+ol, ul, menu { list-style: none; padding: 0; }
+
+/* Controls do not inherit type from the page on their own; the platform gives
+   them their own. Everything in this app is placed on the same baseline grid
+   as the text around it. */
+button, input, optgroup, select, textarea {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+button, select { text-transform: none; }
+button, [type="button"], [type="reset"], [type="submit"] {
+  -webkit-appearance: button;
+  background-color: transparent;
+  background-image: none;
+}
+:disabled { cursor: default; }
+textarea { resize: vertical; }
+
+/* Replaced elements sit on the text baseline by default, which leaves a few
+   pixels of descender space under every image in a flex row. */
+img, svg, video, canvas, audio, iframe, embed, object { display: block; }
+img, video { max-width: 100%; height: auto; }
+
+/* `hidden` must lose to a display rule that means it, but win over the rest. */
+[hidden]:where(:not([hidden="until-found"])) { display: none; }
+
+/* Placeholders. Preflight gave these a grey of Tailwind's own; two screens
+   had already overridden it with the token below, and the rest were quietly
+   inheriting a colour from a framework nobody was using on purpose. */
+::placeholder { color: var(--label-tertiary); opacity: 1; }
+
+/* Present to a screen reader, absent on screen — six labels depend on it
+   (`prep`, `capture`, the shell's skip link), and it was the one Tailwind
+   utility this app genuinely used. Without it they render as loose text
+   beside the control they name, which is how the capture screen came to say
+   "Which input to record from" out loud in the middle of a row.
+   Not `display: none` and not `visibility: hidden`: both remove the element
+   from the accessibility tree as well, which is the opposite of the point.
+   The clip-and-shrink recipe is the same one `.picker-label` uses in
+   shell.css at narrow widths. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ==========================================================================
    Elicta surfaces.
@@ -164,6 +262,10 @@ body {
 /* Section headers in grouped lists: small, tracked open, uppercase. */
 .t-section { font-size: var(--text-footnote); font-weight: var(--weight-semibold);
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--label-supporting); }
+
+/* The shell with nothing mounted in it: `features/*/route.tsx` is a glob, so
+   an empty app is a real state and says so rather than rendering blank. */
+.router-empty { padding: var(--space-5); }
 
 /* Digits that sit in columns or tick upward must not reflow as they change. */
 .tabular { font-variant-numeric: tabular-nums; }

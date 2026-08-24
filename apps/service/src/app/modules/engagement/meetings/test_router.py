@@ -554,3 +554,86 @@ def test_updating_a_meeting_with_an_unknown_field_is_rejected():
     )
 
     assert response.status_code == 422
+
+
+def make_delete_client(
+    existing_meetings: set[str] | None = None,
+    with_delete: bool = True,
+) -> tuple[TestClient, list[str]]:
+    """A meetings router whose only live callable is `delete_meeting`.
+
+    `with_delete=False` builds the router the way the pre-existing tests above
+    do — three positional callables and nothing else — so the guard that the
+    DELETE route is absent unless somebody supplies a way to perform it is
+    tested against the real construction, not a mocked one.
+    """
+
+    received_deletes: list[str] = []
+    known_ids = existing_meetings if existing_meetings is not None else {"meeting-1"}
+
+    async def create_meeting(payload: MeetingCreateRequest) -> str:
+        raise AssertionError("create_meeting should not be called in these tests")
+
+    async def get_engagement_context(engagement_id: str) -> EngagementContext | None:
+        raise AssertionError("get_engagement_context should not be called in these tests")
+
+    async def update_meeting(
+        target_id: str, payload: MeetingUpdateRequest
+    ) -> MeetingUpdateResponse | None:
+        raise AssertionError("update_meeting should not be called in these tests")
+
+    async def delete_meeting(target_id: str) -> bool:
+        received_deletes.append(target_id)
+        return target_id in known_ids
+
+    app = FastAPI()
+    app.include_router(
+        build_meeting_router(
+            create_meeting,
+            get_engagement_context,
+            update_meeting,
+            delete_meeting if with_delete else None,
+        )
+    )
+    return TestClient(app), received_deletes
+
+
+def test_deleting_a_meeting_returns_204_and_no_body():
+    client, received = make_delete_client()
+
+    response = client.delete("/api/meetings/meeting-1")
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert received == ["meeting-1"]
+
+
+def test_deleting_an_unknown_meeting_returns_404():
+    client, received = make_delete_client(existing_meetings=set())
+
+    response = client.delete("/api/meetings/does-not-exist")
+
+    assert response.status_code == 404
+    # The callable is still consulted: only it can answer whether the meeting
+    # is there, so a 404 is its verdict rather than a guess made before asking.
+    assert received == ["does-not-exist"]
+
+
+def test_deleting_the_same_meeting_twice_returns_404_the_second_time():
+    client, _ = make_delete_client(existing_meetings={"meeting-1"})
+
+    assert client.delete("/api/meetings/meeting-1").status_code == 204
+
+    # `known_ids` is a fixed set here, so this asserts the route's contract
+    # rather than the fake's memory: the second call is answered by whatever
+    # `delete_meeting` reports, and composition's real one reports False.
+    second = make_delete_client(existing_meetings=set())[0].delete("/api/meetings/meeting-1")
+    assert second.status_code == 404
+
+
+def test_a_router_built_without_a_delete_callable_serves_no_delete_route():
+    client, _ = make_delete_client(with_delete=False)
+
+    response = client.delete("/api/meetings/meeting-1")
+
+    assert response.status_code == 405

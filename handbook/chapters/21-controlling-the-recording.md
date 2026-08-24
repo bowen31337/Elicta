@@ -101,6 +101,15 @@ Elicta keeps is a small numerical description of your voice, not the recording �
 the audio is used to work that out and then thrown away. Re-recording replaces
 what was there before.
 
+If you would rather Elicta held nothing of your voice at all — you are handing
+the laptop on, or you simply never wanted a description of your voice left on
+it — Remove erases it. It asks once before it does, because this is the one
+thing you can remove in Elicta that does not come back: nothing keeps a copy to
+restore from, and starting again means recording a fresh minute. Removing it
+takes nothing else with it. The meeting still records and still becomes a
+transcript; it just stops separating your speech from the client's, exactly as
+though you had never recorded a sample.
+
 ## Where this is honest about itself
 
 Pausing, the state display and the argument for a better microphone all work,

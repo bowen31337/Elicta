@@ -130,6 +130,8 @@ export const PREP: PrepScreenProps = {
     upload: async () => undefined,
     removeDocument: async () => undefined,
     removeTerm: async () => undefined,
+    renameMeeting: async () => undefined,
+    removeMeeting: async () => undefined,
     addMeeting: async () => undefined,
     retag: async () => undefined,
   },

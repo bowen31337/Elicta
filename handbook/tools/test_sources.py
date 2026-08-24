@@ -104,7 +104,7 @@ class RouteReaderTest(unittest.TestCase):
         # service served 46, missing among others the engagement's meetings
         # list that the toolbar picker calls.
         routes = sources.collect_routes(REPO)
-        self.assertEqual(len({r.path for r in routes}), 49)
+        self.assertEqual(len({r.path for r in routes}), 54)
 
 
 class EnvVarReaderTest(unittest.TestCase):

@@ -159,3 +159,33 @@ describe('a build with no screens', () => {
     expect(screen.getByText(/No screens are registered/)).toBeInTheDocument();
   });
 });
+
+describe('the pane as somewhere a keyboard can go', () => {
+  /**
+   * The window scrolls in exactly one place — the pane — and the pane was a
+   * bare `<div>` with `overflow-y: auto` inside a shell that is
+   * `overflow: hidden`. That combination has a cost nobody paid for: the
+   * document has nothing to scroll and an unfocusable div is not in the tab
+   * order, so End, Page Down and the arrow keys moved the preparation screen
+   * by zero pixels. Measured on the running app, not assumed.
+   *
+   * On a screen that is twelve viewports long, that left the wheel and
+   * dragging the scrollbar as the only ways down. A scrollable region has to
+   * be focusable for the keys the platform already binds to work in it.
+   */
+  it('is a focusable region, so the scroll keys reach it', () => {
+    renderShell();
+
+    const pane = screen.getByRole('region', { name: 'Preparation' });
+    expect(pane).toHaveAttribute('tabindex', '0');
+  });
+
+  it('names itself after the screen it is showing, not "region"', async () => {
+    renderShell();
+
+    await userEvent.click(screen.getByRole('link', { name: 'About' }));
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+
+    expect(await screen.findByRole('region', { name: 'About' })).toBeInTheDocument();
+  });
+});

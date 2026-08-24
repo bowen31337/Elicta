@@ -32,6 +32,14 @@ from the meeting machine, a silent join that takes the audio as loopback, or a
 microphone. You can change your mind later; what matters now is that the
 meeting exists to prepare for.
 
+A new meeting has no name yet, so the list shows it by its number. Give it one
+with **Rename** — "Discovery 2 — depot volumes" rather than `meeting-3` — and
+three meetings under the same client stop being three identical rows. **Remove**
+takes one off the list. Nothing is erased by it: the consent record and the
+recording of a meeting that actually happened stay exactly where they are, so
+this is for the meeting you created by mistake, not for honouring a request to
+be forgotten.
+
 Which engagement and which meeting you are working on is chosen in the toolbar
 at the top of the window, and it follows you between screens.
 
@@ -88,9 +96,9 @@ comes first, and why you are meant to edit it rather than trust it.
 
 | | |
 |---|---|
-| ✅ Ready | Creating engagements and the meetings inside them — the first one and every one after it; adding documents by dropping the files in or by link, and tagging them; reading what is inside them; the client vocabulary list; and reviewing, reordering and pruning the question bank — all of it from the screen, and all of it within one sitting |
-| ✅ Ready | **All of it is kept.** The engagement, its meetings, the documents you attach and their contents, the words you add, and the question bank are written to a single file on your machine as you go. Nothing needs installing for that, and a firm that wants everything on its own database server can point Elicta at one instead |
-| ✅ Ready | **Taking things back out.** A document, a word or the whole engagement can be removed from the screen. Nothing is erased: the record is kept and can be brought back, which is why removing a client here is a tidying-up action and not a way to honour a request to be forgotten |
+| ✅ Ready | Creating engagements and the meetings inside them — the first one and every one after it, and naming or removing any of them afterwards; adding documents by dropping the files in or by link, and tagging them; reading what is inside them; the client vocabulary list; and reviewing, reordering and pruning the question bank — all of it from the screen, and all of it within one sitting |
+| ✅ Ready | **All of it is kept.** The engagement, its meetings and what you named them, the documents you attach and their contents, the words you add, and the question bank are written to a single file on your machine as you go. Nothing needs installing for that, and a firm that wants everything on its own database server can point Elicta at one instead |
+| ✅ Ready | **Taking things back out.** A document, a word, a single meeting or the whole engagement can be removed from the screen. Nothing is erased: the record is kept and can be brought back, which is why removing a client or a meeting here is a tidying-up action and not a way to honour a request to be forgotten |
 | ⏳ Not yet | Erasing a client's data outright, and the engagement list showing more than the first twenty |
 | ⚙️ Setup | Two one-off steps, both in Settings and both covered in journey 10. Drafting the questions needs an AI provider. Reading a document from SharePoint or OneDrive needs your Microsoft 365 tenant registered — a dropped file needs neither, which is the way in that always works |
 | ✅ Ready | **Collecting the drafted questions.** Drafting is submitted as a job that finishes minutes later; the service now goes back for the result every thirty seconds, puts the questions in the bank, and stops asking once a job has ended, failed or expired. A compile that stops for any other reason now says so in the log instead of leaving an empty bank and no explanation |

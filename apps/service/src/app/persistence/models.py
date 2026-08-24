@@ -97,6 +97,11 @@ class Meeting(Base):
     # this table does not own, and re-deriving it on read would couple this
     # module to three others it deliberately does not import.
     detail: Mapped[dict | None] = mapped_column(sa.JSON(), nullable=True)
+    # Soft delete, for the reason `Engagement.deleted_at` gives. A meeting is
+    # the row a consent record, a transcript and an audio-destruction event all
+    # point at, so "take it off the operator's list" and "erase the record that
+    # this meeting happened" must not be the same button.
+    deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(), nullable=True)
 
 
 class OpenQuestion(Base):

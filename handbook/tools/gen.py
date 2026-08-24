@@ -48,6 +48,10 @@ PDF_NAME = "handbook.pdf"
 #: the committed file, or it keeps the old typesetting for ever.
 PDF_TOOL_SOURCES = ("pdf.py", "mdread.py", "typeset.py")
 
+#: The pictures the chapters embed. Part of what the PDF is, not a reference
+#: to something beside it — `pdf.py` writes their bytes into the document.
+SCREENSHOTS = "docs/journeys/screenshots"
+
 _DIGEST_RE = re.compile(rb"/SourceDigest \(([0-9a-f]+)\)")
 
 
@@ -59,10 +63,20 @@ def pdf_source_digest(root: Path) -> str:
     """Digest of everything the PDF is a function of.
 
     Two parts, because they live in different places: the content (the
-    manifest and the chapters, under `root`) and the code that renders it
-    (this directory, wherever the tools happen to be checked out).
+    manifest, the chapters and the pictures they embed, under `root`) and the
+    code that renders it (this directory, wherever the tools happen to be
+    checked out).
+
+    The screenshots are in the first part and were not always. Chapters embed
+    them, `pdf.py` writes their bytes into the file, and the digest covered
+    the words but not the pictures — so re-capturing a screen left a PDF
+    showing the old one and `check` called it current. That is the failure
+    this mechanism exists to prevent, and the PDF is the copy people outside
+    the team read.
     """
-    content = drift.digest(root, ["handbook/book.toml", "handbook/chapters"])
+    content = drift.digest(
+        root, ["handbook/book.toml", "handbook/chapters", SCREENSHOTS]
+    )
     tools = drift.digest(Path(__file__).resolve().parent, list(PDF_TOOL_SOURCES))
     return hashlib.sha256(f"{content}:{tools}".encode()).hexdigest()
 

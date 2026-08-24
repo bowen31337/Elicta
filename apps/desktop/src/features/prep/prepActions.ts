@@ -105,6 +105,48 @@ export async function createMeeting(
   return created?.meeting_id ?? '';
 }
 
+/**
+ * Renames a meeting, which is what its session purpose is used for here (PRD FR-3.8).
+ *
+ * The list on the Preparation screen falls back to the bare `meeting-3` when a
+ * meeting has no purpose, and three of those tell an operator nothing about
+ * which is which. `PATCH /api/meetings/{id}` has stored the purpose since
+ * FR-3.8 was built; no screen ever called it.
+ *
+ * The blank check is here rather than left to the service on purpose: the
+ * service answers 422, and "The service answered 422" tells the operator less
+ * than the screen already knows.
+ */
+export async function renameMeeting(
+  meetingId: string,
+  sessionPurpose: string,
+  options: PrepActionOptions = {},
+): Promise<string> {
+  const purpose = sessionPurpose.trim();
+  if (purpose === '') throw new Error('A meeting needs a purpose to be renamed to.');
+  const updated = await patch<{ session_purpose: string | null }>(
+    apiUrl(`/api/meetings/${id(meetingId)}`),
+    { session_purpose: purpose },
+    options,
+  );
+  return updated?.session_purpose ?? purpose;
+}
+
+/**
+ * Removes a meeting from its engagement's list — soft, like the other two.
+ *
+ * Softer than the other two matter: a meeting is what a consent record, a
+ * transcript and an audio-destruction event all point at. The service marks
+ * the row and stops listing it; nothing is erased, and the record that the
+ * meeting happened stays where it is.
+ */
+export async function deleteMeeting(
+  meetingId: string,
+  options: PrepActionOptions = {},
+): Promise<void> {
+  await send(apiUrl(`/api/meetings/${id(meetingId)}`), { method: 'DELETE' }, options);
+}
+
 export interface DocumentLink {
   readonly url: string;
   readonly status: DocumentStatus;

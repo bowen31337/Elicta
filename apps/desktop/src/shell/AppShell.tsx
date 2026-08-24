@@ -167,7 +167,24 @@ export function AppShell({ destinations, renderScreen, selector }: AppShellProps
           {selector}
         </header>
 
-        <div className="pane-scroll" ref={paneRef} onScroll={onPaneScroll}>
+        {/* A scroll region the keyboard can reach.
+            The window scrolls in exactly one place, and that place was a bare
+            div: `.shell` is `overflow: hidden`, so the document has nothing to
+            scroll, and an unfocusable div is not in the tab order. Measured on
+            the running app, End, Page Down and the arrow keys moved the
+            preparation screen — twelve viewports of it — by zero pixels, and
+            the wheel was the only way down. `tabindex` is what the platform
+            wants here: it puts the scroller in the tab order and the keys it
+            already binds start working. Named after the screen, because
+            "region" is not somewhere anyone would choose to go. */}
+        <div
+          className="pane-scroll"
+          ref={paneRef}
+          onScroll={onPaneScroll}
+          tabIndex={0}
+          role="region"
+          aria-label={selected.title}
+        >
           {/* Keyed on the destination so a screen change is an arrival — the
               material settles into place rather than the old screen's pixels
               being overwritten in situ. */}

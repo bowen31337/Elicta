@@ -26,7 +26,7 @@ const destinations = buildDestinations([...screens.keys()]);
 export function AppRouter() {
   if (destinations.length === 0) {
     return (
-      <p className="p-4 text-sm text-neutral-500">No features registered yet.</p>
+      <p className="t-footnote router-empty">No features registered yet.</p>
     );
   }
 

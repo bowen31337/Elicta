@@ -61,6 +61,7 @@ UpdateMeeting = Callable[
 CreateMeeting = Callable[[MeetingCreateRequest], Awaitable[str]]
 GetEngagementContext = Callable[[str], Awaitable[EngagementContext | None]]
 ListMeetings = Callable[[str], Awaitable[list[MeetingSummary] | None]]
+DeleteMeeting = Callable[[str], Awaitable[bool]]
 
 
 def build_meeting_attendees_router(add_attendee: AddAttendee) -> APIRouter:
@@ -99,6 +100,7 @@ def build_meeting_router(
     create_meeting: CreateMeeting,
     get_engagement_context: GetEngagementContext,
     update_meeting: UpdateMeeting,
+    delete_meeting: DeleteMeeting | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 
@@ -136,6 +138,26 @@ def build_meeting_router(
         if updated is None:
             raise HTTPException(status_code=404, detail="meeting not found")
         return updated
+
+    if delete_meeting is not None:
+
+        @router.delete("/{meeting_id}", status_code=204)
+        async def delete_meeting_endpoint(meeting_id: str) -> None:
+            """Take a meeting out of view (soft).
+
+            Optional for the same reason the engagement router's delete is:
+            whether a removal is even offered belongs to whoever assembles the
+            app, and the tests that build this router to exercise create and
+            update should not have to invent a way to destroy things.
+
+            The row stays, marked, and so does everything hanging off it — the
+            consent record, the transcripts, the audio-destruction events. A
+            removal here is about a list an operator has to read, not about
+            erasing the record of a meeting that actually happened.
+            """
+
+            if not await delete_meeting(meeting_id):
+                raise HTTPException(status_code=404, detail="meeting not found")
 
     return router
 

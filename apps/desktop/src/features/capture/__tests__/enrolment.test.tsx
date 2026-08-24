@@ -373,6 +373,142 @@ describe('the "Your voice" section', () => {
 
     expect(screen.getByRole('button', { name: 'Re-record' })).toBeDisabled();
   });
+  it('offers no way to remove a print that does not exist yet', () => {
+    /* A Remove beside "Not enrolled" is a control with nothing behind it, and
+       pressing it would have to succeed silently — the service answers 204
+       either way. */
+    render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled={false}
+        enrolmentSeconds={0}
+        enrolment={enrolment()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+
+  it('asks before erasing the print, and does nothing on the first press', async () => {
+    /* Every other Remove here is soft and asks nothing. This one pops the
+       record, so a single mis-tap would destroy the only copy. */
+    const onForget = vi.fn();
+    render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment({ onForget })}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    expect(onForget).not.toHaveBeenCalled();
+    expect(screen.getByText(/erases the voiceprint for good/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove for good' }));
+
+    expect(onForget).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the print when the question is answered the other way', async () => {
+    const onForget = vi.fn();
+    render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment({ onForget })}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Keep' }));
+
+    expect(onForget).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Re-record' })).toBeInTheDocument();
+  });
+
+  it('offers removal even where the browser will not open a microphone', async () => {
+    /* The block is about the microphone — an insecure page, no capture API —
+       and erasing a print opens no device. Refusing here would strand
+       biometric material on the machine behind an unrelated limitation. */
+    const onForget = vi.fn();
+    render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment({
+          onForget,
+          blockedReason: 'The browser only allows microphone access on a secure page.',
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Re-record' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove for good' }));
+
+    expect(onForget).toHaveBeenCalledOnce();
+  });
+
+  it('does not leave the question standing over a recording started under it', () => {
+    /* Ask, then start recording from the other control: the row must be a
+       recording, not an unanswered "are you sure" about a print that is now
+       being replaced anyway. */
+    const { rerender } = render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment()}
+      />,
+    );
+
+    rerender(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment({ phase: 'recording', seconds: 4 })}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Remove for good' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it('says the removal is happening rather than looking idle through it', () => {
+    render(
+      <CaptureScreen
+        state="stopped"
+        sources={[]}
+        elapsed="00:00"
+        operatorEnrolled
+        enrolmentSeconds={48}
+        enrolment={enrolment({ phase: 'removing' })}
+      />,
+    );
+
+    expect(screen.getByText('Removing your voice sample')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Removing…' })).toBeDisabled();
+  });
 });
 
 // --- the hook ------------------------------------------------------------
@@ -435,10 +571,17 @@ function fakeMedia(stopped: { count: number }) {
   };
 }
 
-function harness(over: { status?: EnrolmentStatus; post?: () => Response } = {}) {
+function harness(
+  over: {
+    status?: EnrolmentStatus;
+    post?: () => Response;
+    del?: () => Response;
+  } = {},
+) {
   const audio = fakeAudio();
   const stopped = { count: 0 };
   const posted: string[] = [];
+  const deleted = { count: 0 };
 
   const fetchImpl = (async (_path: string, init?: RequestInit) => {
     if (init?.method === 'POST') {
@@ -448,6 +591,12 @@ function harness(over: { status?: EnrolmentStatus; post?: () => Response } = {})
         new Response(JSON.stringify({ ...ENROLLED, sample_seconds: 5 }), { status: 201 })
       );
     }
+    if (init?.method === 'DELETE') {
+      deleted.count += 1;
+      // 204 and no body, which is what the service answers whether or not
+      // there was a print to remove.
+      return over.del?.() ?? new Response(null, { status: 204 });
+    }
     return new Response(JSON.stringify(over.status ?? NOT_ENROLLED), { status: 200 });
   }) as unknown as typeof fetch;
 
@@ -455,6 +604,7 @@ function harness(over: { status?: EnrolmentStatus; post?: () => Response } = {})
     audio,
     stopped,
     posted,
+    deleted,
     deps: {
       environment: () => ({ isSecureContext: true, mediaDevices: fakeMedia(stopped) }),
       pcmContext: () => () => audio.context,
@@ -601,5 +751,85 @@ describe('recording a voice sample', () => {
 
     expect(result.current.phase).toBe('idle');
     expect(result.current.blockedReason).toMatch(/secure page/i);
+  });
+});
+
+describe('removing a voice sample', () => {
+  it('erases the print and reports the screen back to not enrolled', async () => {
+    const { deps, deleted } = harness({ status: ENROLLED });
+    const { result } = renderHook(() => useEnrolment(deps));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(true));
+
+    act(() => result.current.forget());
+
+    await waitFor(() => expect(deleted.count).toBe(1));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(false));
+    expect(result.current.status?.sample_seconds).toBeNull();
+    expect(result.current.status?.usable).toBe(false);
+    expect(result.current.phase).toBe('idle');
+  });
+
+  it('keeps the caps the service enforces, which the removal did not change', async () => {
+    /* They describe the next enrolment, not the one just erased. Dropping
+       them would put the screen's countdown back on its fallback. */
+    const { deps } = harness({
+      status: { ...ENROLLED, max_sample_seconds: 45, min_sample_seconds: 5 },
+    });
+    const { result } = renderHook(() => useEnrolment(deps));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(true));
+
+    act(() => result.current.forget());
+
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(false));
+    expect(result.current.maxSeconds).toBe(45);
+    expect(result.current.status?.min_sample_seconds).toBe(5);
+  });
+
+  it('still says "enrolled" when the service refused to remove it', async () => {
+    /* The dangerous failure is the opposite one: a screen that reports the
+       print gone while the service still holds it. */
+    const { deps } = harness({
+      status: ENROLLED,
+      del: () => new Response(JSON.stringify({ detail: 'The store is read-only.' }), { status: 500 }),
+    });
+    const { result } = renderHook(() => useEnrolment(deps));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(true));
+
+    act(() => result.current.forget());
+
+    await waitFor(() => expect(result.current.error).toBe('The store is read-only.'));
+    expect(result.current.status?.enrolled).toBe(true);
+    expect(result.current.phase).toBe('idle');
+  });
+
+  it('says nothing was removed when the service could not be reached', async () => {
+    const { deps } = harness({
+      status: ENROLLED,
+      del: () => {
+        throw new Error('offline');
+      },
+    });
+    const { result } = renderHook(() => useEnrolment(deps));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(true));
+
+    act(() => result.current.forget());
+
+    await waitFor(() => expect(result.current.error).toMatch(/nothing was removed/i));
+    expect(result.current.status?.enrolled).toBe(true);
+  });
+
+  it('refuses to erase out from under a recording', async () => {
+    /* The sample in flight is about to become the print. Removing the old one
+       underneath it would race the POST that replaces it anyway. */
+    const { deps, deleted } = harness({ status: ENROLLED });
+    const { result } = renderHook(() => useEnrolment(deps));
+    await waitFor(() => expect(result.current.status?.enrolled).toBe(true));
+
+    act(() => result.current.start());
+    await waitFor(() => expect(result.current.phase).toBe('recording'));
+    act(() => result.current.forget());
+
+    expect(deleted.count).toBe(0);
+    expect(result.current.phase).toBe('recording');
   });
 });

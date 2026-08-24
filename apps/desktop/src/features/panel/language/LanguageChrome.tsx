@@ -21,8 +21,17 @@ export interface LanguageChromeProps {
  * had already worked out.
  */
 export function LanguageChrome({ languages, activeTier }: LanguageChromeProps) {
+  // Everything on the strip is expected and nothing has been heard, so the
+  // strip says which of those it means. Without this an operator reads two
+  // tags and assumes the room has been transcribed.
+  const awaiting = languages.length > 0 && languages.every((lang) => !lang.heard);
+
   return (
     <div className="language-chrome">
+      {/* Ahead of the tags, not after them: it is the label the tags need, and
+          "EN ZH Listening for" reads as a state that arrived late. */}
+      {awaiting ? <span className="language-chrome__awaiting">Listening for</span> : null}
+
       <ul className="language-chrome__languages" aria-label="Detected languages">
         {languages.length > 0 ? (
           languages.map((lang) => (
@@ -46,13 +55,6 @@ export function LanguageChrome({ languages, activeTier }: LanguageChromeProps) {
           <li className="language-chrome__empty">No language detected</li>
         )}
       </ul>
-
-      {languages.length > 0 && languages.every((lang) => !lang.heard) ? (
-        // Everything on the strip is expected and nothing has been heard, so
-        // the strip says which of those it means. Without this an operator
-        // reads two tags and assumes the room has been transcribed.
-        <span className="language-chrome__awaiting">Listening for</span>
-      ) : null}
 
       {activeTier ? (
         <span

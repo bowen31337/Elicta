@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addVocabularyTerm,
   deleteDocument,
+  deleteMeeting,
   deleteVocabularyTerm,
   compileBank,
   linkDocument,
   moveCandidate,
   pruneCandidate,
+  renameMeeting,
   retagDocument,
   uploadDocument,
 } from '../prepActions';
@@ -217,5 +219,82 @@ describe('removing things', () => {
     const fetch = stubFetch({ detail: 'no document: doc-9' }, { ok: false, status: 404 });
 
     await expect(deleteDocument('doc-9', { fetch })).rejects.toThrow('no document');
+  });
+});
+
+/**
+ * The two halves of a meeting that the Preparation screen could not do.
+ *
+ * `createMeeting` has been here since the screen learned to make one, and the
+ * list it lands in was one-way: no rename, no removal. An operator who made a
+ * meeting by mistake, or made three while working out what the button did, had
+ * no way back and no way to tell them apart afterwards.
+ */
+describe('editing a meeting', () => {
+  it('renames a meeting through the purpose the service stores', async () => {
+    const fetch = stubFetch({
+      meeting_id: 'meeting-3',
+      session_purpose: 'Validate the depot scheduling scope',
+      target_template_sections: null,
+    });
+
+    const purpose = await renameMeeting(
+      'meeting-3',
+      'Validate the depot scheduling scope',
+      { fetch },
+    );
+
+    expect(purpose).toBe('Validate the depot scheduling scope');
+    const [path, init] = fetch.mock.calls[0];
+    expect(path).toBe('/api/meetings/meeting-3');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({
+      session_purpose: 'Validate the depot scheduling scope',
+    });
+  });
+
+  it('trims the purpose before sending it', async () => {
+    const fetch = stubFetch({ meeting_id: 'meeting-3', session_purpose: 'Scope review' });
+
+    await renameMeeting('meeting-3', '  Scope review  ', { fetch });
+
+    const [, init] = fetch.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toEqual({ session_purpose: 'Scope review' });
+  });
+
+  it('refuses a blank purpose without troubling the service', async () => {
+    // The service answers 422 for an empty `session_purpose`, and a 422 read
+    // back to the operator as "The service answered 422" says less than the
+    // screen already knows.
+    const fetch = stubFetch(null);
+
+    await expect(renameMeeting('meeting-3', '   ', { fetch })).rejects.toThrow(
+      'needs a purpose',
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('escapes an id on its way into the path', async () => {
+    const fetch = stubFetch({ meeting_id: 'a/b', session_purpose: 'Scope review' });
+
+    await renameMeeting('a/b', 'Scope review', { fetch });
+
+    expect(fetch.mock.calls[0][0]).toBe('/api/meetings/a%2Fb');
+  });
+
+  it('removes a meeting', async () => {
+    const fetch = stubFetch(null, { status: 204 });
+
+    await deleteMeeting('meeting-3', { fetch });
+
+    const [path, init] = fetch.mock.calls[0];
+    expect(path).toBe('/api/meetings/meeting-3');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('says so when the service will not remove it', async () => {
+    const fetch = stubFetch({ detail: 'meeting not found' }, { ok: false, status: 404 });
+
+    await expect(deleteMeeting('meeting-9', { fetch })).rejects.toThrow('meeting not found');
   });
 });

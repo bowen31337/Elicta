@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { AboutScreen } from '../../features/about/route';
@@ -40,8 +40,14 @@ describe('prep', () => {
   it('shows the question tree grouped by template section', () => {
     render(<PrepScreen {...PREP} />);
 
-    expect(screen.getByText('Performance')).toBeInTheDocument();
-    expect(screen.getByText('Integrations')).toBeInTheDocument();
+    // Scoped to the bank itself. Every template section is now named twice on
+    // this screen — once as its disclosure header, once as a row in the page's
+    // index — and an unscoped lookup that used to find one heading finds two
+    // and fails. The claim here is about the tree, so ask the tree.
+    const bank = screen.getByRole('region', { name: 'Question bank' });
+
+    expect(within(bank).getByRole('button', { name: /^Performance/ })).toBeInTheDocument();
+    expect(within(bank).getByRole('button', { name: /^Integrations/ })).toBeInTheDocument();
     expect(
       screen.getByText(/what does that mean in seconds/),
     ).toBeInTheDocument();

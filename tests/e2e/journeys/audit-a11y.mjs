@@ -69,13 +69,31 @@ const SCENES = [
 
 const THEMES = ['light', 'dark'];
 
-/** Audited at both widths the product is actually seen at: the 420px panel —
- *  which also exercises WCAG 1.4.10 reflow — and the desk width the review
- *  screens are read at. Layout changes with width, and so can contrast: a
- *  wrapped label sits on a different ground than an unwrapped one. */
+/** Audited at every width the product is actually seen at: the 420px panel —
+ *  which also exercises WCAG 1.4.10 reflow — the desk width the review screens
+ *  are read at, and a phone. Layout changes with width, and so can contrast: a
+ *  wrapped label sits on a different ground than an unwrapped one.
+ *
+ *  The phone row carries `touch`, and that is not decoration. The panel's
+ *  layout for a hand is gated on `(pointer: coarse)` rather than on a width,
+ *  because the two tools that document this product both render at 420px with
+ *  a cursor and a width gate would have restyled the desk panel as a side
+ *  effect. The consequence is that width emulation alone cannot see the touch
+ *  layout at all: without `Emulation.setTouchEmulationEnabled` this audit
+ *  would report a clean run over a screen it never drew — the docked action
+ *  bar, its material, the 34pt nudge and the grid of full-width targets are
+ *  all behind that media query. */
 const VIEWPORTS = [
   { width: 420, height: 900 },
   { width: 820, height: 1100 },
+  { width: 390, height: 844, touch: true },
+  // A real desk. 820px is a *narrow* window, and layouts that only exist in a
+  // wide one were never audited at all: the preparation screen's contents rail
+  // needs 1220px of viewport before there is a margin to put it in, so every
+  // colour and target in it was outside this file's reach. The same blind spot
+  // is why the touch row exists — a viewport this suite does not visit is a
+  // screen it reports clean without drawing.
+  { width: 1440, height: 900 },
 ];
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -198,7 +216,11 @@ async function main() {
   const findings = [];
 
   for (const viewport of VIEWPORTS) {
-  await cdp.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+  const { touch = false, ...metrics } = viewport;
+  await cdp.send('Emulation.setDeviceMetricsOverride', { ...metrics, deviceScaleFactor: 1, mobile: touch });
+  // What actually flips `(pointer: coarse)`. Device metrics alone leave the
+  // primary pointer fine however narrow the viewport is.
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: touch, maxTouchPoints: touch ? 5 : 1 });
   for (const theme of THEMES) {
     await cdp.send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-color-scheme', value: theme }],
@@ -222,7 +244,13 @@ async function main() {
       });
 
       for (const violation of JSON.parse(result.value)) {
-        findings.push({ theme, scene, width: viewport.width, ...violation });
+        findings.push({
+          theme,
+          scene,
+          width: viewport.width,
+          pointer: touch ? 'coarse' : 'fine',
+          ...violation,
+        });
       }
     }
   }
@@ -236,7 +264,7 @@ async function main() {
   } else if (findings.length === 0) {
     console.log(
       `\n  No WCAG 2.2 AA violations across ${SCENES.length} scenes × ${THEMES.length} themes ` +
-        `× ${VIEWPORTS.length} widths (${VIEWPORTS.map((v) => v.width + 'px').join(', ')}).\n`,
+        `× ${VIEWPORTS.length} viewports (${VIEWPORTS.map((v) => v.width + 'px' + (v.touch ? ' touch' : '')).join(', ')}).\n`,
     );
   } else {
     const byRule = new Map();
@@ -250,7 +278,7 @@ async function main() {
     }
     console.log('\n  Worst offenders:');
     for (const finding of findings.slice(0, 6)) {
-      console.log(`    [${finding.theme}/${finding.scene}@${finding.width}] ${finding.id}: ${finding.nodes[0]?.target}`);
+      console.log(`    [${finding.theme}/${finding.scene}@${finding.width}${finding.pointer === 'coarse' ? '/touch' : ''}] ${finding.id}: ${finding.nodes[0]?.target}`);
       const detail = finding.nodes[0]?.summary?.split('\n').slice(0, 2).join(' ');
       if (detail) console.log(`        ${detail}`);
     }

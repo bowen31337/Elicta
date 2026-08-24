@@ -62,7 +62,7 @@ export interface CaptureMetering {
  * what keeps the button inert there, and the screen otherwise identical.
  */
 export interface CaptureEnrolment {
-  readonly phase: 'idle' | 'recording' | 'saving';
+  readonly phase: 'idle' | 'recording' | 'saving' | 'removing';
   /** Whole seconds recorded in this attempt so far. */
   readonly seconds: number;
   /** Where this attempt stops itself, as the service reported it. */
@@ -92,6 +92,16 @@ export interface CaptureEnrolment {
   readonly onStart?: (sourceId: string) => void;
   readonly onStop?: () => void;
   readonly onCancel?: () => void;
+  /**
+   * Erases the enrolled print.
+   *
+   * Separate from re-recording, because they answer different questions. An
+   * operator who has moved to a new headset wants a better sample; an operator
+   * handing the laptop on, or one who simply never agreed to leaving a
+   * voiceprint on it, wants the sample *gone* — and re-recording over it
+   * leaves biometric material behind either way.
+   */
+  readonly onForget?: () => void;
 }
 
 export interface CaptureScreenProps {
@@ -289,9 +299,40 @@ export function CaptureScreen({
 
   const recordingVoice = enrolment?.phase === 'recording';
   const savingVoice = enrolment?.phase === 'saving';
-  // No live control, mid-save, or the browser cannot open a microphone here.
+  const removingVoice = enrolment?.phase === 'removing';
+  // No live control, mid-save, mid-removal, or the browser cannot open a
+  // microphone here.
   const enrolBlocked =
-    enrolment === undefined || savingVoice || (enrolment.blockedReason ?? null) !== null;
+    enrolment === undefined ||
+    savingVoice ||
+    removingVoice ||
+    (enrolment.blockedReason ?? null) !== null;
+  // Deliberately *not* `enrolBlocked`. That gate is about the microphone — an
+  // insecure page, a browser with no capture API — and removal opens no
+  // device. An operator who cannot record here can still have left a print on
+  // this machine, and refusing to erase it because the microphone is
+  // unavailable would strand biometric material behind an unrelated limit.
+  const removeBlocked = enrolment === undefined || savingVoice || removingVoice || recordingVoice;
+
+  /**
+   * Whether Remove has been pressed once and is waiting to be meant.
+   *
+   * Every other Remove in this product is soft — the row stops loading and
+   * nothing is erased — so those ask nothing before acting. This one is the
+   * exception: `DELETE /api/operator/voiceprint` pops the record, no
+   * `deleted_at` exists on the table, and nothing anywhere rebuilds a
+   * voiceprint from anything else. A single tap that permanently destroys the
+   * only copy of something is worth a second one.
+   *
+   * A dialog would be the usual answer and is the wrong one here: this screen
+   * is the one an operator uses mid-meeting, and it is built on the rule that
+   * nothing on it steals focus (FR-1.3). So the confirmation happens in the
+   * row itself, replacing the same two buttons.
+   */
+  const [askedToRemove, setAskedToRemove] = useState(false);
+  // Derived rather than cleared in an effect, so a recording started while the
+  // question was on screen cannot leave a stale "are you sure" behind it.
+  const confirmingRemoval = askedToRemove && operatorEnrolled && !removeBlocked;
   const maxSeconds = enrolment?.maxSeconds ?? 60;
   const minSeconds = enrolment?.minSeconds ?? 3;
 
@@ -302,9 +343,13 @@ export function CaptureScreen({
     ? `Recording — ${enrolment.seconds}s of ${maxSeconds}s`
     : savingVoice
       ? 'Saving your voice sample'
-      : operatorEnrolled
-        ? 'Enrolled'
-        : 'Not enrolled';
+      : removingVoice
+        ? 'Removing your voice sample'
+        : confirmingRemoval
+          ? 'Remove your voice sample?'
+          : operatorEnrolled
+            ? 'Enrolled'
+            : 'Not enrolled';
 
   const enrolmentDetail = recordingVoice
     ? enrolment.seconds < minSeconds
@@ -312,9 +357,15 @@ export function CaptureScreen({
       : 'Stopping ends the recording and keeps it. It stops on its own at the cap.'
     : savingVoice
       ? 'Working out the voiceprint. The recording itself is not kept.'
-      : operatorEnrolled
-        ? `${enrolmentSeconds}s sample. Your speech is tagged as yours, so a question you ask is not mistaken for a client requirement.`
-        : `Record up to ${maxSeconds} seconds so your own speech can be told apart from the client’s.`;
+      : removingVoice
+        ? 'Erasing the voiceprint. Nothing here keeps a copy of it.'
+        : confirmingRemoval
+          ? // Said in full, because this is the one deletion on any screen here
+            // that nothing can undo.
+            'This erases the voiceprint for good — nothing brings it back. Your speech stops being told apart from the client’s until you record a new sample.'
+          : operatorEnrolled
+            ? `${enrolmentSeconds}s sample. Your speech is tagged as yours, so a question you ask is not mistaken for a client requirement.`
+            : `Record up to ${maxSeconds} seconds so your own speech can be told apart from the client’s.`;
   const blocked = Boolean(unavailableReason);
   const sourceId = (source: CaptureSource) => source.id ?? source.label;
   const [chosen, setChosen] = useState<string | null>(null);
@@ -557,6 +608,49 @@ export function CaptureScreen({
                   Discard
                 </button>
               </div>
+            ) : confirmingRemoval ? (
+              /* The question replaces the buttons that asked it, in the same
+                 two positions. Keep is second and plain rather than being the
+                 filled default, because the row above already says what the
+                 danger is and a filled Keep would put the visual weight on
+                 the outcome the operator did not just ask for. */
+              <div className="enrol-actions">
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  onClick={() => {
+                    setAskedToRemove(false);
+                    enrolment?.onForget?.();
+                  }}
+                >
+                  Remove for good
+                </button>
+                <button type="button" className="btn" onClick={() => setAskedToRemove(false)}>
+                  Keep
+                </button>
+              </div>
+            ) : operatorEnrolled ? (
+              /* Two actions once there is something to act on, because
+                 re-recording and removing are different intentions and
+                 re-recording is not a way to get rid of a voiceprint. */
+              <div className="enrol-actions">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => enrolment?.onStart?.(voiceInputId)}
+                  disabled={enrolBlocked}
+                >
+                  {savingVoice ? 'Saving…' : removingVoice ? 'Removing…' : 'Re-record'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  onClick={() => setAskedToRemove(true)}
+                  disabled={removeBlocked}
+                >
+                  Remove
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -564,7 +658,7 @@ export function CaptureScreen({
                 onClick={() => enrolment?.onStart?.(voiceInputId)}
                 disabled={enrolBlocked}
               >
-                {savingVoice ? 'Saving…' : operatorEnrolled ? 'Re-record' : 'Enrol'}
+                {savingVoice ? 'Saving…' : 'Enrol'}
               </button>
             )}
           </div>
@@ -656,6 +750,7 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
             : undefined,
         onStop: enrolment.stop,
         onCancel: enrolment.cancel,
+        onForget: enrolment.forget,
       }}
       onTogglePause={() => {
         void (capture.status.state === 'paused' ? capture.resume() : capture.pause());

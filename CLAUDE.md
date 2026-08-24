@@ -40,7 +40,7 @@ Polyglot monorepo — three toolchains, three package managers.
 |---|---|---|
 | `core/crates/*` | Rust | Latency-critical plugin crates: `asr-live`, `bank`, `capture`, `coverage`, `language`, `ranking`, `slow-lane`, `trigger-gate`, `wer` |
 | `core/shared/*` | Rust | Cross-cutting: `app` (registry seam), `crypto`, `egress`, `health`, `session`, `telemetry` |
-| `apps/desktop` | TS / React 18 / Vite / Tailwind | Panel UI (`src/features/panel/*`) |
+| `apps/desktop` | TS / React 18 / Vite | Panel UI (`src/features/panel/*`) |
 | `apps/desktop/src-tauri` | Rust (Tauri 2) | Desktop shell — **its own Cargo workspace**, not the root one |
 | `apps/service` | Python 3.12 / FastAPI / SQLAlchemy | Context compiler, debrief engine, record-path transcription |
 | `packages/api-client` | TS | Generated from the service's OpenAPI schema — **do not hand-edit** |
@@ -123,6 +123,27 @@ FAKE_AUDIO=speech.wav EXPECT_WORDS="dashboard,depot" \
 ```
 A tone proves the bytes arrive and the sequence never gaps; only speech proves a
 transcript. The file's header says how to generate a WAV — there is no fixture here.
+
+**Does a nudge reach the panel?** Two tools, in order of what they measure.
+`nudge-probe.mjs` posts to the same intake a recogniser posts to and reads the
+session stream itself — the gate, the bank, the rate limit, no audio, nothing
+billed. `panel-nudge.mjs` adds the last hop, the one the operator sees: it opens
+the app in Chrome, picks the meeting through the toolbar, posts one vague line
+and waits for *that* nudge's question to appear in the panel's markup on the
+connection it already had.
+```bash
+node tests/e2e/journeys/nudge-probe.mjs --list           # which meetings there are
+node tests/e2e/journeys/panel-nudge.mjs 37               # meeting-37, end to end
+node tests/e2e/journeys/panel-nudge.mjs 37 --wait --act  # sit out the limit, tap the chips
+node tests/e2e/journeys/panel-nudge.mjs 37 --quiet-check # a line that must NOT fire
+```
+Two things it deliberately does not accept as proof. A nudge already on the
+meeting satisfies "is there a nudge?", so the check is bound to the id the POST
+returned and to the previous card receding into history — consecutive nudges on
+the same trigger can carry identical text. And `performance.getEntriesByType`
+does not list an `EventSource`, so "did the panel connect?" is answered from
+CDP's network events; asking the page reports a panel that never connected in
+the same run in which it visibly received a nudge.
 
 Database migrations (Alembic, run from the repo root):
 ```bash

@@ -88,7 +88,7 @@ export class Cdp {
   }
 }
 
-export async function launchBrowser({ width, height, scale = 2 }) {
+export async function launchBrowser({ width, height, scale = 2, flags = [] }) {
   const port = 9222 + Math.floor(Math.random() * 500);
   // A profile of this run's own, thrown away with it. Without one Chrome uses
   // its default profile, so `localStorage` — which is where the toolbar keeps
@@ -109,6 +109,11 @@ export async function launchBrowser({ width, height, scale = 2 }) {
       '--disable-gpu',
       '--hide-scrollbars',
       `--window-size=${width},${height}`,
+      // Whatever the caller needs and this function should not decide: a
+      // self-signed certificate, for one — `start.sh --https` serves TLS on
+      // the same port, and without `--ignore-certificate-errors` Chrome stops
+      // at its own interstitial instead of loading the app.
+      ...flags,
       'about:blank',
     ],
     { stdio: 'ignore' },

@@ -129,6 +129,22 @@
    field in `.row-main`, so the row is taller than a reading row and the
    controls beside it stay centred against the pair. */
 .row--form { align-items: flex-end; padding-top: var(--space-3); padding-bottom: var(--space-3); }
+
+/* Three controls on one line stop being three controls at phone width. The
+   text field is the flexible one, so it absorbed all of the shortfall and was
+   measured at 18.8px of usable width beside a select that would not shrink —
+   a WCAG 2.2 target-size failure, and unusable long before it was a failure.
+   Stacked, each one keeps the 44px the token layer already gives it.
+
+   Found by the touch pass in `audit-a11y.mjs`: the same 390px viewport with a
+   cursor lays this row out identically and axe passes it, because `target-size`
+   is only asserted where the primary pointer is coarse. */
+@media (pointer: coarse) and (max-width: 767px) {
+  .row--form { flex-wrap: wrap; align-items: stretch; }
+  .row--form .row-main { flex: 1 1 100%; }
+  .row--form .field--inline { flex: 1 1 auto; width: auto; min-width: 0; }
+  .row--form .btn { flex: 0 0 auto; }
+}
 .row--form .row-main { gap: var(--space-2); }
 .row--form label { cursor: pointer; }
 
@@ -235,4 +251,296 @@ label.dropzone-pick { cursor: pointer; }
   justify-content: center;
   margin-top: var(--space-2);
   text-decoration: none;
+}
+
+/* ==========================================================================
+   The page's own contents, for a page too long to cross
+
+   Preparation is the one screen whose length is data rather than design. With
+   a real compiled bank — 73 questions in eight template sections — it measures
+   3,452px with one section open and 11,021px with all of them open: twelve
+   viewports, with the Meetings section, which is the next thing an operator
+   does, starting at 10,235px.
+
+   The disclosures and the filter made the *bank* readable. They did nothing
+   about the page, which still had to be crossed by wheel, and there was no
+   keyboard route at all — the pane was an unfocusable scrolling div, so End
+   and Page Down moved it by zero pixels. That is fixed in the shell; this is
+   the other half: a contents rail in the margin where there is a margin, and
+   the same rows as a pinned row of capsules where there is not.
+   ========================================================================== */
+
+.screen-layout {
+  /* How far under the top of the scrollport things pin. The toolbar always
+     covers that much; at narrow widths the index bar covers more, and the bank
+     headers pin below both. Declared once here so nothing re-derives it — and
+     the bar is given this as a hard height below, rather than being left to
+     size itself, because a number here that the bar does not actually match is
+     a number that lies. It was 46px against a bar that measured 32 with a
+     cursor and 52 under a thumb: on the desktop the pinned section headers
+     floated 14px clear of the bar with the questions sliding through the gap,
+     and on a phone they pinned 6px *behind* it. */
+  --index-bar: 44px;
+  --pin-top: calc(var(--chrome-top) + var(--index-bar));
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  box-sizing: border-box;
+}
+
+/* Both children share row one — always, at both widths. That is what gives the
+   rail somewhere to travel: a sticky box moves only within its own grid area,
+   so an index on a row of its own would be pinned to a strip its own height
+   and never move at all. Narrow, the two overlap and the document passes under
+   the bar; wide, they sit side by side. */
+.screen-layout > * { grid-row: 1; grid-column: 1; min-width: 0; }
+
+/* Wide enough for a margin to exist. The threshold is a *pane* width reached
+   through the viewport: the source list takes 244px of it, and the rail, the
+   gap and the 720px measure need 970 of what is left. Below this there is no
+   margin to put a rail in, and one squeezed in would come out of the reading
+   measure — which is the thing this screen is built around. */
+@media (min-width: 1220px) {
+  .screen-layout {
+    --index-bar: 0px;
+    grid-template-columns: 190px minmax(0, 720px);
+    column-gap: var(--space-6);
+    justify-content: center;
+    padding-left: var(--space-6);
+  }
+  .screen-layout > .screen--indexed { grid-column: 2; }
+}
+
+/* A definite width, which is what it had as a block and what a grid item does
+   not get for free.
+
+   `margin: 0 auto` is how this document centres itself, and auto margins make
+   a grid item size to `fit-content` instead of filling its track. `fit-content`
+   is floored by min-content, and the min-content of a document row is its
+   filename plus a tag menu plus a Remove button — 388px, which no phone has.
+   The page came out 428px wide inside a 390px pane and sheared the buttons off
+   every question on it. As a block the width was simply the container's and
+   the row was clipped by its group, which is the behaviour this restores.
+   Measured both ways before and after. */
+.screen--indexed { width: 100%; }
+
+/* Narrow, the bar is chrome over the document rather than a row above it, so
+   the document owes it the space it covers. */
+@media (max-width: 1219px) {
+  .screen--indexed { padding-top: calc(var(--space-7) + var(--index-bar)); }
+}
+
+/* A jump lands the section below everything pinned over it. Without this the
+   heading you asked for arrives underneath the chrome, and the page looks like
+   it went somewhere else. */
+.screen-layout section[id],
+.screen-layout .bank-section[id] {
+  scroll-margin-top: calc(var(--pin-top) + var(--space-5));
+}
+
+/* Focused because it was jumped to. The ring is the platform's and is right on
+   a control; drawn around a thousand pixels of page it reads as an error
+   state. The section stays focusable — that is what carries the keyboard to
+   where the eye just went — it simply does not shout about it. */
+.screen-layout section[id]:focus,
+.screen-layout section[id]:focus-visible,
+.screen-layout .bank-section[id]:focus,
+.screen-layout .bank-section[id]:focus-visible { outline: none; }
+
+/* ---- The rail, where there is a margin for one ------------------------- */
+
+.section-index {
+  position: sticky;
+  z-index: 4;
+  top: var(--chrome-top);
+  align-self: start;
+  min-width: 0;
+}
+
+.index-caption {
+  margin: 0 0 var(--space-2) var(--space-3);
+  color: var(--label-supporting);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.index-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* WCAG 2.2 asks 24x24 of any target, and rows set at footnote size with 4px
+     of padding came to 23.6 — found by the audit the moment a desk width was
+     added to it, on every theme and both the screen and the whole window.
+     Adjacent rows touch, so the spacing exception does not apply and the size
+     is the only way to satisfy it. 28 is also simply a better row: this is a
+     column of ten in a margin, and a reader picks one of them at a glance. */
+  min-height: 28px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--label-supporting);
+  text-decoration: none;
+  font-size: var(--text-footnote);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.index-row-label { min-width: 0; flex: 1; }
+/* The count sits at the trailing edge so the column of them can be read down
+   the rail — the same job it does in the disclosure headers. */
+.index-row-count { color: var(--label-supporting); flex: none; }
+
+@media (hover: hover) {
+  .index-row:hover { background: var(--fill-4); color: var(--label); }
+}
+/* Feedback on press, not on release. */
+.index-row:active { background: var(--fill-3); }
+
+.index-row[aria-current] { color: var(--accent-ink); font-weight: var(--weight-semibold); }
+.index-row[aria-current] .index-row-count { color: var(--accent-ink); }
+
+@media (min-width: 1220px) {
+  .section-index { top: calc(var(--chrome-top) + var(--space-7)); }
+
+  /* One hairline down the whole rail, both levels, the way a contents list is
+     ruled — and "you are here" is that rule going accent for one row's
+     length. Quieter than a filled row, which would read as a second source
+     list competing with the real one three inches to its left. */
+  .index-list { box-shadow: inset 1.5px 0 0 var(--separator); }
+  .index-list--nested { box-shadow: none; padding-inline-start: var(--space-4); }
+  .index-row {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    box-shadow: inset 1.5px 0 0 transparent;
+  }
+  .index-row[aria-current] { box-shadow: inset 1.5px 0 0 var(--accent); }
+}
+
+/* ---- The same rows, where there is no margin --------------------------- */
+
+/* Pinned under the toolbar as a scrolling row of capsules. The material is the
+   toolbar's, because it is doing the toolbar's job — chrome the content passes
+   under — and a second, differently-lit bar directly below the first is the
+   giveaway that two people built them. */
+@media (max-width: 1219px) {
+  .section-index {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: var(--index-bar);
+    box-sizing: border-box;
+    background: var(--material-regular-tint);
+    -webkit-backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+    backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--sidebar-highlight),
+      0 0.5px 0 var(--separator);
+  }
+
+  .index-caption { display: none; }
+
+  .index-list {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* The row can be longer than the window, so its ends fade rather than
+       being cut: a capsule sliced by the edge reads as a rendering fault, a
+       faded one reads as "there is more this way". */
+    /* Inset by padding alone. Pulling the list wider than the bar with a
+       negative margin made the grid column wider than the pane, and the pane
+       does not scroll sideways — at 390px it sheared the Prune button off the
+       right edge of every question on the page. */
+    padding: 0 var(--space-6);
+    -webkit-mask-image: linear-gradient(90deg, transparent, black var(--space-6),
+      black calc(100% - var(--space-6)), transparent);
+    mask-image: linear-gradient(90deg, transparent, black var(--space-6),
+      black calc(100% - var(--space-6)), transparent);
+  }
+  .index-list::-webkit-scrollbar { display: none; }
+  .index-list li { flex: none; }
+
+  /* The bank's eight sections are not eight more capsules — that is a row
+     nobody can read, and a scroll to cross a scroll. At this width the page's
+     four parts are the index, and the pinned section headers say which part of
+     the bank you are in. */
+  .index-list--nested { display: none; }
+
+  .index-row {
+    white-space: nowrap;
+    border-radius: var(--radius-capsule);
+    background: var(--fill-4);
+    padding: var(--space-2) var(--space-4);
+  }
+  .index-row[aria-current] { background: var(--accent-fill); color: #fff; }
+  .index-row[aria-current] .index-row-count { color: #fff; }
+}
+
+/* A thumb needs the target the token layer gives every other control here —
+   and the bar has to grow to hold it, or the number the headers pin against
+   stops describing the bar they are pinning below. */
+@media (pointer: coarse) {
+  .index-row { min-height: 44px; }
+}
+@media (pointer: coarse) and (max-width: 1219px) {
+  .screen-layout { --index-bar: 56px; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .section-index {
+    background: var(--bg-grouped);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .index-row[aria-current] { outline: 1px solid var(--separator-opaque); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .index-row { transition-duration: 0.01ms; }
+}
+
+/* ---- Section headers that stay while their section is read ------------- */
+
+/* Nine questions is more than a screen, and the header naming them scrolled
+   away with the first two. Pinned, the section says what it is for as long as
+   you are inside it — which is what a grouped table does on this platform.
+
+   `clip`, not `hidden`. Both clip identically; `hidden` additionally makes the
+   element a scroll container, and a scroll container is exactly what stops a
+   descendant sticking. `.group` is `overflow: hidden`, so without this line
+   the rule below would silently do nothing. */
+.bank-section { overflow: clip; }
+
+/* The heading is what sticks, not the button inside it. A sticky box travels
+   only within its own containing block, and the button's is the `h3` — a box
+   exactly the header's own height, which is no distance at all. Measured: with
+   the rule on the button the headers scrolled away exactly as before, 767px
+   past the top by the time their section was half read. On the `h3` the
+   containing block is the section, which is the distance that was wanted. */
+.bank-section-heading {
+  position: sticky;
+  top: var(--pin-top);
+  z-index: 2;
+}
+
+.bank-disclosure {
+  /* The row's fill is translucent and would show the questions sliding under
+     it. Layering it over the group's own ground keeps the colour exactly as it
+     was and makes it opaque. */
+  background: linear-gradient(var(--fill-4), var(--fill-4)), var(--bg-tertiary);
+  /* A hairline along the bottom: once it is pinned there is always something
+     underneath it. */
+  box-shadow: inset 0 -0.5px 0 var(--separator);
+}
+.bank-disclosure:hover:not(:disabled) {
+  background: linear-gradient(var(--fill-3), var(--fill-3)), var(--bg-tertiary);
+}
+.bank-disclosure:active:not(:disabled) {
+  background: linear-gradient(var(--fill-2), var(--fill-2)), var(--bg-tertiary);
 }

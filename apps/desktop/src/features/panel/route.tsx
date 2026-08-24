@@ -25,6 +25,14 @@ import { useCurrentEngagement, useCurrentMeeting } from '../../services/selectio
  * page, the nudge is the only thing set at reading size, and every response is
  * one tap. The chrome (coverage, time, language, connection) is deliberately
  * quiet — it is state to glance at, not to read.
+ *
+ * On a touch screen that constraint gets stronger rather than different: the
+ * panel stops being a card floating over something and becomes the screen,
+ * with the chrome pinned at the top, the nudge in the middle at reading size,
+ * and every control docked at the foot of the display where a thumb already
+ * is. The layout adapts; what the screen *is* does not. `route.css` holds the
+ * whole of that behind `(pointer: coarse)` — deliberately the pointer and not
+ * a width, since a narrow desk window is still driven by a cursor.
  */
 export interface PanelState {
   readonly active: Nudge | null;
@@ -186,34 +194,45 @@ export function OperatorPanel({
         />
       </section>
 
-      <footer className="panel-chips">
-        {firstUnfilled ? <AskedItChip slot={firstUnfilled} onAsked={onAsked} /> : null}
-        {state.active ? (
-          <ParkItChip
-            thread={{
-              id: state.active.id,
-              question: state.active.question,
-              operatorAskedAt: null,
-            }}
-            onParked={onParked}
-          />
-        ) : null}
-        {liveCoverage ? <WhatAmIMissingChip summary={liveCoverage} /> : null}
-        {state.active ? (
-          <GoDeeperChip
-            thread={{
-              id: state.active.id,
-              question: state.active.question,
-              operatorAskedAt: null,
-            }}
-          />
-        ) : null}
+      {/* Everything the operator can do, in one region. On a touch screen it
+          docks to the foot of the display as a single material (route.css),
+          which is the only part of this panel a thumb can reach without the
+          hand leaving the device. Source order matters and is not arbitrary:
+          the four chips are laid out two to a row in named grid cells, and
+          read row by row that is exactly this order — so the reading order and
+          the visual order never come apart. */}
+      <footer className="panel-dock">
+        <div className="panel-chips">
+          {firstUnfilled ? <AskedItChip slot={firstUnfilled} onAsked={onAsked} /> : null}
+          {state.active ? (
+            <ParkItChip
+              thread={{
+                id: state.active.id,
+                question: state.active.question,
+                operatorAskedAt: null,
+              }}
+              onParked={onParked}
+            />
+          ) : null}
+          {liveCoverage ? <WhatAmIMissingChip summary={liveCoverage} /> : null}
+          {state.active ? (
+            <GoDeeperChip
+              thread={{
+                id: state.active.id,
+                question: state.active.question,
+                operatorAskedAt: null,
+              }}
+            />
+          ) : null}
+        </div>
+
+        {/* FR-6.9: present, but deliberately the quietest thing here — it is an
+            escape hatch, not the primary way to work. It stays last so the
+            keyboard reaches it in source order after the chips, which are the
+            primary input, and because the foot of the dock is where a thumb
+            expects a field it has decided to type in. */}
+        <EscapeHatchInput onSubmit={() => undefined} />
       </footer>
-
-      {/* FR-6.9: present, but deliberately the quietest thing here — it is an
-          escape hatch, not the primary way to work. */}
-      <EscapeHatchInput onSubmit={() => undefined} />
-
     </main>
   );
 }

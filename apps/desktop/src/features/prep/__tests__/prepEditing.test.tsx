@@ -536,3 +536,142 @@ describe('dropping documents onto the screen', () => {
     expect(written).toHaveLength(0);
   });
 });
+
+/**
+ * The meetings list, which was one-way.
+ *
+ * `Add meeting` has been on this screen since the screen learned to make one,
+ * and nothing took a meeting back out or told two of them apart. Three rows
+ * reading `meeting-1`, `meeting-2`, `meeting-3` is what an operator saw after
+ * pressing the button while working out what it did, and there was no way back
+ * from any of it.
+ */
+describe('editing the meetings on the list', () => {
+  it('removes a meeting through the service', async () => {
+    const written = stubService();
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove Discovery 2 — volumes' }),
+    );
+
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0].path).toBe('/api/meetings/meeting-1');
+    expect(written[0].method).toBe('DELETE');
+  });
+
+  it('says what the service said when it will not remove one', async () => {
+    stubService({
+      path: '/api/meetings/meeting-1',
+      status: 404,
+      detail: 'meeting not found',
+    });
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove Discovery 2 — volumes' }),
+    );
+
+    expect(await screen.findByText('meeting not found')).toBeInTheDocument();
+  });
+
+  it('renames a meeting to the purpose the operator typed', async () => {
+    const written = stubService();
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename Discovery 2 — volumes' }),
+    );
+    const field = screen.getByRole('textbox', { name: 'What this meeting is for' });
+    await userEvent.clear(field);
+    await userEvent.type(field, 'Discovery 3 — peak volumes');
+    await userEvent.click(screen.getByRole('button', { name: 'Save meeting purpose' }));
+
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0].path).toBe('/api/meetings/meeting-1');
+    expect(written[0].method).toBe('PATCH');
+    expect(written[0].body).toEqual({ session_purpose: 'Discovery 3 — peak volumes' });
+  });
+
+  it('opens the rename field with the purpose already in it', async () => {
+    // Renaming is usually amending, and retyping a sentence to change a word
+    // is how an operator ends up with two meetings called almost the same.
+    stubService();
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename Discovery 2 — volumes' }),
+    );
+
+    expect(screen.getByRole('textbox', { name: 'What this meeting is for' })).toHaveValue(
+      'Discovery 2 — volumes',
+    );
+  });
+
+  it('leaves the meeting alone when the rename is cancelled', async () => {
+    const written = stubService();
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename Discovery 2 — volumes' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel rename' }));
+
+    expect(written).toHaveLength(0);
+    expect(screen.getByText('Discovery 2 — volumes')).toBeInTheDocument();
+  });
+
+  it('does not send a blank purpose to a service that refuses it', async () => {
+    const written = stubService();
+    await ready();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Rename Discovery 2 — volumes' }),
+    );
+    await userEvent.clear(screen.getByRole('textbox', { name: 'What this meeting is for' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save meeting purpose' }));
+
+    expect(written).toHaveLength(0);
+    expect(await screen.findByText(/needs a purpose/i)).toBeInTheDocument();
+  });
+
+  it('names an unnamed meeting by its id, so the controls can still be told apart', async () => {
+    // A meeting created and not yet described has no purpose. Two rows whose
+    // buttons both read `Remove` are two buttons a screen reader cannot
+    // separate, and this screen's whole point is that the operator made
+    // several while working out what the button did.
+    const written = stubService();
+    READS['/api/engagements/eng-1/meetings'] = {
+      engagement_id: 'eng-1',
+      meetings: [
+        (READS['/api/engagements/eng-1/meetings'] as { meetings: unknown[] }).meetings[0],
+        {
+          meeting_id: 'meeting-2',
+          engagement_id: 'eng-1',
+          state: 'scheduled',
+          capture_mode: 'line-in',
+          scheduled_at: null,
+          session_purpose: null,
+          sections_filled: null,
+          sections_total: null,
+        },
+      ],
+    };
+    try {
+      await ready();
+
+      expect(screen.getByRole('button', { name: 'Remove meeting-2' })).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Remove meeting-2' }));
+      await waitFor(() => expect(written).toHaveLength(1));
+      expect(written[0].path).toBe('/api/meetings/meeting-2');
+    } finally {
+      READS['/api/engagements/eng-1/meetings'] = {
+        engagement_id: 'eng-1',
+        meetings: [
+          (READS['/api/engagements/eng-1/meetings'] as { meetings: unknown[] }).meetings[0],
+        ],
+      };
+    }
+  });
+});

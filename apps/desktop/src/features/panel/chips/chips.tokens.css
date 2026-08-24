@@ -21,7 +21,13 @@
   padding: var(--space-3) var(--space-5);
   min-height: 44px;
   cursor: pointer;
-  transition: transform var(--duration-instant) var(--ease-out),
+  /* The two halves of a press are not the same motion. Going down is
+     instantaneous — anything else reads as lag under a finger — and is set on
+     :active below. Coming back up is the object's own recoil, so it takes the
+     spring curve and long enough to be seen: press and release on the same
+     flat 100ms is what makes a web button feel like a switch rather than
+     something you pushed. */
+  transition: transform var(--duration-base) var(--ease-spring),
               background var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
@@ -56,6 +62,9 @@
 .go-deeper-chip__button:active:not(:disabled),
 .what-am-i-missing-chip__button:active:not(:disabled) {
   transform: scale(0.96);
+  /* Down is immediate; the spring in the base rule governs only the way back.
+     Feedback lands on pointer-down, which is what :active already means. */
+  transition-duration: var(--duration-instant);
 }
 
 /* Confirmed reads as done, not as disabled-and-greyed: the operator needs to
@@ -85,4 +94,41 @@
 .what-am-i-missing-chip__result {
   font-size: var(--text-caption-1);
   color: var(--label-supporting);
+}
+
+
+/* ---- The primary action -------------------------------------------------
+ *
+ * Four capsules in the same grey say the operator has four equally likely
+ * things to do. They do not: `Asked it` is the affirmative — the tap that
+ * says the question got asked and closes a section (FR-6.6/6.7) — and the
+ * other three are a deferral, a lookup and a request. Apple's idiom for the
+ * affirmative is a filled accent, so that is what it gets.
+ *
+ * Deliberately not gated on the pointer. The layout adapts to the device —
+ * a phone docks these at the foot of the display, a desk lays them inline in
+ * a card — but which control is the primary one does not change with the
+ * hardware, and a button that is blue in the browser and grey in the desktop
+ * build would be two products. Responsive layout, one look.
+ *
+ * `--accent-fill` rather than `--accent`: it is the darkest step that still
+ * reads as system blue while clearing 4.5:1 against white, which the vivid
+ * system blue does not (4.02:1).
+ *
+ * Confirmed is deliberately not covered here. `:disabled` on this chip means
+ * "already done" and keeps its green; the blue is only the un-tapped state,
+ * so the flip from blue to green is the confirmation itself.
+ */
+.panel-chips > .asked-it-chip:not(:disabled) {
+  background: var(--accent-fill);
+  color: #fff;
+}
+.panel-chips > .asked-it-chip:not(:disabled):active {
+  background: color-mix(in srgb, var(--accent-fill) 86%, black);
+}
+
+@media (hover: hover) {
+  .panel-chips > .asked-it-chip:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent-fill) 92%, black);
+  }
 }

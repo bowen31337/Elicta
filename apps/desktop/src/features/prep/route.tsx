@@ -9,10 +9,12 @@ import {
   compileBank,
   createMeeting,
   deleteDocument,
+  deleteMeeting,
   deleteVocabularyTerm,
   linkDocument,
   moveCandidate,
   pruneCandidate,
+  renameMeeting,
   retagDocument,
   uploadDocument,
 } from './prepActions';
@@ -27,6 +29,10 @@ import type {
   VocabularyTermType,
 } from './types';
 import { CAPTURE_MODES } from './types';
+import { SectionIndex } from './SectionIndex';
+import type { IndexEntry } from './sectionIndex';
+import { bankSectionId, flattenEntries, jumpBehaviour } from './sectionIndex';
+import { useCurrentSection } from './useCurrentSection';
 import { usePrep } from './usePrep';
 
 /**
@@ -57,6 +63,8 @@ export interface PrepActions {
   readonly removeDocument: (documentId: string) => Promise<void>;
   readonly removeTerm: (termId: string) => Promise<void>;
   readonly addMeeting: (captureMode: string) => Promise<void>;
+  readonly renameMeeting: (meetingId: string, sessionPurpose: string) => Promise<void>;
+  readonly removeMeeting: (meetingId: string) => Promise<void>;
   readonly retag: (documentId: string, status: DocumentStatus) => Promise<void>;
 }
 
@@ -75,6 +83,18 @@ export interface PrepScreenProps {
 
 function meetingCaptureLabel(mode: string): string {
   return CAPTURE_MODES.find((known) => known.value === mode)?.label ?? mode;
+}
+
+/**
+ * What to call a meeting in a label a person or a screen reader reads.
+ *
+ * A meeting created and not yet described has no purpose, and this screen is
+ * where several of those accumulate — so the id stands in. Two rows whose
+ * buttons both read `Remove` are two buttons a screen reader cannot separate.
+ */
+function meetingName(meeting: PreparedMeeting): string {
+  const purpose = meeting.purpose?.trim();
+  return purpose === undefined || purpose === '' ? meeting.id : purpose;
 }
 
 const DOCUMENT_STATUSES: readonly DocumentStatus[] = ['ground truth', 'hypothesis', 'superseded'];
@@ -130,6 +150,14 @@ export function PrepScreen({
   const [termType, setTermType] = useState<VocabularyTermType>('product_name');
   const [dragging, setDragging] = useState(false);
   const [captureMode, setCaptureMode] = useState<string>(CAPTURE_MODES[0].value);
+  /**
+   * Which meeting is being renamed, or `null` for none.
+   *
+   * One id rather than a flag per row: only one row is ever being edited, and
+   * a set would let two rows hold two drafts of the same field.
+   */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [purposeDraft, setPurposeDraft] = useState('');
   /**
    * Which bank sections are open, or `null` for "the operator has not said".
    *
@@ -231,8 +259,74 @@ export function PrepScreen({
     });
   };
 
+  /* --- Getting to the bottom of twelve viewports ---------------------------
+     Measured on the running app with a real compiled bank — 73 questions in
+     eight sections — this screen is 3,452px with one section open and
+     11,021px with all of them open, and Meetings starts at 10,235px. The
+     disclosures and the filter made the bank readable; they did nothing about
+     the page, which still had to be crossed by wheel. The index below is the
+     route across it, and it lists the bank's own sections too, because that
+     is where the length is. */
+  const indexEntries: readonly IndexEntry[] = [
+    { id: 'prep-documents', label: 'Reference documents' },
+    { id: 'prep-vocabulary', label: 'Engagement vocabulary' },
+    {
+      id: 'prep-bank',
+      label: 'Question bank',
+      childrenLabel: 'Question bank sections',
+      // From the sections the screen renders, not from the filtered view: an
+      // index that shrinks as you type is a map redrawing itself while you
+      // read it. The filter already says what it matched, in words.
+      children: sections.map((section) => ({
+        id: bankSectionId(section.templateSection),
+        label: section.templateSection,
+        count: section.candidates.length,
+      })),
+    },
+    { id: 'prep-meetings', label: 'Meetings' },
+  ];
+
+  const index = useCurrentSection(flattenEntries(indexEntries).map((entry) => entry.id));
+
+  const jump = (entry: IndexEntry) => {
+    // A closed section jumped to and left closed is a jump that did nothing:
+    // the operator asked for Constraints and got a shut header. Opening it is
+    // the whole point of having asked.
+    const section = sections.find((s) => bankSectionId(s.templateSection) === entry.id);
+    if (section !== undefined && !isOpen(section.templateSection)) {
+      toggleSection(section.templateSection);
+    }
+
+    const target = document.getElementById(entry.id);
+    if (target === null) return;
+
+    // Focus first and without scrolling, so the keyboard lands where the eye
+    // is about to; then the scroll, which is the part that is animated.
+    // Focusing after would fight the animation, and focusing *with* scroll
+    // would jump to the destination and then animate from it.
+    target.focus?.({ preventScroll: true });
+
+    const box = target.getBoundingClientRect?.();
+    target.scrollIntoView?.({
+      behavior: jumpBehaviour(
+        box === undefined ? 0 : box.top,
+        window.innerHeight,
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
+      ),
+      block: 'start',
+    });
+  };
+
   return (
-    <main className="screen" aria-labelledby="prep-title">
+    /* The index is a sibling of the document rather than its first child, and
+       that is a layout decision, not a tidiness one: as a grid item beside
+       `.screen` its area is the full height of the page, which is the distance
+       a sticky rail has to be free to travel. Nested inside the column it
+       could only travel within its own row, which is no distance at all. */
+    <div className="screen-layout">
+      <SectionIndex entries={indexEntries} currentId={index.currentId} onJump={jump} />
+
+      <main className="screen screen--indexed" aria-labelledby="prep-title" ref={index.attach}>
       <header className="screen-head">
         <ScreenEyebrow>Engagement</ScreenEyebrow>
         <h1 className="t-large-title" id="prep-title">
@@ -246,7 +340,7 @@ export function PrepScreen({
         </p>
       )}
 
-      <section aria-labelledby="docs-title">
+      <section id="prep-documents" tabIndex={-1} aria-labelledby="docs-title">
         <h2 className="t-section" id="docs-title">
           Reference documents
         </h2>
@@ -369,7 +463,7 @@ export function PrepScreen({
         </p>
       </section>
 
-      <section aria-labelledby="vocab-title">
+      <section id="prep-vocabulary" tabIndex={-1} aria-labelledby="vocab-title">
         <h2 className="t-section" id="vocab-title">
           Engagement vocabulary
         </h2>
@@ -432,7 +526,7 @@ export function PrepScreen({
         </p>
       </section>
 
-      <section aria-labelledby="bank-title">
+      <section id="prep-bank" tabIndex={-1} aria-labelledby="bank-title">
         <h2 className="t-section" id="bank-title">
           Question bank
         </h2>
@@ -544,7 +638,7 @@ export function PrepScreen({
         )}
       </section>
 
-      <section aria-labelledby="meetings-title">
+      <section id="prep-meetings" tabIndex={-1} aria-labelledby="meetings-title">
         <h2 className="t-section" id="meetings-title">
           Meetings
         </h2>
@@ -561,16 +655,82 @@ export function PrepScreen({
               </div>
             </div>
           ) : (
-            meetings.map((meeting) => (
-              <div className="row" key={meeting.id}>
-                <div className="row-main">
-                  <span className="t-body">{meeting.purpose ?? meeting.id}</span>
-                  <span className="t-footnote">
-                    {meetingCaptureLabel(meeting.captureMode)} · {meeting.state}
-                  </span>
+            meetings.map((meeting) =>
+              renaming === meeting.id ? (
+                <div className="row row--form" key={meeting.id}>
+                  <div className="row-main">
+                    <label className="t-footnote" htmlFor={`meeting-purpose-${meeting.id}`}>
+                      What this meeting is for
+                    </label>
+                    <input
+                      id={`meeting-purpose-${meeting.id}`}
+                      type="text"
+                      className="field"
+                      placeholder="Discovery 2 — depot volumes"
+                      value={purposeDraft}
+                      disabled={write.busy}
+                      onChange={(event) => setPurposeDraft(event.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={write.busy}
+                    aria-label="Save meeting purpose"
+                    onClick={() =>
+                      void write.run(async () => {
+                        await actions.renameMeeting(meeting.id, purposeDraft);
+                        setRenaming(null);
+                      })
+                    }
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={write.busy}
+                    aria-label="Cancel rename"
+                    onClick={() => setRenaming(null)}
+                  >
+                    Cancel
+                  </button>
                 </div>
-              </div>
-            ))
+              ) : (
+                <div className="row" key={meeting.id}>
+                  <div className="row-main">
+                    <span className="t-body">{meetingName(meeting)}</span>
+                    <span className="t-footnote">
+                      {meetingCaptureLabel(meeting.captureMode)} · {meeting.state}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={write.busy}
+                    aria-label={`Rename ${meetingName(meeting)}`}
+                    onClick={() => {
+                      // Opened with the current purpose in it: renaming is
+                      // usually amending, and retyping a sentence to change one
+                      // word is how two meetings end up called almost the same.
+                      setPurposeDraft(meeting.purpose ?? '');
+                      setRenaming(meeting.id);
+                    }}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger"
+                    disabled={write.busy}
+                    aria-label={`Remove ${meetingName(meeting)}`}
+                    onClick={() => void write.run(() => actions.removeMeeting(meeting.id))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ),
+            )
           )}
 
           <div className="row row--form">
@@ -603,11 +763,14 @@ export function PrepScreen({
         </div>
         <p className="t-footnote hint">
           Which one you are working on is chosen in the toolbar, beside the
-          engagement.
+          engagement. Removing one takes it off this list — nothing is erased,
+          and the consent record and recording of a meeting that happened stay
+          where they are.
         </p>
       </section>
 
-    </main>
+      </main>
+    </div>
   );
 }
 
@@ -645,13 +808,16 @@ function BankSection({
   readonly run: (write: () => Promise<void>) => Promise<void>;
 }) {
   const bodyId = `bank-body-${section.templateSection.replace(/\W+/g, '-').toLowerCase()}`;
+  // The index points here, and the disclosure header is what it points *at* —
+  // so the id sits on the group rather than on the body, or a jump would land
+  // below the heading that names where it landed.
   const count =
     shown.length === section.candidates.length
       ? `${section.candidates.length}`
       : `${shown.length} of ${section.candidates.length}`;
 
   return (
-    <div className="group bank-section">
+    <div className="group bank-section" id={bankSectionId(section.templateSection)} tabIndex={-1}>
       <h3 className="bank-section-heading">
         <button
           type="button"
@@ -792,6 +958,9 @@ export default function PrepRoute() {
           ? Promise.resolve()
           : createMeeting({ engagementId, captureMode }),
       ),
+    renameMeeting: (meetingId, sessionPurpose) =>
+      after(renameMeeting(meetingId, sessionPurpose).then(() => undefined)),
+    removeMeeting: (meetingId) => after(deleteMeeting(meetingId)),
     retag: (documentId, status) => after(retagDocument(documentId, status)),
   };
 

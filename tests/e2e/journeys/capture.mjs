@@ -38,6 +38,13 @@ const CHROME =
   process.env.CHROME_PATH ??
   `${process.env.HOME}/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`;
 
+// `waitForApp` reaches the dev server from Node, and `start.sh --https` serves
+// it under a certificate this machine generated for itself. Same trade as the
+// Chrome flag below and made for the same reason: scoped to an https base URL,
+// so an http run keeps Node's verification on. Set before the first fetch,
+// which is what the flag reads.
+if (APP.startsWith('https:')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 /** The panel ships in a 420x720 window; capturing at that size keeps the
  *  screenshots honest about how much actually fits on screen. */
 const PANEL = { width: 420, height: 720 };
@@ -124,6 +131,43 @@ const SCENES = [
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
+/**
+ * Refuse to photograph a page that is not the app.
+ *
+ * This tool writes into `docs/journeys/screenshots/`, which the handbook then
+ * embeds in a PDF people outside the team read. There was nothing here that
+ * could tell the difference between a rendered scene and Chrome's network
+ * error page — pointed at a dev server it could not reach, it would have
+ * overwritten every screenshot with a picture of the browser and reported a
+ * clean run. `waitForApp` does not cover it: it proves the server answers, not
+ * that the tab in front of us is showing what the server said. A TLS
+ * interstitial in particular passes the fetch and fails the tab.
+ */
+async function assertSceneRendered(cdp, scene, name) {
+  const { result } = await cdp.send('Runtime.evaluate', {
+    expression: `JSON.stringify({
+      origin: location.origin,
+      mounted: document.querySelector('#root')?.childElementCount ?? 0,
+    })`,
+    returnByValue: true,
+  });
+  const { origin, mounted } = JSON.parse(result.value);
+  if (!APP.startsWith(origin)) {
+    throw new Error(
+      `${name}: the tab is on ${origin}, not ${APP} — Chrome never reached the ` +
+        `app, so this would have saved a picture of the browser. Check the dev ` +
+        `server is up, and that JOURNEY_BASE_URL matches its protocol: ` +
+        `start.sh --https serves TLS on the same port.`,
+    );
+  }
+  if (mounted === 0) {
+    throw new Error(
+      `${name}: ${APP} served the app but #root is empty, so scene "${scene}" ` +
+        `never mounted. A blank screenshot is worse than a missing one.`,
+    );
+  }
+}
+
 async function waitForApp() {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
@@ -150,6 +194,11 @@ function launchChrome(port, profile) {
       '--no-sandbox',
       '--hide-scrollbars',
       '--force-device-scale-factor=2',
+      // `start.sh --https` serves TLS on the same port, and without this Chrome
+      // stops at its own interstitial. Scoped to an https base URL rather than
+      // always on, because silently accepting a bad certificate is not a
+      // default worth carrying into an http run. Same rule as audit-a11y.mjs.
+      ...(APP.startsWith('https:') ? ['--ignore-certificate-errors'] : []),
       'about:blank',
     ],
     { stdio: 'ignore' },
@@ -235,6 +284,7 @@ async function main() {
     });
     await cdp.send('Page.navigate', { url: `${APP}/journeys.html?scene=${scene}` });
     await sleep(900);
+    await assertSceneRendered(cdp, scene, name);
 
     if (action) {
       await cdp.send('Runtime.evaluate', { expression: action });

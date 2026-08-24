@@ -1,5 +1,11 @@
 /* The panel floats over the operator's screen, so it is padded like a card
-   rather than a page and never fills the window edge to edge. */
+   rather than a page and never fills the window edge to edge.
+
+   On a touch screen it is not a card at all — see the coarse-pointer block at
+   the foot of this file. Everything above it is the desk-width panel and is
+   deliberately unchanged, because that is what the journey screenshots and the
+   accessibility audit are taken against (both run at 420px with a *fine*
+   pointer, so neither sees the touch layout). */
 .panel {
   display: flex;
   flex-direction: column;
@@ -7,12 +13,16 @@
   /* The panel paints edge to edge under the notch and the home indicator
      (viewport-fit=cover in index.html), so its padding has to be the larger
      of the card inset and the device's own inset. On a desktop window every
-     env() is 0 and this collapses back to a plain inset. */
-  padding:
-    max(var(--panel-inset), env(safe-area-inset-top))
-    max(var(--panel-inset), env(safe-area-inset-right))
-    max(var(--panel-inset), env(safe-area-inset-bottom))
-    max(var(--panel-inset), env(safe-area-inset-left));
+     env() is 0 and this collapses back to a plain inset.
+
+     Named rather than written inline because the docked action bar has to
+     cancel exactly these four values to bleed to the screen edges, and a
+     second copy of the max() expression is a second thing to keep in step. */
+  --inset-top: max(var(--panel-inset), env(safe-area-inset-top));
+  --inset-right: max(var(--panel-inset), env(safe-area-inset-right));
+  --inset-bottom: max(var(--panel-inset), env(safe-area-inset-bottom));
+  --inset-left: max(var(--panel-inset), env(safe-area-inset-left));
+  padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
   min-height: 100vh;
   min-height: 100dvh;
   box-sizing: border-box;
@@ -30,12 +40,17 @@
 
 /* Coverage reads as segments rather than a percentage: an operator needs to
    know how many sections are left, not a number that requires arithmetic. */
-.meter { display: flex; align-items: center; gap: var(--space-3); }
-.meter-track { display: flex; gap: 3px; }
+.meter { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.meter-track { display: flex; gap: 3px; min-width: 0; }
 .meter-seg {
   width: 16px; height: 4px; border-radius: var(--radius-capsule);
   background: var(--fill-1);
   transition: background var(--duration-base) var(--ease-out);
+  /* A template with a dozen sections used to push the count and the clock off
+     the end of the bar. The segments give ground first; they are the graphic,
+     and the count beside them is the reading that must survive. */
+  flex: 0 1 16px;
+  min-width: 5px;
 }
 .meter-seg.is-filled { background: var(--green); }
 
@@ -55,13 +70,270 @@
 .nudge--idle { padding: var(--space-6) 0; }
 .nudge--idle p { margin: 0; color: var(--label-supporting); }
 
-.panel-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+/* The chips and the typed fallback are one region: they are the whole of what
+   the operator can do, and on a touch screen they dock together at the foot of
+   the display. On a desk the wrapper is layout-neutral — the gap below repeats
+   what `.panel`'s own gap used to supply, so the card renders unchanged. */
+.panel-dock { display: flex; flex-direction: column; gap: var(--space-5); }
 
-/* Thumb-sized targets need thumb-sized gaps between them, or the miss lands
-   on the neighbouring chip rather than on nothing. */
-@media (pointer: coarse) {
-  .panel-chips { gap: var(--space-4); }
+/* Two rows of two, and each chip owns its cell by name.
+ *
+ * Wrapping them inline was the wrong tool twice over. It packed them by
+ * whatever the labels happened to measure, so the four controls sat in a
+ * different arrangement on every state of the screen; and because the chips
+ * are conditional — `Asked it` needs an unfilled section, `Park it` and
+ * `Go deeper` need an active nudge — answering a nudge pulled `What am I
+ * missing?` up into the row above it. This screen is used by somebody looking
+ * at a client rather than at it, so a control that moves when its neighbour
+ * leaves is a control that gets mis-tapped. Named areas leave a hole instead.
+ *
+ * The names match the source order of the four chips read row by row, so the
+ * reading order and the visual order stay the same thing.
+ *
+ * Not gated on the pointer. A cursor mis-clicks a control that moved just as
+ * a thumb mis-taps one, and the panel is the same width on a desk as it is in
+ * a hand — only the target size and the channel between them change below. */
+.panel-chips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "asked   park"
+    "missing deeper";
+  gap: var(--space-3);
+  align-items: stretch;
+}
+.panel-chips > .asked-it-chip { grid-area: asked; }
+.panel-chips > .park-it-chip { grid-area: park; }
+.panel-chips > .what-am-i-missing-chip { grid-area: missing; }
+.panel-chips > .go-deeper-chip { grid-area: deeper; }
+
+/* A chip's result — the parked confirmation, the follow-on question, the
+   section that is missing — reads under the control it came from rather than
+   beside it, which is the only way it fits in half a panel. */
+.panel-chips > .park-it-chip,
+.panel-chips > .what-am-i-missing-chip,
+.panel-chips > .go-deeper-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The cell is the target: full width, so both columns are the same size
+   whatever the labels say, and a press aimed at the middle of one lands. */
+.panel-chips > .asked-it-chip,
+.panel-chips button {
+  width: 100%;
+  /* The cell already supplies the width, so the coarse-pointer inline padding
+     in chips.tokens.css would only push "What am I missing?" past the edge of
+     its own column — and since the label is centred in a cell it does not
+     size, the padding buys nothing but the margin that keeps a wrapped word
+     off the rim. Held to one step: at 375px the longest label clears its
+     column by three pixels, and would wrap at the next step up. */
+  padding-inline: var(--space-3);
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .history { display: flex; flex-direction: column; gap: var(--space-2); }
 .history-item { margin: 0; color: var(--label-supporting); }
+
+/* ==========================================================================
+   Touch screens.
+
+   On a phone the panel stops being a card that floats over something and
+   becomes the thing itself, so it is laid out the way a phone app is: state
+   pinned at the top, the one thing to read in the middle, and every control
+   docked at the bottom where the thumb already is.
+
+   Gated on the pointer rather than the width on purpose. A narrow desktop
+   window is still driven by a cursor, which can reach the top of the screen
+   as easily as the bottom and does not need 52px targets; and the two tools
+   that hold this product's UI to account — `capture.mjs` for the journey
+   screenshots and `audit-a11y.mjs` — both render at 420px with a fine
+   pointer, so a width gate would rewrite documentation about the desk panel
+   as a side effect of a change made for phones.
+   ========================================================================== */
+@media (pointer: coarse) {
+  /* One screen, three bands: chrome, nudge, dock. The nudge takes whatever is
+     left and scrolls inside itself, so a long history never pushes the
+     controls off the bottom of the display.
+
+     `height`, not the `min-height` above, and that is the whole mechanism: a
+     flex child only shrinks when its container has a height to shrink within.
+     Under `min-height` alone the panel simply grew to fit its contents and the
+     dock went with it — on a phone in landscape it sat 57px below the fold,
+     which is a docked bar that is not docked. The shell overrides this to
+     100% of the pane, since there the toolbar has already taken its share. */
+  .panel { gap: var(--space-4); height: 100dvh; }
+
+  .nudge {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    /* The panel is the whole app; a flick that runs past the end of the
+       history must not rubber-band the page behind it. */
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    /* The dock's material sits over the last line of history rather than
+       butting against it, so there is something for it to be in front of. */
+    padding-bottom: var(--space-4);
+  }
+
+  /* ---- Chrome: state to glance at, and it must never reflow ------------ */
+
+  /* At 390px the degraded pill and the language strip together overran the
+     bar: "1 / 4" wrapped inside its own capsule into a circle and the pill
+     took two lines, doubling the bar's height mid-meeting. The row is allowed
+     to wrap as a row now, and the atoms in it are not allowed to wrap at all. */
+  .panel-chrome {
+    flex-wrap: wrap;
+    row-gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+  .meter { flex: 1 1 auto; }
+  .chrome-right { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+  /* These four are atoms. A count broken across two lines inside a capsule
+     is not a smaller count, it is a circle with a fraction in it, and a
+     status pill that grows a second line moves everything under it. If they
+     do not fit, the row wraps around them. */
+  .panel-chrome .coverage-indicator__count,
+  .panel-chrome .coverage-indicator__time,
+  .panel-chrome .language-chrome__language,
+  .panel-chrome .pill { white-space: nowrap; }
+
+  /* A 4px bar is a hairline in the hand. The track takes the room the count
+     and the clock do not need, and every segment shares it equally, so the
+     meter reads at arm's length whether the template has four sections or
+     fourteen. */
+  .meter-track { flex: 1 1 auto; max-width: 160px; gap: 4px; }
+  .meter-seg { flex: 1 1 auto; width: auto; height: 6px; }
+
+  /* ---- The nudge: the one thing set at reading size -------------------- */
+
+  /* Held at arm's length while talking to somebody, 17pt body is not a line
+     you can pick up in a glance. Both lines step up — and the stub's tracking
+     tightens as it grows, which is the optical correction that keeps 34pt
+     from reading as spaced-out.
+     Qualified by `.nudge` for specificity alone: NudgeStack.css sets the same
+     properties at the same weight and is imported after this file, so a bare
+     class here loses the cascade by one import position. */
+  .nudge .nudge-stack__stub {
+    font-size: var(--text-large-title);
+    letter-spacing: var(--tracking-tight);
+  }
+  .nudge .nudge-stack__question {
+    font-size: var(--text-title-3);
+    line-height: var(--leading-snug);
+  }
+  .nudge .nudge-stack__reason { font-size: var(--text-footnote); }
+
+  /* The resting state is most of a meeting, and on a phone it was a short
+     grey line in the top-left corner of an otherwise black display — which
+     reads as a screen that failed to load rather than as one that is working
+     and has nothing to say yet. Centred in the band it owns, it reads as a
+     resting state. Auto margins rather than `justify-content`, so the day a
+     longer message overflows it scrolls instead of being clipped at the top.
+     Nothing else is on screen in this state, so there is no position for it
+     to be inconsistent with. */
+  .nudge > .nudge-stack { flex: 1 1 auto; min-height: 0; }
+  .nudge .nudge-stack__empty {
+    font-size: var(--text-title-3);
+    margin-block: auto;
+    text-align: center;
+    text-wrap: balance;
+  }
+
+  /* ---- The dock -------------------------------------------------------- */
+
+  /* Bleeds to the edges of the display by cancelling exactly the four insets
+     `.panel` applied, then pays the bottom one back as padding so nothing
+     lands under the home indicator. */
+  .panel-dock {
+    gap: var(--space-4);
+    margin:
+      0
+      calc(-1 * var(--inset-right))
+      calc(-1 * var(--inset-bottom))
+      calc(-1 * var(--inset-left));
+    padding:
+      var(--space-4)
+      var(--inset-right)
+      calc(var(--inset-bottom) + var(--space-1))
+      var(--inset-left);
+    background: var(--material-thick-tint);
+    -webkit-backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+    backdrop-filter: blur(var(--material-blur)) saturate(var(--material-saturate));
+    /* Light on the top edge and a hairline under it: the dock is a surface in
+       front of the history, not a band of colour painted on it. */
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 0.5px 0 0.5px var(--separator);
+  }
+
+  /* A material catches whatever light is in the room. On a black ground a
+     half-white top edge is a stripe, not a highlight — the same value `.glass`
+     steps down to in dark. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .panel-dock {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 0.5px 0 0.5px var(--separator);
+    }
+  }
+  [data-theme="dark"] .panel-dock {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 0.5px 0 0.5px var(--separator);
+  }
+
+  /* The OS settings that turn a material off. Without the first the dock keeps
+     a translucent tint over content it is no longer blurring, which is the
+     unreadable half of both worlds. */
+  @media (prefers-reduced-transparency: reduce) {
+    .panel-dock {
+      background: var(--bg-tertiary);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+  @media (prefers-contrast: more) {
+    .panel-dock { box-shadow: inset 0 1px 0 var(--separator-opaque); }
+  }
+
+  /* A thumb lands wide. The cells stay the same size; only the channel
+     between them grows, so a miss lands on nothing rather than on the
+     neighbouring control. */
+  .panel-chips { gap: var(--space-4); }
+  .panel-chips > .asked-it-chip,
+  .panel-chips button { min-height: 52px; }
+}
+
+/* ==========================================================================
+   Short displays — a phone held sideways, mostly.
+
+   Portrait is what this screen is for and what every measurement above is
+   tuned to. Landscape on a phone leaves about 390px of height, and the dock
+   sized for a thumb takes over half of it: the reading size that helps in the
+   hand starts crowding out the thing being read. So the ramp steps back down
+   and the targets return to Apple's 44px floor rather than the 52px the dock
+   is given when there is room for it.
+
+   Height, not orientation: a tablet in landscape has 800px and wants none of
+   this. `500px` is below any tablet and above every phone held sideways.
+   ========================================================================== */
+@media (pointer: coarse) and (max-height: 500px) {
+  .nudge .nudge-stack__stub {
+    font-size: var(--text-title-2);
+    letter-spacing: var(--tracking-snug);
+  }
+  .nudge .nudge-stack__question { font-size: var(--text-callout); }
+  .nudge .nudge-stack__empty { font-size: var(--text-callout); }
+
+  .panel-dock { gap: var(--space-3); padding-block: var(--space-3); }
+  .panel-chips { gap: var(--space-3); }
+  .panel-chips > .asked-it-chip,
+  .panel-chips button { min-height: 44px; }
+}

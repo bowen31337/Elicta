@@ -47,6 +47,14 @@ Adding one asks a single question: how the audio will reach Elicta. Line-in
 from the meeting machine, a silent join that takes the audio as loopback, or a
 microphone. You can change that later.
 
+A new meeting arrives without a name, so the list shows it by its number. Give
+it one with Rename — "Discovery 2 — depot volumes" reads better than a number,
+and by the third meeting under one client it is the difference between a list
+you can use and three identical rows. Remove takes a meeting off the list.
+Nothing is erased by it: if the meeting happened, its consent record and its
+recording stay exactly where they are. It is there for the meeting you added by
+mistake.
+
 Which engagement and which meeting you are working on is chosen at the top of
 the window, and the choice follows you from screen to screen.
 
@@ -127,6 +135,27 @@ filter the question above on screen is not the one above in the bank.
 Pruning is not deletion. A pruned question is kept as a record of your judgement
 and left out of the list, so redrafting the bank later does not bring it back for
 you to reject a second time.
+
+While you are reading a section, its heading stays at the top of the screen
+rather than scrolling away above the questions, so you can always see which part
+of the template the ones in front of you belong to.
+
+## Finding your way around a long page
+
+With a full bank open this screen runs to a dozen screenfuls, and the meetings
+sit at the very bottom of it. Beside the page — across the top of it, in a
+narrow window — is a list of its parts: the documents, the words, the questions
+and the meetings, with the sections of the bank named underneath and the number
+of questions in each. It marks the part you are reading as you move, and takes
+you to any other in a single click. That is the short way to the foot of the
+page without crossing the questions to get there, and the short way back.
+
+Clicking a section of the bank opens it as well as going to it, so you never
+arrive at a heading with nothing under it.
+
+The keyboard works on this page too. Page Down, End and the arrow keys move it
+once you have clicked anywhere on the page, which on a screen this long is worth
+knowing.
 
 ![The preparation screen: documents, the client's vocabulary, and the question bank grouped by section](../../docs/journeys/screenshots/prep-question-tree.png)
 
