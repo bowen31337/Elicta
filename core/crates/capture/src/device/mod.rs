@@ -64,7 +64,9 @@ mod wasapi;
 #[cfg(target_os = "windows")]
 mod wasapi_line_in;
 
-pub use input::{is_built_in_transport, select, InputDevice, TRANSPORT_TYPE_BUILT_IN};
+pub use input::{
+    is_built_in_transport, is_offerable_input, select, InputDevice, TRANSPORT_TYPE_BUILT_IN,
+};
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
 pub use permission::{
     describe_failure, explain, reads_as_tcc_refusal, silent_device_reason, Permission,

@@ -45,15 +45,15 @@ const SILENT_DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
-    audio_unit_from_device_id, get_audio_device_ids_for_scope, get_default_device_id,
-    get_device_name, get_device_transport_type, get_hogging_pid,
+    audio_unit_from_device_id, get_audio_device_ids, get_audio_device_supports_scope,
+    get_default_device_id, get_device_name, get_device_transport_type, get_hogging_pid,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 
 use crate::ring::{AudioFormat, RawFrame};
 
-use super::input::{is_built_in_transport, select, InputDevice};
+use super::input::{is_built_in_transport, is_offerable_input, select, InputDevice};
 use super::permission::silent_device_reason;
 use super::kind::AudioSourceKind;
 use super::source::{AudioSource, AudioSourceError};
@@ -88,14 +88,20 @@ pub struct CoreAudioLineInSource {
 
 /// Every input CoreAudio can see, in the order it reports them.
 ///
-/// Devices that report no input scope are skipped rather than listed and
+/// Devices that report no input channels are skipped rather than listed and
 /// refused later: an output-only interface in an input picker is a row that
 /// exists only to fail. A device whose name cannot be read is skipped for the
 /// same reason — there is nothing to put in the list, and an entry called
 /// "unknown" is a row nobody can choose deliberately.
+///
+/// The list is asked for unscoped and filtered per device, which is not a
+/// preference. `get_audio_device_ids_for_scope(Scope::Input)` reads like the
+/// filter and is not one: its selector belongs to the system object, which
+/// reports every device whatever scope is passed. Trusting it shipped a
+/// picker offering a monitor and a pair of speakers as microphones.
 pub fn input_devices() -> Vec<InputDevice> {
     let default = get_default_device_id(true);
-    let Ok(ids) = get_audio_device_ids_for_scope(Scope::Input) else {
+    let Ok(ids) = get_audio_device_ids() else {
         // The whole list, not one device, failed. Reported as empty rather
         // than as an error: the picker's own "nothing is connected" is a
         // truthful description of what the operator can choose from, and the
@@ -105,6 +111,11 @@ pub fn input_devices() -> Vec<InputDevice> {
 
     ids.into_iter()
         .filter_map(|id| {
+            // `.ok()` folds an unreadable scope into "not known", which
+            // `is_offerable_input` keeps rather than hides.
+            if !is_offerable_input(get_audio_device_supports_scope(id, Scope::Input).ok()) {
+                return None;
+            }
             let name = get_device_name(id).ok()?;
             Some(InputDevice {
                 id: id.to_string(),
@@ -166,15 +177,26 @@ impl CoreAudioLineInSource {
             AudioSourceError::Disconnected(format!("failed to open input audio unit: {e}"))
         })?;
 
-        // Before this backend overrides it below, the AUHAL's input-element
-        // client format (`Scope::Output`, `Element::Input`) mirrors the
-        // device's own current sample rate and channel count — reading it
-        // here is this backend's equivalent of WASAPI's `GetMixFormat`.
-        let native = audio_unit.input_stream_format().map_err(|e| {
-            AudioSourceError::Disconnected(format!(
-                "failed to read native input stream format: {e}"
-            ))
-        })?;
+        // The hardware side of the input element, which is the device's own
+        // sample rate and channel count — this backend's equivalent of
+        // WASAPI's `GetMixFormat`.
+        //
+        // Deliberately not `input_stream_format()`. That reads the *client*
+        // side (`Scope::Output`, `Element::Input`), which before anything is
+        // set is the AudioUnit's generic default of 44100Hz stereo and not
+        // the device's format at all — every input reports it identically,
+        // which is how to tell. Handing that default back as the client
+        // format asks a 48kHz mono microphone to feed a 44.1kHz stereo
+        // client; the unit starts, the callback never fires, and the silence
+        // reads as a denied microphone. This backend was written that way and
+        // so never captured a sample on a built-in microphone.
+        let native = audio_unit
+            .stream_format(Scope::Input, Element::Input)
+            .map_err(|e| {
+                AudioSourceError::Disconnected(format!(
+                    "failed to read native input stream format: {e}"
+                ))
+            })?;
 
         // Request that same sample rate and channel count back, but as plain
         // interleaved 32-bit float — CoreAudio's canonical PCM format, and
