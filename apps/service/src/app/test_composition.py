@@ -9,6 +9,7 @@ tree: the module's own tests passed, and no test asserted that anything
 
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime
 
 import pytest
@@ -27,6 +28,8 @@ from app.core.consent.models import ConsentModel
 from app.modules.debrief.pipeline.models import DiarizationStatus, SessionDiarization
 
 RecordPathTranscript = _asr_models.RecordPathTranscript
+
+audio_hold = importlib.import_module("app.modules.asr-record.audio_hold")
 
 SESSION = "session-1"
 AUDIO_REF = "s3://retained/session-1.wav"
@@ -654,3 +657,122 @@ def test_candidates_of_equal_priority_keep_the_order_they_were_compiled_in() -> 
     )
 
     assert _served_order(client) == ["c-1", "c-2", "c-3"]
+
+
+# --- a meeting recorded more than once ------------------------------------
+#
+# The record path keys everything by the meeting id and calls it a session id,
+# so a second recording of a meeting landed on top of the first one's records.
+# The count these gates use is "has every engine finished", and it was asking
+# it of every transcript the session had ever collected -- which on a second
+# recording was already satisfied before that recording's engines had started.
+
+
+def _recording_open(backend: Backend, *, epoch: int, baseline: int) -> None:
+    """Put the session in the state `POST /sessions/{id}/recording` leaves it."""
+
+    audio_hold.open_recording(
+        backend.session_audio, SESSION, epoch=epoch, transcript_baseline=baseline
+    )
+
+
+async def test_audio_survives_while_a_second_recordings_engines_still_run() -> None:
+    """Transcripts banked by an earlier recording do not count towards this one.
+
+    Two rows from the first recording met FR-2.6's count on their own, so the
+    second recording's audio was destroyed the moment its *first* engine
+    finished. The other engine then read from a hold that was already gone,
+    and the divergence check FR-2.8 scores had one opinion to compare against
+    itself.
+    """
+
+    backend = _backend_with_audio()
+    _complete_both_engines(backend)  # the first recording's, already banked
+    backend.audio_destruction_events[SESSION] = [
+        await _install_audio_lifecycle(backend).destroy_if_ready(SESSION)
+    ]
+    backend.retained_audio[SESSION] = AUDIO_REF  # the second recording's audio
+
+    _recording_open(backend, epoch=1, baseline=2)
+    backend.record_path_transcripts[SESSION] = [
+        *backend.record_path_transcripts[SESSION],
+        _transcript("engine-a", TranscriptionStatus.COMPLETE),
+    ]
+    backend.session_diarizations[SESSION] = _diarization(DiarizationStatus.COMPLETE)
+
+    event = await _install_audio_lifecycle(backend).destroy_if_ready(SESSION)
+
+    assert event is None, "the audio went while an engine was still reading it"
+    assert backend.retained_audio[SESSION] == AUDIO_REF
+
+
+async def test_a_second_recording_is_destroyed_once_its_own_engines_finish() -> None:
+    """The gate still closes — it just counts this recording's transcripts."""
+
+    backend = _backend_with_audio()
+    _complete_both_engines(backend)
+    backend.audio_destruction_events[SESSION] = [
+        await _install_audio_lifecycle(backend).destroy_if_ready(SESSION)
+    ]
+    backend.retained_audio[SESSION] = AUDIO_REF
+
+    _recording_open(backend, epoch=1, baseline=2)
+    backend.record_path_transcripts[SESSION] = [
+        *backend.record_path_transcripts[SESSION],
+        _transcript("engine-a", TranscriptionStatus.COMPLETE),
+        _transcript("engine-b", TranscriptionStatus.COMPLETE),
+    ]
+    backend.session_diarizations[SESSION] = _diarization(DiarizationStatus.COMPLETE)
+
+    event = await _install_audio_lifecycle(backend).destroy_if_ready(SESSION)
+
+    assert event is not None
+    assert SESSION not in backend.retained_audio
+    assert SESSION not in backend.session_audio, (
+        "the recording stayed open over audio that no longer exists"
+    )
+
+
+async def test_a_second_recording_gets_its_own_debrief() -> None:
+    """Re-entry is guarded per recording, not per meeting.
+
+    The guard exists so one recording's analyst pass does not run twice and
+    duplicate its artifacts. Keyed by session alone it also meant the second
+    recording of a meeting produced no debrief at all: the meeting was
+    recorded, transcribed, and then silently had nothing written up.
+    """
+
+    backend = Backend()
+    build_app(backend)
+    lifecycle = _install_audio_lifecycle(backend)
+
+    from app.composition import _run_debrief_when_record_path_completes
+    from app.orchestration.engines import DebriefEngines
+
+    backend.retained_audio[SESSION] = AUDIO_REF
+    _recording_open(backend, epoch=0, baseline=0)
+    _complete_both_engines(backend)
+
+    first = await _run_debrief_when_record_path_completes(
+        backend, SESSION, lifecycle, DebriefEngines.unconfigured()
+    )
+    assert first is not None
+
+    # A second recording of the same meeting: new audio, new transcripts, and
+    # an epoch of 1 because the first recording's audio has been destroyed.
+    backend.retained_audio[SESSION] = AUDIO_REF
+    _recording_open(
+        backend, epoch=1, baseline=len(backend.record_path_transcripts[SESSION])
+    )
+    backend.record_path_transcripts[SESSION] = [
+        *backend.record_path_transcripts[SESSION],
+        _transcript("engine-a", TranscriptionStatus.COMPLETE),
+        _transcript("engine-b", TranscriptionStatus.COMPLETE),
+    ]
+
+    second = await _run_debrief_when_record_path_completes(
+        backend, SESSION, lifecycle, DebriefEngines.unconfigured()
+    )
+
+    assert second is not None, "the second recording was never written up"
+    assert second is not first, "the first recording's debrief was served again"

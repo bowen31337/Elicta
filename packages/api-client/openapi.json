@@ -2952,6 +2952,49 @@
         }
       }
     },
+    "/api/sessions/{session_id}/recording": {
+      "post": {
+        "tags": [
+          "record-path-transcription"
+        ],
+        "summary": "Open Session Recording",
+        "description": "`POST /api/sessions/{id}/recording` \u2014 begin a recording.\n\nThe record path never had an explicit start: the first chunk was it,\nwhich left a stray chunk and a genuine new recording indistinguishable\nand forced the destruction guard to be permanent to tell them apart.\nSaying so out loud is what lets a meeting be recorded twice.",
+        "operationId": "open_session_recording_api_sessions__session_id__recording_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingOpened"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sessions/{session_id}/audio-chunk": {
       "post": {
         "tags": [
@@ -5925,6 +5968,30 @@
         ],
         "title": "RecordPathTranscriptionRequest",
         "description": "Kicks off a batch re-transcription of one full session's recording.\n\n`audio_ref` points at the full-session recording (e.g. a storage key or\nURI) rather than carrying audio bytes inline \u2014 the recording store lives\noutside this package, same reasoning as the injected callables in\n`service.py`."
+      },
+      "RecordingOpened": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "epoch": {
+            "type": "integer",
+            "title": "Epoch"
+          },
+          "transcript_baseline": {
+            "type": "integer",
+            "title": "Transcript Baseline"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "epoch",
+          "transcript_baseline"
+        ],
+        "title": "RecordingOpened",
+        "description": "Which recording of this session the caller just began.\n\n`epoch` counts the recordings of this session that have already ended, so\nit names this one. Returned rather than kept private because it is the\nonly thing that distinguishes two recordings of the same meeting, and a\nclient reporting a problem with one of them has no other way to say which."
       },
       "ReferenceDocument": {
         "properties": {

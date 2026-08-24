@@ -34,6 +34,18 @@ export interface ChunkBody {
 
 export type PostChunk = (meetingId: string, body: ChunkBody) => Promise<ChunkResponse>;
 
+/**
+ * Tells the service a recording is starting, before any of it is sent.
+ *
+ * The hold on the other end is opened deliberately and never conjured by a
+ * chunk arriving, so that a stray chunk and a genuine second recording of the
+ * same meeting can be told apart. That distinction is what lets a meeting be
+ * recorded again: before it, one whose audio had been destroyed -- which is
+ * every meeting that was ever recorded and written up -- answered 410 to
+ * every chunk for ever, and a false start burned the meeting.
+ */
+export type OpenRecording = (meetingId: string) => Promise<ChunkResponse>;
+
 export interface ChunkUploader {
   /** Buffers samples, sending whole chunks as they become due. */
   push(samples: Int16Array): void;
@@ -50,6 +62,7 @@ export interface ChunkUploader {
 export interface ChunkUploaderOptions {
   readonly meetingId: string;
   readonly post?: PostChunk;
+  readonly open?: OpenRecording;
   /** Samples per chunk. Five seconds at 16kHz, by default. */
   readonly chunkSamples?: number;
   /** Tries per chunk, including the first. */
@@ -61,6 +74,15 @@ export interface ChunkUploaderOptions {
 
 const FIVE_SECONDS_AT_16KHZ = 16_000 * 5;
 const DEFAULT_ATTEMPTS = 3;
+
+/** The real `POST` that opens the recording, for callers that are not a test. */
+export const openAudioRecording: OpenRecording = async (meetingId) => {
+  const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(meetingId)}/recording`), {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  return { ok: response.ok, status: response.status };
+};
 
 /** The real `POST`, for callers that are not a test. */
 export const postAudioChunk: PostChunk = async (meetingId, body) => {
@@ -75,9 +97,12 @@ export const postAudioChunk: PostChunk = async (meetingId, body) => {
 /** A refusal this uploader cannot correct by trying again. */
 function permanentRefusal(status: number): string | null {
   if (status === 410) {
+    // Not "this meeting is finished for ever" any more: the service is no
+    // longer holding a recording for this session, which means this one was
+    // closed underneath us — its audio destroyed, or swept for going quiet.
     return (
-      'This meeting’s audio has already been destroyed on the service, so no ' +
-      'more of it can be sent.'
+      'The service is no longer holding a recording for this meeting, so the ' +
+      'rest of it could not be sent. Stop and start the recording again.'
     );
   }
   if (status === 409) {
@@ -95,6 +120,7 @@ export function createChunkUploader(options: ChunkUploaderOptions): ChunkUploade
   const {
     meetingId,
     post = postAudioChunk,
+    open = openAudioRecording,
     chunkSamples = FIVE_SECONDS_AT_16KHZ,
     attempts = DEFAULT_ATTEMPTS,
     wait = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms)),
@@ -108,6 +134,30 @@ export function createChunkUploader(options: ChunkUploaderOptions): ChunkUploade
   let failure: string | null = null;
   /** The tail of the send chain. Appending to it is what serialises the posts. */
   let queue: Promise<void> = Promise.resolve();
+  /**
+   * The open request, started when the first chunk is actually due.
+   *
+   * Lazy rather than at construction so a microphone that opens and delivers
+   * nothing -- which is the failure the silence watchdog exists for -- leaves
+   * no recording open on the service. Held as the promise rather than a
+   * boolean because the sends are serialised through `queue` and this must
+   * happen once, before the first of them.
+   */
+  let opening: Promise<boolean> | null = null;
+
+  async function opened(): Promise<boolean> {
+    opening ??= open(meetingId).then((response) => {
+      if (!response.ok) {
+        stop(
+          `The service could not start a recording for this meeting (${response.status}), ` +
+            'so none of it was uploaded.',
+        );
+        return false;
+      }
+      return true;
+    });
+    return await opening;
+  }
 
   function stop(message: string): void {
     if (failure !== null) return;
@@ -141,6 +191,7 @@ export function createChunkUploader(options: ChunkUploaderOptions): ChunkUploade
 
   async function send(chunk: Int16Array): Promise<void> {
     if (failure !== null) return;
+    if (!(await opened())) return;
     const body: ChunkBody = { sequence, pcm: base64OfInt16(chunk) };
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {

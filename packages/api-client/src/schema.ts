@@ -1040,6 +1040,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/recording": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Session Recording
+         * @description `POST /api/sessions/{id}/recording` — begin a recording.
+         *
+         *     The record path never had an explicit start: the first chunk was it,
+         *     which left a stray chunk and a genuine new recording indistinguishable
+         *     and forced the destruction guard to be permanent to tell them apart.
+         *     Saying so out loud is what lets a meeting be recorded twice.
+         */
+        post: operations["open_session_recording_api_sessions__session_id__recording_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/audio-chunk": {
         parameters: {
             query?: never;
@@ -2699,6 +2724,23 @@ export interface components {
         RecordPathTranscriptionRequest: {
             /** Audio Ref */
             audio_ref: string;
+        };
+        /**
+         * RecordingOpened
+         * @description Which recording of this session the caller just began.
+         *
+         *     `epoch` counts the recordings of this session that have already ended, so
+         *     it names this one. Returned rather than kept private because it is the
+         *     only thing that distinguishes two recordings of the same meeting, and a
+         *     client reporting a problem with one of them has no other way to say which.
+         */
+        RecordingOpened: {
+            /** Session Id */
+            session_id: string;
+            /** Epoch */
+            epoch: number;
+            /** Transcript Baseline */
+            transcript_baseline: number;
         };
         /**
          * ReferenceDocument
@@ -5411,6 +5453,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReferenceDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_session_recording_api_sessions__session_id__recording_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingOpened"];
                 };
             };
             /** @description Validation Error */

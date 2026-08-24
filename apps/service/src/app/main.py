@@ -26,9 +26,12 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from app.composition import (
+    ABANDONED_SWEEP_INTERVAL_SECONDS,
     Backend,
+    abandoned_recording_window,
     attach_state_store,
     build_app,
+    build_audio_lifecycle,
     build_bank_collector,
     read_session_audio,
 )
@@ -172,12 +175,41 @@ def create_app(
             "startup: collecting analyst batches every %ss",
             int(DEFAULT_INTERVAL_SECONDS),
         )
+
+        # A recording is closed by the record path finishing with its audio,
+        # and nothing finishes for a recording nobody stopped — a closed
+        # browser, a shut laptop, an operator who walked away. Without this
+        # that hold keeps raw audio for as long as the process lives, which is
+        # the retention NFR-2.4 exists to bound. Same reasoning as the
+        # collector above for living out here rather than in `build_app`.
+        idle = abandoned_recording_window()
+
+        async def close_abandoned_recordings_forever() -> None:
+            lifecycle = build_audio_lifecycle(backend)
+            while True:
+                await asyncio.sleep(ABANDONED_SWEEP_INTERVAL_SECONDS)
+                try:
+                    await lifecycle.sweep_abandoned(older_than=idle)
+                except Exception:  # noqa: BLE001
+                    # One bad pass must not end the loop: stopping here would
+                    # silently restore the unbounded retention this prevents.
+                    logger.exception("the abandoned-recording sweep failed")
+
+        closer = asyncio.create_task(
+            close_abandoned_recordings_forever(), name="abandoned-recordings"
+        )
+        logger.info(
+            "startup: closing recordings unfed for %ss, checked every %ss",
+            int(idle.total_seconds()),
+            int(ABANDONED_SWEEP_INTERVAL_SECONDS),
+        )
         try:
             yield
         finally:
-            sweeper.cancel()
-            with suppress(asyncio.CancelledError):
-                await sweeper
+            for task in (sweeper, closer):
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     app.router.lifespan_context = lifespan
     return app

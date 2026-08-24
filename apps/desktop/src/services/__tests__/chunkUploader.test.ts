@@ -33,10 +33,27 @@ function recordingPost(reply: (sequence: number) => Promise<ChunkResponse> = asy
   return { post, sequences };
 }
 
+/**
+ * Lets every pending microtask run, so what is left is genuinely blocked.
+ *
+ * A macrotask boundary rather than a fixed number of `await Promise.resolve()`
+ * hops: that count is a detail of how many `await`s the uploader happens to
+ * pass through, and opening the recording added one.
+ */
+async function everythingThatCanProceed(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Opening the recording succeeds unless a test says otherwise. */
+async function opens(): Promise<ChunkResponse> {
+  return { ok: true, status: 201 };
+}
+
 function uploader(post: PostChunk, overrides: Record<string, unknown> = {}) {
   return createChunkUploader({
     meetingId: 'meeting-1',
     post,
+    open: opens,
     chunkSamples: CHUNK,
     // Awaited but never slept through: retry timing is not what these assert.
     wait: async () => {},
@@ -89,8 +106,7 @@ describe('createChunkUploader', () => {
     const upload = uploader(post);
 
     upload.push(new Int16Array(CHUNK * 2));
-    await Promise.resolve();
-    await Promise.resolve();
+    await everythingThatCanProceed();
 
     // Chunk 1 is buffered and must stay there: the hold expects 0 first, and
     // two posts in flight can arrive in either order.
@@ -154,7 +170,7 @@ describe('createChunkUploader', () => {
     expect(upload.failure).toContain('could not be reached');
   });
 
-  it('stops without retrying when the audio has already been destroyed', async () => {
+  it('stops without retrying when the service has no recording open', async () => {
     const { post, sequences } = recordingPost(async () => refusal(410));
     const upload = uploader(post);
 
@@ -162,7 +178,64 @@ describe('createChunkUploader', () => {
     await upload.settled();
 
     expect(sequences).toEqual([0]);
-    expect(upload.failure).toContain('destroyed');
+    expect(upload.failure).toContain('no longer holding');
+  });
+
+  describe('opening the recording', () => {
+    /**
+     * The service will not take a chunk for a session nobody is recording:
+     * the hold is opened deliberately, so that a stray chunk and a genuine
+     * second recording of the same meeting can be told apart. That is what
+     * lets a meeting be recorded again after a false start -- before it, a
+     * meeting whose audio had been destroyed answered 410 for ever.
+     */
+
+    it('opens the recording before the first chunk, once', async () => {
+      const opened: string[] = [];
+      const { post, sequences } = recordingPost();
+      const upload = uploader(post, {
+        open: async (meetingId: string) => {
+          opened.push(meetingId);
+          return { ok: true, status: 201 };
+        },
+      });
+
+      upload.push(new Int16Array(CHUNK * 3));
+      await upload.settled();
+
+      expect(opened).toEqual(['meeting-1']);
+      expect(sequences).toEqual([0, 1, 2]);
+    });
+
+    it('does not open a recording for audio that never arrives', async () => {
+      const opened: string[] = [];
+      const { post } = recordingPost();
+      const upload = uploader(post, {
+        open: async (meetingId: string) => {
+          opened.push(meetingId);
+          return { ok: true, status: 201 };
+        },
+      });
+
+      await upload.flush();
+
+      // A microphone that opened and delivered nothing must not leave a
+      // recording open on the service for the sweep to have to close.
+      expect(opened).toEqual([]);
+    });
+
+    it('stops rather than uploading into a recording that was never opened', async () => {
+      const { post, sequences } = recordingPost();
+      const upload = uploader(post, {
+        open: async () => ({ ok: false, status: 503 }),
+      });
+
+      upload.push(new Int16Array(CHUNK * 2));
+      await upload.settled();
+
+      expect(sequences).toEqual([]);
+      expect(upload.failure).toContain('could not start');
+    });
   });
 
   it('stops without retrying when the hold refuses the sequence', async () => {

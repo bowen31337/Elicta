@@ -22,7 +22,7 @@ import importlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial, wraps
 from types import SimpleNamespace
 from typing import Any
@@ -310,6 +310,11 @@ class AudioLifecycle:
 
     destroy_if_ready: Any
     save_diarization: Any
+    #: Closes recordings nobody stopped. The ordinary discard is triggered by
+    #: the record path finishing, and nothing finishes for a recording that
+    #: was never stopped — so without this a hold opened and abandoned keeps
+    #: raw audio for as long as the process lives.
+    sweep_abandoned: Any
 
 @dataclass
 class Backend:
@@ -406,6 +411,12 @@ class Backend:
     template_sections: list[Any] = field(default_factory=list)
     document_language: str = "en"
     debrief_runs: dict[str, Any] = field(default_factory=dict)
+    #: Which recording of each session the run in `debrief_runs` was for. The
+    #: re-entry guard has to mean "this recording has already been written up",
+    #: not "this meeting has": keyed by session alone, a meeting recorded a
+    #: second time was transcribed and then never written up at all. Kept
+    #: beside `debrief_runs` and never durable, because that is not either.
+    debrief_epochs: dict[str, int] = field(default_factory=dict)
     transcript_cleanings: dict[str, Any] = field(default_factory=dict)
     transcript_translations: dict[str, Any] = field(default_factory=dict)
     section_classifications: dict[str, Any] = field(default_factory=dict)
@@ -727,6 +738,51 @@ def upstream_status_for(failure: UpstreamFailure) -> int:
     """
 
     return _UPSTREAM_STATUS.get(failure, 503)
+
+
+#: How often the process checks for recordings nobody stopped. Far shorter
+#: than the idle window it enforces, so the window is what decides when a
+#: recording is closed rather than the phase of this loop.
+ABANDONED_SWEEP_INTERVAL_SECONDS = 60.0
+
+
+def abandoned_recording_window() -> timedelta:
+    """How long a recording may go unfed before the sweep closes it."""
+
+    return timedelta(seconds=_audio_hold.idle_seconds_from_env())
+
+
+def build_audio_lifecycle(backend: Backend) -> AudioLifecycle:
+    """The NFR-2.4 destruction gate bound to `backend`.
+
+    Public so the process can drive the sweep. `build_app` installs its own
+    for the request paths; both are closures over the same backend, so which
+    one runs a discard makes no difference to what is discarded.
+    """
+
+    return _install_audio_lifecycle(backend)
+
+
+def current_recording_transcripts(backend: Backend, session_id: str) -> list[Any]:
+    """The record-path transcripts belonging to the recording now in progress.
+
+    A meeting is recorded once in the happy case and more than once whenever
+    the first attempt produced nothing worth keeping — which, with a
+    microphone that can open and deliver silence, is not rare. Its transcripts
+    accumulate under the one session id, so "have all the engines finished"
+    has to be asked of the tail rather than the whole list.
+
+    The baseline is carried on the hold, written when the recording was
+    opened. No hold means no recording is open: every transcript there is
+    belongs to a recording that has already ended, so the tail is the lot.
+    That is what the gates want in that case anyway — both of them are
+    already closed by then, and neither acts on a session whose audio is gone.
+    """
+
+    transcripts = backend.record_path_transcripts.get(session_id, [])
+    entry = backend.session_audio.get(session_id)
+    baseline = getattr(entry, "transcript_baseline", 0)
+    return list(transcripts[baseline:])
 
 
 def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
@@ -2784,23 +2840,30 @@ def _include_operational_routers(
 
         backend.retained_audio[session_id] = audio_ref
 
-    def audio_was_destroyed(session_id: str) -> bool:
-        """Whether this session's audio already has a destruction record.
+    def open_recording_for(session_id: str) -> _audio_hold.RecordingOpened:
+        """What this session had already banked before this recording began.
 
-        NFR-2.4's record has to stay true after it is written. Nothing marked
-        a session closed, so a chunk with `sequence: 0` posted after the
-        destruction event recreated the hold and re-recorded the audio as
-        retained — and nothing destroyed it again, because `destroy_if_ready`
-        is only re-entered when a gating stage finishes and both had already
-        finished for that session. The result was audio retained after a
-        record asserting it was destroyed.
+        The epoch is derived, never counted: a destruction record is exactly
+        the record of one recording's audio reaching the end of its life, so
+        how many exist is how many recordings have ended. Read from the events
+        rather than from a counter beside them because the event list *is* the
+        record, and a second place saying the same thing is a second place to
+        disagree with it — and because the events are durable, so the epoch
+        survives a restart without anything having to persist it.
 
-        Read from the events rather than a flag beside them: the event list
-        *is* the record, and a second place saying the same thing is a second
-        place to disagree with it.
+        The transcript baseline is not durable and does not need to be: the
+        hold it belongs to is memory-only, so a restart loses the audio too,
+        and `destroy_if_ready` refuses to act on a session with no retained
+        audio. There is nothing left for a stale baseline to get wrong.
         """
 
-        return bool(backend.audio_destruction_events.get(session_id))
+        return _audio_hold.RecordingOpened(
+            session_id=session_id,
+            epoch=len(backend.audio_destruction_events.get(session_id, [])),
+            transcript_baseline=len(
+                backend.record_path_transcripts.get(session_id, [])
+            ),
+        )
 
     # --- the live lane's tap on the uploaded audio ------------------------
     #
@@ -2885,7 +2948,7 @@ def _include_operational_routers(
         _audio_hold.build_audio_chunk_router(
             backend.session_audio,
             on_audio_retained,
-            audio_was_destroyed,
+            open_recording_for,
             on_chunk=feed_live_lane,
         )
     )
@@ -2931,9 +2994,14 @@ def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:
         transcript, so one finishing is not the session finishing. `FAILED`
         counts as terminal: that engine is done reading the audio, and
         holding it longer is exactly what NFR-2.4 forbids.
+
+        Asked of *this* recording's transcripts. The record path keys them by
+        the meeting id, so a meeting recorded twice appends the second
+        recording's rows after the first's, and counting the lot meant the
+        first recording's two satisfied FR-2.6 on their own.
         """
 
-        transcripts = backend.record_path_transcripts.get(session_id, [])
+        transcripts = current_recording_transcripts(backend, session_id)
         if len(transcripts) < backend.record_path_engine_count:
             return False
         return all(
@@ -2973,8 +3041,44 @@ def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:
         backend.session_diarizations[diarization.session_id] = diarization
         await destroy_if_ready(diarization.session_id)
 
+    async def sweep_abandoned(
+        *,
+        older_than: timedelta,
+        now: datetime | None = None,
+    ) -> list[AudioDestructionEvent]:
+        """Discard the audio of recordings nothing has fed for `older_than`.
+
+        Two outcomes, and the difference matters. A recording that took audio
+        has that audio destroyed and the destruction recorded, exactly as the
+        record path's own discard would. A recording that took none is simply
+        closed: an event would assert that audio existed and was discarded,
+        and NFR-2.4's record is worth only as much as its literal truth.
+        """
+
+        events: list[AudioDestructionEvent] = []
+        for session_id in _audio_hold.stale_sessions(
+            backend.session_audio, older_than=older_than, now=now
+        ):
+            audio_ref = backend.retained_audio.get(session_id)
+            if audio_ref is None:
+                _audio_hold.discard(backend.session_audio, session_id)
+                continue
+            _logger.warning(
+                "closing an abandoned recording of %s: nothing has fed it for %s",
+                session_id,
+                older_than,
+            )
+            events.append(
+                await destroy_retained_audio(
+                    session_id, audio_ref, delete_audio, emit
+                )
+            )
+        return events
+
     return AudioLifecycle(
-        destroy_if_ready=destroy_if_ready, save_diarization=save_diarization
+        destroy_if_ready=destroy_if_ready,
+        save_diarization=save_diarization,
+        sweep_abandoned=sweep_abandoned,
     )
 
 
@@ -3023,7 +3127,8 @@ async def _run_debrief_when_record_path_completes(
     analyst pass and duplicate the artifacts.
     """
 
-    transcripts = backend.record_path_transcripts.get(session_id, [])
+    epoch = getattr(backend.session_audio.get(session_id), "epoch", 0)
+    transcripts = current_recording_transcripts(backend, session_id)
     if len(transcripts) < backend.record_path_engine_count:
         return None
     if not all(
@@ -3035,7 +3140,10 @@ async def _run_debrief_when_record_path_completes(
         # third, non-terminal state is added, running the pipeline over a
         # half-finished transcript is the failure this prevents.
         return None  # pragma: no cover
-    if session_id in backend.debrief_runs:
+    if (
+        session_id in backend.debrief_runs
+        and backend.debrief_epochs.get(session_id) == epoch
+    ):
         return backend.debrief_runs[session_id]
 
     # One engine's timeline, not both concatenated (FR-2.6/2.8). Two engines
@@ -3200,6 +3308,7 @@ async def _run_debrief_when_record_path_completes(
         ),
     )
     backend.debrief_runs[session_id] = run
+    backend.debrief_epochs[session_id] = epoch
     _record_debrief_artifacts(backend, session_id, run)
     return run
 

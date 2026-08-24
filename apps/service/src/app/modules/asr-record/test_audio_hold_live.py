@@ -26,9 +26,17 @@ async def _retained(session_id: str, audio_ref: str) -> None:
 
 
 def _client(on_chunk) -> TestClient:
+    """A client with a recording already open, which is where a chunk starts.
+
+    Opening it here rather than in each test keeps these about the live lane:
+    the hold's own rules have their own file.
+    """
+
     app = FastAPI()
     app.include_router(_hold.build_audio_chunk_router({}, _retained, None, on_chunk=on_chunk))
-    return TestClient(app)
+    client = TestClient(app)
+    client.post("/api/sessions/meeting-1/recording")
+    return client
 
 
 def test_the_bytes_are_offered_to_the_live_lane_as_they_arrive() -> None:

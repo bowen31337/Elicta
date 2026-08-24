@@ -212,6 +212,7 @@ def _nudges_from_one_window(
         "/api/meetings", json={"engagement_id": engagement_id, "capture_mode": "monolingual"}
     ).json()["meeting_id"]
 
+    client.post(f"/api/sessions/{meeting_id}/recording")
     posted = client.post(
         f"/api/sessions/{meeting_id}/audio-chunk",
         json={

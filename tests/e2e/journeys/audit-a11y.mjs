@@ -149,16 +149,37 @@ async function connect(port) {
  * The usual cause is protocol, not a stopped server: `start.sh --https` serves
  * TLS on the same port, and a plain-HTTP request to it returns nothing at all
  * rather than redirecting.
+ *
+ * Waits for the mount rather than assuming it. The caller used to sleep a flat
+ * 700ms and ask once, which is a guess about how long a dev server takes to
+ * compile a route it has not been asked for before — and under any load at all
+ * it is the wrong guess. Two runs aborted that way on a scene that renders
+ * perfectly well, once on `arc` and once on `replay-failing`, and an abort
+ * reads like a broken app rather than like a harness in a hurry. The deadline
+ * is what keeps the check honest: a page that never mounts still fails, it
+ * just gets a few seconds to prove it.
  */
 async function assertSceneRendered(cdp, scene) {
-  const { result } = await cdp.send('Runtime.evaluate', {
-    returnByValue: true,
-    expression: `JSON.stringify({
-      url: location.href,
-      mounted: (document.getElementById('root')?.childElementCount ?? 0) > 0,
-    })`,
-  });
-  const { url, mounted } = JSON.parse(result.value);
+  const read = async () => {
+    const { result } = await cdp.send('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `JSON.stringify({
+        url: location.href,
+        mounted: (document.getElementById('root')?.childElementCount ?? 0) > 0,
+      })`,
+    });
+    return JSON.parse(result.value);
+  };
+
+  let state = await read();
+  const deadline = Date.now() + 10_000;
+  // Chrome's own error page is a mount that will never happen, so stop asking
+  // as soon as the tab is on one and let the message below say which it is.
+  while (!state.mounted && !state.url.startsWith('chrome-error://') && Date.now() < deadline) {
+    await sleep(250);
+    state = await read();
+  }
+  const { url, mounted } = state;
 
   if (url.startsWith('chrome-error://')) {
     throw new Error(
@@ -228,6 +249,8 @@ async function main() {
 
     for (const scene of SCENES) {
       await cdp.send('Page.navigate', { url: `${APP}/journeys.html?scene=${scene}` });
+      // Settling time for a scene that has already mounted; waiting for the
+      // mount itself is `assertSceneRendered`'s job.
       await sleep(700);
       await assertSceneRendered(cdp, scene);
       await cdp.send('Runtime.evaluate', { expression: AXE });

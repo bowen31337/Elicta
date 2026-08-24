@@ -174,6 +174,7 @@ def test_uploaded_audio_becomes_a_nudge_without_anything_else_being_called(
         # One window's worth of linear16 at 16kHz mono, which is what the
         # capture screen's uploader states it sends.
         window = base64.b64encode(b"\x00" * (32_000 * 4)).decode()
+        client.post(f"/api/sessions/{meeting_id}/recording")
         uploaded = client.post(
             f"/api/sessions/{meeting_id}/audio-chunk", json={"sequence": 0, "pcm": window}
         )
@@ -204,6 +205,7 @@ def test_audio_too_short_to_be_worth_recognising_is_not_sent_anywhere(
 
     with TestClient(app) as client:
         meeting_id = _meeting(client)
+        client.post(f"/api/sessions/{meeting_id}/recording")
         client.post(
             f"/api/sessions/{meeting_id}/audio-chunk",
             json={"sequence": 0, "pcm": base64.b64encode(b"\x00" * 1_600).decode()},
@@ -338,6 +340,7 @@ def test_the_meeting_being_recorded_can_be_found_from_outside_the_browser(
     for meeting_id in (quiet, recording):
         assert client.post(f"/api/meetings/{meeting_id}/session/start").status_code == 200
 
+    client.post(f"/api/sessions/{recording}/recording")
     client.post(
         f"/api/sessions/{recording}/audio-chunk",
         json={"sequence": 0, "pcm": base64.b64encode(b"\x00" * 3_200).decode()},

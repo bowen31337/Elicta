@@ -85,6 +85,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/sessions/{session_id}/follow-up-email", "get"),
     ("/api/sessions/{session_id}/open-questions", "get"),
     ("/api/sessions/{session_id}/project-brief", "get"),
+    ("/api/sessions/{session_id}/recording", "post"),
     ("/api/sessions/{session_id}/record-path-alignment", "get"),
     ("/api/sessions/{session_id}/record-path-transcript", "get"),
     ("/api/sessions/{session_id}/record-path-transcript", "post"),
