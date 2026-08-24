@@ -32,7 +32,7 @@ import threading
 from collections.abc import Callable, Iterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ClassVar, Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
