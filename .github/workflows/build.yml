@@ -9,12 +9,18 @@ name: Build Desktop Artifacts
 # notarisation of the macOS artifact happen downstream in sign-macos.yml
 # (PRD NFR-3.3); Windows artifacts are Authenticode-signed inline below.
 
+# Not built automatically. The macOS job runs on `macos-26` at ten times the
+# usual billing for the better part of an hour, and every push to main was
+# starting one — which is how a day of ordinary commits exhausted the account's
+# spending limit and left builds refusing to start at all.
+#
+# So it is asked for rather than triggered: `gh workflow run build.yml`, a tag
+# push when something is being released, or a call from the signing workflow.
+# Restoring the automatic build is one line — put `branches: [main]` back under
+# `push` — and should wait until it is worth an hour of macOS time per commit.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       windows:

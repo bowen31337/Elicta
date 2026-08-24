@@ -80,13 +80,25 @@ because Swift had back-deployed `libswift_Concurrency.dylib` to an `@rpath` with
 no `LC_RPATH`. `bundle.macOS.minimumSystemVersion` (13.0) is what prevents that;
 it also sets `MACOSX_DEPLOYMENT_TARGET`, so lowering it reintroduces the crash.
 
-`build.yml` builds **macOS only** on push; the Windows jobs are gated behind
-`if: inputs.windows` and are asked for explicitly:
+`build.yml` **does not run on a push to main any more.** The macOS job costs an
+hour of `macos-26` time at 10x billing, and one on every commit exhausted the
+account's spending limit — after which builds refuse to start at all, with an
+error about billing rather than about the build. It is now asked for:
 ```bash
-gh workflow run build.yml -f windows=true
+gh workflow run build.yml                    # macOS only
+gh workflow run build.yml -f windows=true    # and the Windows bundles
 ```
+A tag push (`v*`) still builds, and so does a call from the signing workflow.
+Restoring the automatic build is one line — `branches: [main]` under `push`.
+
+Because nothing builds a bundle now until someone asks, **a change that only
+breaks on macOS will sit unnoticed on main**. Three did in one day: a filename
+case collision, and two packages with no universal2 wheel. `pnpm --filter
+elicta-desktop test` covers the first (see `src/__tests__/fileCasing.test.ts`);
+the others are only found by building.
+
 The macOS job runs on `macos-26` at 10x billing for ~35 min, and
-`cancel-in-progress` means a second push kills the first run mid-flight. It
+`cancel-in-progress` means a second run kills the first mid-flight. It
 uploads an artifact rather than publishing a release; attaching a `.dmg` to a
 release is a separate `gh release upload --clobber` step.
 
