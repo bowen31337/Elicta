@@ -510,6 +510,36 @@ class StateStore:
         ]
         return max(ordinals, default=0)
 
+    def highest_linked_document_ordinal(self) -> int:
+        """The largest `reference-document-N` suffix on record, or 0.
+
+        `reference_documents` carries two id schemes, because it has two
+        intake paths: an upload is `doc-N` and a link is
+        `reference-document-N`, and FR-3.2 keeps the link's id rather than
+        minting a second one for the list. They cannot collide with each
+        other, so they are counted apart — this reads only its own prefix, and
+        `highest_document_ordinal` only reads the other.
+
+        The failure it prevents is quieter than the vocabulary one and worse
+        to find. `document_texts` persists by updating the row with that id
+        and inserting only when nothing matched, so a reissued
+        `reference-document-1` does not raise: it finds the earlier row and
+        writes over its text. One engagement's attached document becomes
+        another's, and nothing reports anything.
+
+        Soft-deleted rows count, for the reason `highest_document_ordinal`
+        gives: the row is still holding its id.
+        """
+
+        table = metadata.tables["reference_documents"]
+        prefix = "reference-document-"
+        ordinals = [
+            int(row.id.removeprefix(prefix))
+            for row in self._rows(table)
+            if row.id.startswith(prefix) and row.id.removeprefix(prefix).isdigit()
+        ]
+        return max(ordinals, default=0)
+
     def highest_vocabulary_term_ordinal(self) -> int:
         """The largest `term-N` suffix on record, or 0 for an empty database.
 

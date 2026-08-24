@@ -207,6 +207,41 @@ def _engagement(client: TestClient, organisation: str) -> str:
     return created.json()["engagement_id"]
 
 
+def test_a_linked_document_id_is_not_reissued_after_a_restart(database: str) -> None:
+    """The link intake mints its own ids, into the table uploads already use.
+
+    `attach_document` hands back `reference-document-N` and keeps it — FR-3.2
+    makes a link a second intake path, not a second kind of document — and the
+    text lands in `reference_documents` beside the uploaded `doc-N` rows.
+    `next_reference_document_id` was the last counter still starting at 0 with
+    the process.
+
+    It does not fail loudly the way the vocabulary one did. `document_texts`
+    persists by updating the row with that id and only inserting when no row
+    matched, so a reissued id finds the earlier row and overwrites its text:
+    one engagement's document replaced by another's, no error anywhere. The two
+    schemes share a table and must be counted apart, which is what the second
+    half asserts.
+    """
+
+    first = open_state_store(database)
+    first.document_texts()["reference-document-1"] = "CLIENT A — merger terms"
+    first.document_texts()["reference-document-2"] = "CLIENT A — heads of terms"
+    # An uploaded document, which mints on the other scheme.
+    first.document_texts()["doc-9"] = "CLIENT A — a file somebody dropped"
+
+    second = attach_state_store(Backend(), open_state_store(database))
+    assert second.next_reference_document_id == 2
+    # So the next link is `reference-document-3`, not a second `-1`.
+    assert (
+        f"reference-document-{second.next_reference_document_id + 1}"
+        == "reference-document-3"
+    )
+    # Counted apart: the uploaded row neither raises the link counter nor is
+    # raised by it.
+    assert second.next_document_id == 9
+
+
 def test_a_vocabulary_term_created_after_a_restart_does_not_collide(
     database: str,
 ) -> None:

@@ -1032,6 +1032,13 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # collision. Seeded from the rows, soft-deleted ones included, because a
     # removed term is still holding its id.
     backend.next_vocabulary_term_id = store.highest_vocabulary_term_ordinal()
+    # The fifth, and the quiet one. A link's `reference-document-N` lands in
+    # the same table as an uploaded `doc-N`, and `document_texts` persists by
+    # updating the row with that id — so a reissued one overwrites an earlier
+    # engagement's document text instead of failing. Counted on its own prefix,
+    # because the two schemes share the table and neither should move the
+    # other's counter.
+    backend.next_reference_document_id = store.highest_linked_document_ordinal()
     # The legally significant one, and the last to get a table. Losing this on
     # restart lost the answer to "did we have permission for this?", and the
     # gate it opens with it.
