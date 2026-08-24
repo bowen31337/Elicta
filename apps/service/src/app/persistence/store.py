@@ -32,7 +32,7 @@ import threading
 from collections.abc import Callable, Iterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, TypeVar
+from typing import Any, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
@@ -491,20 +491,8 @@ class StateStore:
         ]
         return max(ordinals, default=0)
 
-    #: Tables whose rows are keyed by a meeting's id, under whichever name that
-    #: id travels as. The desktop uploads a meeting's audio under
-    #: `/api/sessions/{id}`, passing the meeting id, so a "session id" here is
-    #: a meeting id and holds the same ordinal.
-    _MEETING_ID_COLUMNS: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("meetings", "id"),
-        ("record_path_transcripts", "session_id"),
-        ("session_alignments", "session_id"),
-        ("audio_destruction_events", "session_id"),
-        ("consent_records", "meeting_id"),
-    )
-
     def highest_meeting_ordinal(self) -> int:
-        """The largest `meeting-N` suffix anything still refers to, or 0.
+        """The largest `meeting-N` suffix on record, or 0 for an empty database.
 
         Counts every row, **including the soft-deleted ones**, for the reason
         `highest_document_ordinal` gives: `meetings.id` is a primary key, and a
@@ -512,31 +500,15 @@ class StateStore:
         instead, this would walk backwards the moment a meeting was removed —
         delete the only meeting, restart, create another, and it would be
         issued `meeting-1` against a row the table still has.
-
-        And not only that table. A session's transcripts, its alignment, its
-        consent record and its audio-destruction record are keyed by the same
-        id in tables of their own, and outlive the meetings row independently.
-        An id reissued over them hands the new meeting the old one's history:
-        recording is refused because a destruction record says this session's
-        audio is already gone, and — the half that matters — the transcript
-        route answers with the earlier meeting's words, one client's session
-        served under another's id.
-
-        Seen live rather than reasoned about: a meeting issued one evening
-        answered with a transcript recorded that afternoon.
         """
 
-        highest = 0
-        for table_name, column in self._MEETING_ID_COLUMNS:
-            table = metadata.tables[table_name]
-            for row in self._rows(table):
-                identifier = getattr(row, column, None)
-                if not isinstance(identifier, str) or not identifier.startswith("meeting-"):
-                    continue
-                suffix = identifier.removeprefix("meeting-")
-                if suffix.isdigit():
-                    highest = max(highest, int(suffix))
-        return highest
+        table = metadata.tables["meetings"]
+        ordinals = [
+            int(row.id.removeprefix("meeting-"))
+            for row in self._rows(table)
+            if row.id.startswith("meeting-") and row.id.removeprefix("meeting-").isdigit()
+        ]
+        return max(ordinals, default=0)
 
     def highest_document_ordinal(self) -> int:
         """The largest `doc-N` suffix on record, or 0 for an empty database.
