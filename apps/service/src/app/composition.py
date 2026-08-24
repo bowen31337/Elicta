@@ -29,6 +29,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.consent.gate import evaluate_consent_gate
@@ -254,6 +255,16 @@ from app.persistence import StateStore
 #: conversational window the nudge has to land in, and it buys the lane
 #: freedom from having to reach into the connection to wake it.
 LIVE_POLL_SECONDS = 0.25
+
+#: The origins the packaged desktop app serves its page from. Tauri uses the
+#: custom protocol on macOS and Linux and a host under http on Windows, so a
+#: list naming one of them ships an app that works on one platform and a build
+#: for the other where somebody finds out.
+DESKTOP_SHELL_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
 
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
@@ -1023,6 +1034,24 @@ def build_app(
     """Mount every documented router onto one app, backed by `backend`."""
 
     app = FastAPI(title="Elicta Service")
+
+    # The packaged desktop app serves its page from the shell's own protocol
+    # and reaches this service across an origin boundary, so it has to be
+    # answered for by name. Served through the dev server's `/api` proxy the
+    # request is same-origin and none of this applies, which is why it went
+    # unnoticed until there was a bundle: every read came back unreadable to
+    # the webview and every write was refused at its preflight, and the app
+    # said only that the service could not be reached.
+    #
+    # Exact origins, and it must stay that way. This service has no
+    # authentication and holds vendor credentials; the one thing between it
+    # and any page a browser happens to open is which origins it answers for.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(DESKTOP_SHELL_ORIGINS),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ADR-012 puts the compiler and debrief workloads on the Agent SDK. Until
     # one is supplied, every stage that needs a model fails closed and says
