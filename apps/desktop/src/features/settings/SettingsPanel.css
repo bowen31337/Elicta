@@ -335,7 +335,19 @@
 .settings-panel button:active { transform: scale(0.96); }
 .settings-panel button:disabled { color: var(--label-tertiary); cursor: default; }
 .settings-panel button:disabled:active { transform: none; }
-.settings-danger { color: var(--red-ink); }
+/* Destructive, and it has to look it.
+ *
+ * This was `.settings-danger` alone, which is one class against the two
+ * components of `.settings-panel button` above — so the accent colour won on
+ * specificity however far down the file this sat, and `Clear` rendered in the
+ * same blue as `Test` beside it. The one control on this screen that throws a
+ * credential away looked exactly like the one that checks it.
+ *
+ * Qualified by the panel rather than by the element, so it beats the rule
+ * above on class count instead of on source order, and still loses to
+ * `.settings-panel button:disabled` — a destructive button that cannot be
+ * pressed should read as unavailable, not as available and dangerous. */
+.settings-panel .settings-danger { color: var(--red-ink); }
 
 .settings-actions {
   display: flex;
