@@ -26,6 +26,16 @@ const OUT = arg('out', './live-run-out');
 const ONLY = arg('only', null);
 const VIEWPORT = { width: 1280, height: 800, scale: 2 };
 
+// `start.sh --https` serves TLS on the same port, and this tool had never been
+// taught about it: Chrome stops at its own interstitial, so every journey then
+// photographs and audits the browser's warning page instead of the app.
+// `capture.mjs` and `audit-a11y.mjs` both learned this already, and the trade is
+// theirs too — scoped to an https target rather than always on, because
+// silently accepting a bad certificate is not a default worth carrying into a
+// run against a real host.
+const CHROME_FLAGS = APP.startsWith('https:') ? ['--ignore-certificate-errors'] : [];
+if (API.startsWith('https:')) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const SECRETS = {
   anthropicToken: process.env.ELICTA_ANTHROPIC_TOKEN ?? '',
   deepgramKey: process.env.ELICTA_DEEPGRAM_KEY ?? '',
@@ -160,13 +170,54 @@ const OVERLAY = (journey, message) => `
     '<span>' + ${JSON.stringify(message)} + '</span>';
   return true;`;
 
+/**
+ * Waits for a screen to actually be on the page, before the settling time.
+ *
+ * Every navigation here used to be followed by a flat sleep and nothing else —
+ * 3500ms for the first load, 3200 after a reload, 1800 after a hash change.
+ * That is a bet on how long the machine takes, and `capture.mjs` and
+ * `audit-a11y.mjs` both lost the same bet this week: a dev server compiles a
+ * route the first time it is asked for, and any load at all pushes it past the
+ * guess. A journey that acts on a screen which has not rendered records a FAIL
+ * about the app, and this tool exists to be a map of what is connected — a
+ * wrong FAIL is worse here than a missing one.
+ *
+ * `router.tsx` renders lazy screens inside `<Suspense fallback={null}>`, so
+ * while a screen's chunk is loading the pane body is present and empty. That
+ * makes "the pane body has a child" the signal for every case: a cold boot, a
+ * document reload, and a hash change that swaps one lazy screen for another.
+ *
+ * It reports rather than throws, unlike its siblings in the other two tools.
+ * They are producing an artifact and must stop; this one is producing a map,
+ * and stopping at the first hole is what the checks were written not to do.
+ * The wait is *added* to the settling time rather than replacing it — the sleep
+ * that follows was also covering fetch-on-mount data arriving, so keeping it
+ * whole means this can only ever be more patient than it was, never less.
+ */
+async function waitForScreen(cdp, what, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const ready = await cdp.eval(
+      `const root = document.querySelector('#root');
+       const body = document.querySelector('.pane-body');
+       return Boolean(root?.childElementCount && body?.childElementCount)`,
+    );
+    if (ready === true) return true;
+    if (Date.now() >= deadline) {
+      console.log(`    ! ${what}: nothing rendered in ${timeoutMs / 1000}s — the checks below are about a blank pane`);
+      return false;
+    }
+    await sleep(250);
+  }
+}
+
 async function main() {
   const tool = findFfmpeg();
   if (tool === null) throw new Error('No ffmpeg found — cannot record.');
   mkdirSync(OUT, { recursive: true });
   console.log(`app ${APP}\napi ${API}\nout ${OUT}\nffmpeg ${tool.bin} (${tool.ext})\n`);
 
-  const { cdp, close } = await launchBrowser(VIEWPORT);
+  const { cdp, close } = await launchBrowser({ ...VIEWPORT, flags: CHROME_FLAGS });
   const consoleErrors = [];
   cdp.on('Runtime.exceptionThrown', ({ exceptionDetails }) =>
     consoleErrors.push(redact(exceptionDetails?.exception?.description ?? 'exception')));
@@ -176,6 +227,7 @@ async function main() {
   });
 
   await cdp.send('Page.navigate', { url: `${APP}/#/about` });
+  await waitForScreen(cdp, 'the first load');
   await sleep(3500);
 
   const state = {};
@@ -221,6 +273,7 @@ async function main() {
         // fragment, then reload the document explicitly.
         await cdp.eval(`window.location.hash = '#/${feature}'; return true`);
         await cdp.send('Page.reload', { ignoreCache: true });
+        await waitForScreen(cdp, `reload to ${feature}`);
         await sleep(3200);
         await cdp.eval(OVERLAY(`${journey.id} — ${journey.title}`, `Screen: ${feature}`));
       },
@@ -251,6 +304,7 @@ async function main() {
       },
       async go(feature) {
         await cdp.eval(`window.location.hash = '#/${feature}'; return true`);
+        await waitForScreen(cdp, `go to ${feature}`);
         await sleep(1800);
         await cdp.eval(OVERLAY(`${journey.id} — ${journey.title}`, `Screen: ${feature}`));
       },
