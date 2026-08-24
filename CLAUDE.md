@@ -122,9 +122,25 @@ the macOS ones. Cross-check them without a runner:
 ```bash
 cargo check -p capture --target x86_64-pc-windows-msvc --all-targets
 cargo check -p capture --target aarch64-pc-windows-msvc --all-targets
+cargo check -p capture --target aarch64-apple-darwin --no-default-features --all-targets
+cargo check -p capture --target x86_64-apple-darwin --no-default-features --all-targets
 ```
 That type-checks the gated code but links nothing, so it catches trait and
 signature breakage, not linkage or runtime behaviour.
+
+**macOS needs `--no-default-features`, and that is the whole point of the
+`loopback` feature.** `screencapturekit` pulls in `apple-cf`, which vendors a
+Swift bridge and shells out to `swiftc` from its build script — so a Linux
+`cargo check --target aarch64-apple-darwin` dies before it reaches a line of
+this repo. With the `ScreenCaptureKit` backend behind a default-on feature,
+turning it off type-checks every other macOS path — the CoreAudio line-in
+backend, input-device enumeration, the TCC permission shims — on the real
+target, from anywhere. What stays uncheckable is `device/macos.rs` alone.
+
+That is a development affordance, not a product configuration: every shipped
+build takes the default and has the loopback backend. `available_kinds` drops
+`Loopback` when the feature is off, so a build without it never offers a path
+it cannot open.
 
 Desktop (`pnpm`, Node >= 22.13):
 ```bash

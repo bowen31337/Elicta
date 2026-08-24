@@ -16,5 +16,21 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-screencapturekit = "8.0.1"
+# Optional so the rest of the macOS code can be type-checked off a Mac.
+# `screencapturekit` pulls in `apple-cf`, which vendors a Swift bridge and so
+# needs `swiftc` — meaning a Linux `cargo check --target aarch64-apple-darwin`
+# fails at the build script before it reaches a line of this crate. That blind
+# spot is not theoretical: three macOS-only breakages reached main in one day
+# because nothing but a full bundle build could see them. With the loopback
+# backend behind a feature, `--no-default-features` type-checks every other
+# macOS path — the CoreAudio line-in backend, device enumeration, the
+# permission shims — on the real target, from anywhere.
+screencapturekit = { version = "8.0.1", optional = true }
 coreaudio-rs = "0.14"
+
+[features]
+default = ["loopback"]
+#: The `ScreenCaptureKit` silent-join backend. On by default: every shipped
+#: build wants it, and turning it off is a development affordance, not a
+#: product configuration.
+loopback = ["dep:screencapturekit"]

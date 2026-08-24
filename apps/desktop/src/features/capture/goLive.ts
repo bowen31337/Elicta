@@ -35,19 +35,21 @@ export interface GoLiveOptions {
   readonly startSession?: (meetingId: string) => Promise<SessionStarted>;
   /** Which input to open, when one is not already being checked. */
   readonly sourceId?: string;
+  /** One input within that path. Omitted, the OS's own preference opens. */
+  readonly deviceId?: string;
 }
 
 export async function goLive(
   meetingId: string,
   options: GoLiveOptions = {},
 ): Promise<SessionStarted> {
-  const { store = captureSession, startSession = postSessionStart, sourceId } = options;
+  const { store = captureSession, startSession = postSessionStart, sourceId, deviceId } = options;
 
   // A check already holds the device. Otherwise open one now — this throws
   // with the device's own sentence, a refused permission or an input another
   // application holds, and nothing has been booked.
   const wasChecking = store.getSnapshot().status.state === 'checking';
-  if (!wasChecking) await store.check(sourceId);
+  if (!wasChecking) await store.check(sourceId, deviceId);
 
   let session: SessionStarted;
   try {

@@ -50,10 +50,30 @@ import {
  * branch is reachable with no browser, no device and no permission prompt.
  */
 
+/**
+ * One input device within a capture path.
+ *
+ * The packaged app offered no device choice at all until this existed: it
+ * listed two *kinds* and opened whatever the OS called the default input, so
+ * an operator with an interface plugged in beside a built-in microphone had no
+ * way to say which one to record. The browser build had been enumerating and
+ * offering real devices the whole time, which is the wrong way round — the
+ * packaged app is the one that ships.
+ */
+export interface CaptureInputDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly isDefault: boolean;
+  /** Mixes the room into one stream (FR-1.2) — the built-in microphone. */
+  readonly degraded: boolean;
+}
+
 export interface CaptureSourceOption {
   readonly id: string;
   readonly label: string;
   readonly degraded: boolean;
+  /** Empty when the path takes no device, as the loopback tap does. */
+  readonly devices?: readonly CaptureInputDevice[];
 }
 
 export interface CaptureStatus {
@@ -154,8 +174,15 @@ export interface CaptureStore {
   getSnapshot(): CaptureSnapshot;
   /** Re-reads the device list, and the shell's session if there is one. */
   refresh(): Promise<void>;
-  /** Opens the device without recording, so the operator can see it working. */
-  check(sourceId?: string): Promise<void>;
+  /**
+   * Opens the device without recording, so the operator can see it working.
+   *
+   * `deviceId` names one input within that path, from the source's `devices`.
+   * Omitted, the OS's own preference opens — which is all this could ever do
+   * before, and is why an operator with an interface plugged in beside a
+   * built-in microphone had no way to say which one was recording.
+   */
+  check(sourceId?: string, deviceId?: string): Promise<void>;
   /**
    * Records on the device that is already open, promoting a check rather than
    * re-opening it — a second `getUserMedia` prompts again on some browsers and
@@ -163,7 +190,7 @@ export interface CaptureStore {
    */
   beginRecording(): Promise<void>;
   /** Opens a device and records on it, in one step. */
-  start(sourceId?: string): Promise<void>;
+  start(sourceId?: string, deviceId?: string): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   /** Releases the device. The only thing that does, now that no unmount will. */
@@ -583,7 +610,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    * Shared by checking and recording precisely so that the device a check
    * opened is the device that records.
    */
-  async function openDevice(sourceId?: string): Promise<void> {
+  async function openDevice(sourceId?: string, deviceId?: string): Promise<void> {
     // Refused rather than restarted, which is the answer the shell has always
     // given. Two sessions on one device is a state the operator can neither
     // see nor get out of.
@@ -593,7 +620,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
 
     if (shellAvailable()) {
       try {
-        const next = await invoke<CaptureStatus>('start_capture', { sourceId });
+        const next = await invoke<CaptureStatus>('start_capture', { sourceId, deviceId });
         publish({ status: next, error: null });
       } catch (cause) {
         const message = shellFailureMessage(cause);
@@ -728,8 +755,8 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       publish({ sources, blockedReason: blocked() });
     },
 
-    async check(sourceId?: string) {
-      await openDevice(sourceId);
+    async check(sourceId?: string, deviceId?: string) {
+      await openDevice(sourceId, deviceId);
       // Deliberately no clock: nothing is being recorded, so there is nothing
       // for it to have been recorded for.
       startMeter();
@@ -759,8 +786,8 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       await openUploadPath();
     },
 
-    async start(sourceId?: string) {
-      await openDevice(sourceId);
+    async start(sourceId?: string, deviceId?: string) {
+      await openDevice(sourceId, deviceId);
       startClock();
       startMeter();
       publish({

@@ -53,6 +53,8 @@ use crate::ring::{AudioFormat, RawFrame};
 
 use super::kind::AudioSourceKind;
 use super::macos_format::{decode_audio_buffers, CoreAudioBuffer, CoreAudioTapFormat};
+use super::macos_permission::screen_recording_permission;
+use super::permission::{describe_failure, explain, Permission};
 use super::source::{AudioSource, AudioSourceError};
 
 /// The format this backend asks `ScreenCaptureKit` to deliver system audio
@@ -144,14 +146,28 @@ impl SCStreamDelegateTrait for StopForwarder {
 }
 
 impl ScreenCaptureLoopbackSource {
-    /// Starts a silent local capture of the system's audio output. Fails if
-    /// `ScreenCaptureKit` has no shareable content available (no display, or
-    /// screen-recording permission not yet granted — `ScreenCaptureKit`
-    /// gates audio-only capture behind the same permission as video) or the
-    /// stream refuses to start.
+    /// Starts a silent local capture of the system's audio output.
+    ///
+    /// Asks for Screen Recording first and reports a refusal in words an
+    /// operator can act on, rather than letting `ScreenCaptureKit` fail later
+    /// with a message about shareable content. Still fails afterwards if
+    /// there is no display to attach to, or the stream refuses to start.
     pub fn open() -> Result<Self, AudioSourceError> {
+        if let Some(reason) = explain(Permission::ScreenRecording, screen_recording_permission()) {
+            return Err(AudioSourceError::Disconnected(reason));
+        }
+
+        // Checked again from the other side. The preflight above answers for
+        // the running process, and a locally built app is ad-hoc signed — its
+        // code-signing hash changes with every rebuild, so a grant can
+        // describe yesterday's binary and not this one. When that happens the
+        // preflight says yes and `ScreenCaptureKit` still refuses.
         let content = SCShareableContent::get().map_err(|e| {
-            AudioSourceError::Disconnected(format!("failed to enumerate shareable content: {e}"))
+            AudioSourceError::Disconnected(describe_failure(
+                Permission::ScreenRecording,
+                "failed to enumerate shareable content",
+                &e.to_string(),
+            ))
         })?;
         let display = content.displays().into_iter().next().ok_or_else(|| {
             AudioSourceError::Disconnected(

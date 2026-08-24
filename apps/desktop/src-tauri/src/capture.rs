@@ -27,6 +27,22 @@ use capture::state::{CaptureState, CaptureStateMachine};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+/// One input device the operator can pick within a capture path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioInputDevice {
+    /// Passed back to `start_capture`. Opaque here — only the backend that
+    /// produced it knows what it addresses.
+    pub id: String,
+    /// The OS's own name for the device, never one invented here.
+    pub name: String,
+    /// The input the OS would choose on its own, so the UI can say which one
+    /// "no choice" would land on.
+    pub is_default: bool,
+    /// Whether picking this one mixes the room into a single stream (FR-1.2).
+    /// True for the machine's built-in microphone.
+    pub degraded: bool,
+}
+
 /// One capture path, as the settings and capture screens render it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioSourceOption {
@@ -37,11 +53,27 @@ pub struct AudioSourceOption {
     /// Whether choosing this one mixes the room into a single stream, which
     /// the capture screen turns into the FR-1.2 warning banner.
     pub degraded: bool,
+    /// The devices this path can be pointed at, if it has a choice to offer.
+    ///
+    /// Empty means the path takes no device — the loopback tap is the
+    /// machine's output, which is one thing — or that this build cannot
+    /// enumerate them, in which case the OS's preference is what opens. The
+    /// packaged app offered no device choice at all until this existed, while
+    /// the browser build had been enumerating and offering real ones the
+    /// whole time; an operator could not say which interface to record from
+    /// in the one build that ships.
+    #[serde(default)]
+    pub devices: Vec<AudioInputDevice>,
 }
 
 fn describe(kind: AudioSourceKind) -> AudioSourceOption {
     let (id, label) = match kind {
-        AudioSourceKind::LineIn => ("line-in", "Audio interface (line in)"),
+        // Not "line in": this path opens whatever CoreAudio calls the default
+        // input unless told otherwise, which on a laptop with nothing plugged
+        // in is the built-in microphone. Calling that line-in told the
+        // operator they were on an interface while the room was being mixed
+        // into one stream.
+        AudioSourceKind::LineIn => ("line-in", "Microphone or audio interface"),
         AudioSourceKind::Loopback => ("loopback", "Meeting audio (silent join)"),
         AudioSourceKind::ManagedParticipant => ("managed", "Per-participant streams"),
         AudioSourceKind::AcousticFallback => ("acoustic", "Built-in microphone"),
@@ -50,6 +82,17 @@ fn describe(kind: AudioSourceKind) -> AudioSourceOption {
         id: id.to_string(),
         label: label.to_string(),
         degraded: kind.is_degraded_fallback(),
+        devices: device::input_devices(kind)
+            .into_iter()
+            .map(|found| AudioInputDevice {
+                id: found.id,
+                name: found.name,
+                is_default: found.is_default,
+                // The kind cannot answer this and never could: one kind covers
+                // both a USB interface and the machine's own microphone.
+                degraded: found.is_built_in,
+            })
+            .collect(),
     }
 }
 
@@ -242,6 +285,7 @@ pub fn start_capture(
     app: AppHandle,
     manager: State<'_, CaptureManager>,
     source_id: String,
+    device_id: Option<String>,
 ) -> Result<CaptureStatus, String> {
     let mut guard = manager.session.lock().map_err(|_| "capture lock poisoned")?;
     if guard.is_some() {
@@ -249,7 +293,7 @@ pub fn start_capture(
     }
 
     let kind = kind_from_id(&source_id).ok_or_else(|| format!("unknown source {source_id}"))?;
-    let mut source = device::open(kind).map_err(|error| match error {
+    let mut source = device::open_device(kind, device_id.as_deref()).map_err(|error| match error {
         capture::device::AudioSourceError::Disconnected(reason) => reason,
     })?;
 
@@ -398,10 +442,29 @@ mod tests {
     }
 
     #[test]
-    fn only_the_acoustic_fallback_is_marked_degraded() {
+    fn only_the_acoustic_fallback_is_marked_degraded_at_the_kind_level() {
         assert!(describe(AudioSourceKind::AcousticFallback).degraded);
         assert!(!describe(AudioSourceKind::LineIn).degraded);
         assert!(!describe(AudioSourceKind::Loopback).degraded);
+    }
+
+    #[test]
+    fn the_input_path_is_not_described_as_line_in() {
+        // It opens whatever the default input is, which on a laptop with
+        // nothing plugged in is the built-in microphone. Calling that "line
+        // in" told the operator they were on an interface while the room was
+        // being mixed into a single stream.
+        let label = describe(AudioSourceKind::LineIn).label;
+
+        assert!(!label.to_lowercase().contains("line in"), "{label}");
+        assert!(label.contains("Microphone"), "{label}");
+    }
+
+    #[test]
+    fn the_loopback_tap_offers_no_device_choice() {
+        // It captures what the machine is playing, which is one thing. A
+        // device list there would be a control that changes nothing.
+        assert!(describe(AudioSourceKind::Loopback).devices.is_empty());
     }
 
     #[test]

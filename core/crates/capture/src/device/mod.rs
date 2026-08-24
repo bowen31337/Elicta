@@ -33,7 +33,9 @@
 //! callback decoded, typed interleaved samples, so there is no raw
 //! `AudioBufferList` byte-decoding step here for a `_format` module to hold.
 
+mod input;
 mod kind;
+mod permission;
 mod managed;
 mod platform;
 mod profile;
@@ -42,12 +44,16 @@ mod source;
 // Consumed by `macos` on macOS builds; compiled under `cfg(test)` on every
 // other platform purely so its byte-decoding logic keeps cross-platform unit
 // test coverage even though nothing links it on non-macOS targets.
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(any(test, all(target_os = "macos", feature = "loopback")))]
 mod macos_format;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "loopback"))]
 mod macos;
 #[cfg(target_os = "macos")]
 mod macos_line_in;
+// Gated on the OS and not on `loopback`: these are the FFI declarations the
+// loopback backend needs, kept where a compiler off a Mac can still check them.
+#[cfg(target_os = "macos")]
+mod macos_permission;
 // Consumed by `wasapi` on Windows builds; compiled under `cfg(test)` on every
 // other platform purely so its byte-decoding logic keeps cross-platform unit
 // test coverage even though nothing links it on non-Windows targets.
@@ -58,12 +64,14 @@ mod wasapi;
 #[cfg(target_os = "windows")]
 mod wasapi_line_in;
 
+pub use input::{is_built_in_transport, select, InputDevice, TRANSPORT_TYPE_BUILT_IN};
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
+pub use permission::{describe_failure, explain, reads_as_tcc_refusal, Permission, PermissionState};
 pub use managed::{
     ManagedParticipantSource, MeetingSession, Participant, ParticipantFrame, RecordedMeeting,
 };
-pub use platform::{available_kinds, open, open_registry};
-#[cfg(target_os = "macos")]
+pub use platform::{available_kinds, input_devices, open, open_device, open_registry};
+#[cfg(all(target_os = "macos", feature = "loopback"))]
 pub use macos::ScreenCaptureLoopbackSource;
 #[cfg(target_os = "macos")]
 pub use macos_line_in::CoreAudioLineInSource;

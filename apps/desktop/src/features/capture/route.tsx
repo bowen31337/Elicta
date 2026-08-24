@@ -28,6 +28,15 @@ import { useRecordingStart } from './useRecordingStart';
  */
 export type CaptureState = 'capturing' | 'paused' | 'checking' | 'stopped';
 
+/** One input device within a capture path, for the picker. */
+export interface CaptureSourceDevice {
+  readonly id: string;
+  readonly name: string;
+  readonly isDefault: boolean;
+  /** The machine's own microphone: mixes the room into one stream (FR-1.2). */
+  readonly degraded: boolean;
+}
+
 export interface CaptureSource {
   /** The device to open. Defaults to the label for the fixed journey scenes,
    *  which render a source list but never start one. */
@@ -35,6 +44,16 @@ export interface CaptureSource {
   readonly label: string;
   readonly kind: 'wired' | 'loopback' | 'acoustic';
   readonly active: boolean;
+  /**
+   * The inputs this path can be pointed at.
+   *
+   * Absent or empty means it takes no device — the loopback tap is the
+   * machine's output — or that this build cannot enumerate them, in which case
+   * the OS's own preference opens. The packaged app was in the second case
+   * for every path, so it listed two kinds and no devices while the browser
+   * build listed the real ones.
+   */
+  readonly devices?: readonly CaptureSourceDevice[];
 }
 
 /**
@@ -103,7 +122,7 @@ export interface CaptureEnrolment {
    */
   readonly metering?: CaptureMetering;
   /** Starts recording from one input, named as `CaptureSource.id` names it. */
-  readonly onStart?: (sourceId: string) => void;
+  readonly onStart?: (sourceId: string, deviceId?: string) => void;
   readonly onStop?: () => void;
   readonly onCancel?: () => void;
   /**
@@ -127,11 +146,11 @@ export interface CaptureScreenProps {
   /** Fired by the pause/resume control. Omitted by the fixed journey scenes. */
   readonly onTogglePause?: () => void;
   /** Opens the chosen input without recording, so it can be seen working. */
-  readonly onCheck?: (sourceId: string) => void;
+  readonly onCheck?: (sourceId: string, deviceId?: string) => void;
   /** Why recording cannot begin for consent reasons. Disables the control. */
   readonly consentBlocked?: string | null;
   /** Opens the chosen input. Omitted by the fixed journey scenes. */
-  readonly onStart?: (sourceId: string) => void;
+  readonly onStart?: (sourceId: string, deviceId?: string) => void;
   /** Releases the device. Omitted by the fixed journey scenes. */
   readonly onStop?: () => void;
   /** A failure from trying to open the microphone, in the operator's terms. */
@@ -398,6 +417,16 @@ export function CaptureScreen({
   const sourceId = (source: CaptureSource) => source.id ?? source.label;
   const [chosen, setChosen] = useState<string | null>(null);
   const selected = chosen ?? (sources.length > 0 ? sourceId(sources[0]) : null);
+  const selectedSource = sources.find((source) => sourceId(source) === selected) ?? null;
+  const devices = selectedSource?.devices ?? [];
+  // Held per source: switching path clears it, because a device id from one
+  // path means nothing to another. `null` is "whatever the system prefers",
+  // which is the only thing this screen could ask for before there was a list.
+  const [chosenDevice, setChosenDevice] = useState<string | null>(null);
+  const device = devices.some((entry) => entry.id === chosenDevice) ? chosenDevice : null;
+  const roomMicrophone =
+    devices.find((entry) => entry.id === device)?.degraded ??
+    (device === null && (devices.find((entry) => entry.isDefault)?.degraded ?? false));
 
   return (
     <main className="screen" aria-labelledby="capture-title">
@@ -443,7 +472,14 @@ export function CaptureScreen({
                   id="capture-input"
                   className="field field--inline"
                   value={selected ?? ''}
-                  onChange={(event) => setChosen(event.target.value)}
+                  onChange={(event) => {
+                    setChosen(event.target.value);
+                    // A device id belongs to one path. Carried across, it
+                    // either matches nothing or — worse — matches something
+                    // else, and the operator records from a device they did
+                    // not pick on a screen showing the one they did.
+                    setChosenDevice(null);
+                  }}
                 >
                   {/* Keyed by position, not by id. A browser withholds every
                       device id until the first permission grant, so before it
@@ -461,6 +497,38 @@ export function CaptureScreen({
                 </select>
               </>
             ) : null}
+            {devices.length > 0 ? (
+              <>
+                <label className="sr-only" htmlFor="capture-device">
+                  Which device to record from
+                </label>
+                <select
+                  id="capture-device"
+                  className="field field--inline"
+                  value={device ?? ''}
+                  onChange={(event) =>
+                    setChosenDevice(event.target.value === '' ? null : event.target.value)
+                  }
+                >
+                  {/* The empty value is a real choice, not a placeholder:
+                      following the system default is what an operator who
+                      changes it in System Settings expects, and it is what
+                      every recording did before this picker existed. */}
+                  <option value="">
+                    {`System default${
+                      devices.find((entry) => entry.isDefault)
+                        ? ` (${devices.find((entry) => entry.isDefault)?.name})`
+                        : ''
+                    }`}
+                  </option>
+                  {devices.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
             {state === 'stopped' ? (
               // Before this is pressed, a browser has told us neither the ids
               // nor the labels of its inputs, so the list above is
@@ -469,7 +537,7 @@ export function CaptureScreen({
               <button
                 type="button"
                 className="btn"
-                onClick={() => (selected === null ? undefined : onCheck?.(selected))}
+                onClick={() => (selected === null ? undefined : onCheck?.(selected, device ?? undefined))}
                 disabled={blocked || selected === null}
               >
                 Check microphone
@@ -482,7 +550,7 @@ export function CaptureScreen({
             <button
               type="button"
               className="btn btn--filled capture-toggle"
-              onClick={() => (selected === null ? undefined : onStart?.(selected))}
+              onClick={() => (selected === null ? undefined : onStart?.(selected, device ?? undefined))}
               disabled={blocked || selected === null || consentBlocked !== null}
             >
               Start recording
@@ -560,7 +628,7 @@ export function CaptureScreen({
             </div>
           ))}
         </div>
-        {acoustic ? (
+        {acoustic || roomMicrophone ? (
           <p className="capture-warning t-footnote" role="status">
             You are on a room microphone. Wired or loopback capture is
             noticeably more accurate — cross-talk is the single largest source
@@ -755,6 +823,12 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
         label: source.label,
         kind: source.degraded ? 'acoustic' : source.id === 'loopback' ? 'loopback' : 'wired',
         active: capture.status.source?.id === source.id,
+        devices: source.devices?.map((found) => ({
+          id: found.id,
+          name: found.name,
+          isDefault: found.isDefault,
+          degraded: found.degraded,
+        })),
       }))}
       // Read from the service rather than hardcoded. These were `false` and
       // `0` on every render, so the section described an operator who had
@@ -785,8 +859,8 @@ export default function CaptureRoute({ store }: { store?: CaptureStore } = {}) {
       }}
       // Not `capture.start`: starting a recording books the meeting, because
       // the meeting begins when the recording does.
-      onStart={(sourceId) => beginning.start(sourceId)}
-      onCheck={(sourceId) => beginning.check(sourceId)}
+      onStart={(sourceId, deviceId) => beginning.start(sourceId, deviceId)}
+      onCheck={(sourceId, deviceId) => beginning.check(sourceId, deviceId)}
       onStop={() => void capture.stop()}
       consentBlocked={beginning.consentBlocked}
       captureError={beginning.error ?? capture.error}

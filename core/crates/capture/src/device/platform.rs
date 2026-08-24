@@ -6,13 +6,15 @@
 //! list an operator can choose from, so nothing ever opened a device and the
 //! whole capture path sat unreachable behind a UI that could not call it.
 //!
-//! Availability is answered in two stages on purpose. [`available_kinds`] is a
-//! compile-time fact and costs nothing, so a settings screen can render the
-//! choices without touching the audio hardware; [`open`] is what actually
-//! grabs a device, and only ever runs for the one kind the operator picked.
-//! Collapsing the two would mean opening every input on the machine — and
-//! lighting up the OS recording indicator — just to draw a menu.
+//! Availability is answered in stages on purpose. [`available_kinds`] is a
+//! compile-time fact and costs nothing; [`input_devices`] asks the OS what is
+//! plugged in, which is a read of the device list and not a capture — nothing
+//! is opened and the OS recording indicator stays dark; [`open_device`] is
+//! what actually grabs a device, and only ever runs for the one the operator
+//! picked. Collapsing the last into the others would mean opening every input
+//! on the machine, and lighting that indicator, just to draw a menu.
 
+use super::input::InputDevice;
 use super::kind::AudioSourceKind;
 use super::registry::AudioSourceRegistry;
 use super::source::{AudioSource, AudioSourceError};
@@ -26,7 +28,17 @@ use super::source::{AudioSource, AudioSourceError};
 pub fn available_kinds() -> Vec<AudioSourceKind> {
     #[cfg(target_os = "macos")]
     {
-        vec![AudioSourceKind::LineIn, AudioSourceKind::Loopback]
+        // Offering a kind `open` would refuse is worse than offering fewer:
+        // the operator picks it, it fails, and nothing on the screen said it
+        // was never available. `loopback` is on for every shipped build.
+        #[cfg(feature = "loopback")]
+        {
+            vec![AudioSourceKind::LineIn, AudioSourceKind::Loopback]
+        }
+        #[cfg(not(feature = "loopback"))]
+        {
+            vec![AudioSourceKind::LineIn]
+        }
     }
     #[cfg(target_os = "windows")]
     {
@@ -41,6 +53,25 @@ pub fn available_kinds() -> Vec<AudioSourceKind> {
     }
 }
 
+/// Every input device the operator can choose between, for the kinds that
+/// have a choice to offer.
+///
+/// Empty is a meaningful answer, not a failure: it means this build offers no
+/// device-level choice for that kind and the OS's own preference is what will
+/// be opened. Two things are empty for different reasons and both are honest.
+/// [`AudioSourceKind::Loopback`] taps what the machine is playing, which is
+/// one thing and not a device to pick from. Windows returns nothing yet
+/// because the WASAPI backend has not been given enumeration — the macOS
+/// build is where an operator had no way to say which interface to record,
+/// and where the browser build had been offering real devices all along.
+pub fn input_devices(kind: AudioSourceKind) -> Vec<InputDevice> {
+    match kind {
+        #[cfg(target_os = "macos")]
+        AudioSourceKind::LineIn => super::macos_line_in::input_devices(),
+        _ => Vec::new(),
+    }
+}
+
 /// Opens one capture path, or explains why it could not be opened.
 ///
 /// The error is deliberately the same `Disconnected` a mid-session failure
@@ -49,10 +80,26 @@ pub fn available_kinds() -> Vec<AudioSourceKind> {
 /// giving them separate types would push a distinction into the UI that the
 /// UI would only have to collapse again.
 pub fn open(kind: AudioSourceKind) -> Result<Box<dyn AudioSource>, AudioSourceError> {
+    open_device(kind, None)
+}
+
+/// Opens one capture path against a chosen input device.
+///
+/// `device` is an id from [`input_devices`]. `None` opens whatever the OS
+/// prefers, which is what every caller got before there was a choice. A kind
+/// with no device-level choice ignores it rather than refusing: the loopback
+/// tap is the machine's output whichever row the UI had selected.
+pub fn open_device(
+    kind: AudioSourceKind,
+    device: Option<&str>,
+) -> Result<Box<dyn AudioSource>, AudioSourceError> {
+    let _ = device;
     match kind {
         #[cfg(target_os = "macos")]
-        AudioSourceKind::LineIn => Ok(Box::new(super::macos_line_in::CoreAudioLineInSource::open()?)),
-        #[cfg(target_os = "macos")]
+        AudioSourceKind::LineIn => Ok(Box::new(
+            super::macos_line_in::CoreAudioLineInSource::open_device(device)?,
+        )),
+        #[cfg(all(target_os = "macos", feature = "loopback"))]
         AudioSourceKind::Loopback => {
             Ok(Box::new(super::macos::ScreenCaptureLoopbackSource::open()?))
         }

@@ -28,9 +28,9 @@ export interface RecordingStart {
   readonly error: string | null;
   readonly busy: boolean;
   /** Opens the input without recording, so it can be seen working. */
-  readonly check: (sourceId?: string) => void;
+  readonly check: (sourceId?: string, deviceId?: string) => void;
   /** Opens the input if needed, books the meeting, and records. */
-  readonly start: (sourceId?: string) => void;
+  readonly start: (sourceId?: string, deviceId?: string) => void;
 }
 
 export function useRecordingStart(store?: CaptureStore): RecordingStart {
@@ -59,9 +59,9 @@ export function useRecordingStart(store?: CaptureStore): RecordingStart {
   const { meetingId } = meeting;
 
   const check = useCallback(
-    (sourceId?: string) => {
+    (sourceId?: string, deviceId?: string) => {
       setError(null);
-      void (store ?? captureSession).check(sourceId).catch((cause: unknown) => {
+      void (store ?? captureSession).check(sourceId, deviceId).catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : 'The microphone could not be opened.');
       });
     },
@@ -69,14 +69,14 @@ export function useRecordingStart(store?: CaptureStore): RecordingStart {
   );
 
   const start = useCallback(
-    (sourceId?: string) => {
+    (sourceId?: string, deviceId?: string) => {
       if (meetingId === null) {
         setError('No meeting is selected, so there is nothing to record.');
         return;
       }
       setError(null);
       setBusy(true);
-      void goLive(meetingId, { store, sourceId })
+      void goLive(meetingId, { store, sourceId, deviceId })
         .catch((cause: unknown) => {
           setError(cause instanceof Error ? cause.message : 'That did not work.');
         })

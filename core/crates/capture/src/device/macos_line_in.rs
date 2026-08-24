@@ -44,12 +44,16 @@ use std::time::Duration;
 const SILENT_DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
-use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
+use coreaudio::audio_unit::macos_helpers::{
+    audio_unit_from_device_id, get_audio_device_ids_for_scope, get_default_device_id,
+    get_device_name, get_device_transport_type,
+};
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 
 use crate::ring::{AudioFormat, RawFrame};
 
+use super::input::{is_built_in_transport, select, InputDevice};
 use super::kind::AudioSourceKind;
 use super::source::{AudioSource, AudioSourceError};
 
@@ -73,18 +77,81 @@ pub struct CoreAudioLineInSource {
     format: AudioFormat,
 }
 
+/// Every input CoreAudio can see, in the order it reports them.
+///
+/// Devices that report no input scope are skipped rather than listed and
+/// refused later: an output-only interface in an input picker is a row that
+/// exists only to fail. A device whose name cannot be read is skipped for the
+/// same reason — there is nothing to put in the list, and an entry called
+/// "unknown" is a row nobody can choose deliberately.
+pub fn input_devices() -> Vec<InputDevice> {
+    let default = get_default_device_id(true);
+    let Ok(ids) = get_audio_device_ids_for_scope(Scope::Input) else {
+        // The whole list, not one device, failed. Reported as empty rather
+        // than as an error: the picker's own "nothing is connected" is a
+        // truthful description of what the operator can choose from, and the
+        // system-default path stays open regardless.
+        return Vec::new();
+    };
+
+    ids.into_iter()
+        .filter_map(|id| {
+            let name = get_device_name(id).ok()?;
+            Some(InputDevice {
+                id: id.to_string(),
+                name,
+                is_default: Some(id) == default,
+                // Unreadable transport means "not known to be built in".
+                // The wrong way round would put the FR-1.2 warning on an
+                // interface that does not deserve it, and a warning that
+                // fires on the good path is one nobody reads on the bad one.
+                is_built_in: get_device_transport_type(id)
+                    .map(is_built_in_transport)
+                    .unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
 impl CoreAudioLineInSource {
-    /// Opens the current default input device and starts capture. Fails if
-    /// no input device exists (no line-in interface configured as the input
-    /// device) or the AUHAL audio unit refuses configuration or
-    /// initialization.
+    /// Opens the current default input device and starts capture.
+    ///
+    /// Equivalent to [`open_device`](Self::open_device) with no device asked
+    /// for. Kept because most callers genuinely have no preference, and
+    /// spelling that as `open_device(None)` at every call site reads like an
+    /// omission rather than a choice.
     pub fn open() -> Result<Self, AudioSourceError> {
-        let device_id = get_default_device_id(true).ok_or_else(|| {
-            AudioSourceError::Disconnected(
-                "no default input device (no line-in interface configured as the input device)"
-                    .to_string(),
-            )
-        })?;
+        Self::open_device(None)
+    }
+
+    /// Opens one input device by id and starts capture.
+    ///
+    /// `None` opens whatever the OS prefers, which is all this backend could
+    /// ever do before. Fails if the requested device is no longer connected,
+    /// if no input device exists at all, or if the AUHAL audio unit refuses
+    /// configuration or initialization.
+    pub fn open_device(requested: Option<&str>) -> Result<Self, AudioSourceError> {
+        let available = input_devices();
+        let device_id = match select(&available, requested)? {
+            // Chosen deliberately: parsed back from the string this backend
+            // itself produced, so a failure here means the id was invented
+            // somewhere above rather than that the device went away.
+            // Type left to inference rather than named: `AudioDeviceID` is
+            // defined in a crate this one does not depend on directly, and the
+            // default arm below already pins it to whatever coreaudio-rs says.
+            Some(device) => device.id.parse().map_err(|_| {
+                AudioSourceError::Disconnected(format!(
+                    "'{}' is not an input this build can address",
+                    device.id
+                ))
+            })?,
+            None => get_default_device_id(true).ok_or_else(|| {
+                AudioSourceError::Disconnected(
+                    "no default input device (no line-in interface configured as the input device)"
+                        .to_string(),
+                )
+            })?,
+        };
 
         let mut audio_unit = audio_unit_from_device_id(device_id, true).map_err(|e| {
             AudioSourceError::Disconnected(format!("failed to open input audio unit: {e}"))
