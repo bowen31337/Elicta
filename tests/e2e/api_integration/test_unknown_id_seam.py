@@ -380,9 +380,12 @@ def test_testing_an_anthropic_key_probes_it_rather_than_reporting_configuration(
     # The vendor's error type, never the credential.
     assert "sk-ant-not-real" not in response.text
     assert "not verified" not in body["detail"], "a probe ran, so this is a real verdict"
-    # Listing models rather than sending one: no tokens spent, and nothing an
-    # operator would mistake for product traffic in their usage.
-    assert "/v1/models" in str(vendor_refuses[0].url)
+    # Sending the smallest possible message, not listing models. Listing
+    # authenticates and nothing more: an OAuth token lists happily -- and lists
+    # the configured model -- and is then refused for `/v1/messages`, so this
+    # screen said "Verified" while every bank compile stopped at the first
+    # model call.
+    assert "/v1/messages" in str(vendor_refuses[0].url)
 
 
 def test_testing_an_oauth_token_probes_it_in_its_own_mode(

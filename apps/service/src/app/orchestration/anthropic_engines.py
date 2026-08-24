@@ -428,11 +428,18 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
         retry_after = _retry_after(exc)
         if retry_after is None:
             # A 429 with no `retry-after` and no rate-limit headers is what
-            # Anthropic returns when the *model* is not one the credential's
-            # plan includes: the body says `rate_limit_error`, and the same
+            # Anthropic returns when the credential is not entitled to make
+            # this request: the body says `rate_limit_error`, and the same
             # request a second later is refused identically. Promising it
             # "should succeed shortly" sends an operator away to wait for
             # something that never happens — which is exactly what it did.
+            #
+            # This named the model as the cause and only the model, which sent
+            # the next operator to check a setting that was already right: the
+            # engagement had `claude-opus-5` chosen and `models.list` returned
+            # `claude-opus-5`. What was refused was an OAuth token's right to
+            # call `/v1/messages` at all. The credential is the first thing to
+            # look at, and the model the second.
             #
             # `NOT_ENTITLED` rather than `RATE_LIMITED`, because that kind is
             # documented as "a missing OAuth scope or a model the plan does not
@@ -444,9 +451,11 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
                 stage,
                 UpstreamFailure.NOT_ENTITLED,
                 "the model provider refused this request as rate limited but "
-                "gave no time to retry after. That usually means the model "
-                "chosen in Settings is one this credential may not be available "
-                "to use — check it there before waiting.",
+                "gave no time to retry after, so waiting will not clear it. "
+                "That is how a request the credential is not entitled to make "
+                "is refused: most often an OAuth token used where an API key "
+                "is required, and sometimes a model the plan does not include. "
+                "Check the credential first and the model second, in Settings.",
             )
         return UpstreamUnavailableError(
             stage,
@@ -1097,18 +1106,36 @@ def configured_engines(
 
 
 async def probe_anthropic_credential(
-    secret: str, *, base_url: str | None = None, mode: Any = None
+    secret: str,
+    *,
+    base_url: str | None = None,
+    mode: Any = None,
+    model: str | None = None,
 ) -> None:
     """Verify an Anthropic credential, raising if it does not work.
 
-    Lists models rather than sending a message: it exercises the same
-    authentication path, costs no tokens, and cannot be mistaken for product
-    traffic in the operator's usage. Raises the SDK's own typed error, which
-    the settings surface renders by type and message — never echoing the
-    credential back.
+    Sends the smallest possible message on the configured model — one token,
+    no cache, no tools — because that is the request the product makes and the
+    only one whose success means anything.
+
+    This used to call `models.list`, on the reasoning that listing exercises
+    the same authentication path while costing no tokens. It does not. An
+    OAuth token authenticates, lists models, and includes the configured model
+    in what it lists, and is then refused for `/v1/messages`. So the Settings
+    screen said "Verified (…TAAA)" while every bank compile stopped at the
+    first model call, and the credential was the last thing anybody suspected.
+    A probe whose pass does not imply the product works is worse than no probe,
+    because it is read as evidence.
+
+    Raises the SDK's own typed error, which the settings surface renders by
+    type and message — never echoing the credential back.
     """
 
     from app.modules.settings.models import AuthMode
 
     client = build_anthropic_client(mode or AuthMode.API_KEY, secret, base_url=base_url)
-    await client.models.list(limit=1)
+    await client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=1,
+        messages=[{"role": "user", "content": "."}],
+    )

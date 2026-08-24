@@ -1934,8 +1934,15 @@ def build_app(
                     if key is SecretKey.ANTHROPIC_API_KEY
                     else AuthMode.OAUTH_TOKEN
                 )
+                # The model the operator chose, not a default: "this
+                # credential works" and "this credential works for what you
+                # have configured" are different claims, and only the second
+                # is worth showing.
                 await probe_anthropic_credential(
-                    secret, base_url=inference.base_url, mode=mode
+                    secret,
+                    base_url=inference.base_url,
+                    mode=mode,
+                    model=inference.model,
                 )
 
         # The speech vendors have real probes now, each key tested against its

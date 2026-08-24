@@ -801,14 +801,15 @@ class TestARateLimitWithNoRetryHint:
         assert failure is not None
         assert "should succeed shortly" not in str(failure)
 
-    def test_it_points_at_the_model_because_that_is_usually_the_cause(self):
-        # "model provider" already appears in the old wording, so this asks for
-        # the specific advice instead: the model chosen in Settings may not be
-        # one this credential's plan includes.
+    def test_it_points_at_settings_and_names_both_causes_in_order(self):
+        # This used to ask for the model advice alone. The model is a real
+        # cause and stays named -- it is the second one, after the credential.
         failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
 
-        assert "not be available" in str(failure)
-        assert "Settings" in str(failure)
+        text = str(failure)
+        assert "Settings" in text
+        assert "model" in text
+        assert text.index("credential") < text.index("the plan does not include")
 
     def test_it_is_not_classified_as_a_throttle_at_all(self):
         """The wording said one thing and the kind said another.
@@ -1042,16 +1043,34 @@ def test_the_model_falls_back_to_the_default_when_none_is_set() -> None:
 # --- probing a credential -----------------------------------------------------
 
 
-async def test_probing_a_credential_lists_models_rather_than_sending_a_message(
+async def test_probing_a_credential_sends_it_on_the_header_its_mode_requires(
     monkeypatch,
 ) -> None:
-    """Listing costs no tokens and cannot be mistaken for product traffic."""
+    """An API key goes on `x-api-key`, whatever request the probe makes.
+
+    This once asserted a `GET /v1/models`, on the reasoning that listing costs
+    no tokens. What the probe sends is now a one-token message -- see
+    `probe_anthropic_credential` for why listing proved nothing -- and the
+    part worth keeping is the pairing of credential to header, which is its
+    own trap.
+    """
 
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"data": [], "has_more": False})
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": DEFAULT_MODEL,
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "max_tokens",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
 
     original = httpx.AsyncClient.__init__
 
@@ -1064,9 +1083,8 @@ async def test_probing_a_credential_lists_models_rather_than_sending_a_message(
     await probe_anthropic_credential("sk-ant-the-key")
 
     assert seen, "the probe made no request"
-    assert seen[0].method == "GET"
-    assert "/v1/models" in str(seen[0].url)
     assert seen[0].headers["x-api-key"] == "sk-ant-the-key"
+    assert b'"max_tokens":1' in seen[0].content.replace(b", ", b",")
 
 
 async def test_probing_an_oauth_token_uses_the_bearer_pairing(monkeypatch) -> None:
@@ -1434,3 +1452,74 @@ async def test_an_unclassified_utterance_is_marked_so_rather_than_guessed() -> N
     )
 
     assert keys == [UNCLASSIFIED_SECTION_KEY, "performance"]
+
+
+async def test_probing_a_credential_makes_the_call_the_credential_must_make(
+    monkeypatch,
+) -> None:
+    """A probe that only lists models says Verified for a credential that cannot work.
+
+    Listing exercises authentication and nothing else. An OAuth token
+    authenticates fine and is then refused for `/v1/messages` -- so the
+    Settings screen reported "Verified" while every compile stopped at the
+    first model call, and the credential was the last thing anybody suspected.
+    The probe has to make the request the product makes, on the model the
+    operator chose, or it is not evidence of anything.
+    """
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "max_tokens",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    original = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    await probe_anthropic_credential("sk-ant-the-key", model="claude-opus-5")
+
+    assert seen, "the probe made no request"
+    assert seen[0].method == "POST"
+    assert "/v1/messages" in str(seen[0].url)
+    assert b"claude-opus-5" in seen[0].content, "the configured model must be the one tested"
+
+
+class TestARefusalNamesTheCredentialNotOnlyTheModel:
+    def test_the_advice_names_the_credential_as_a_cause(self):
+        """The model was the only cause named, and it was the wrong one.
+
+        A live engagement had `claude-opus-5` configured and an OAuth token
+        for a credential. `models.list` returned that very model, so the
+        advice -- check the model in Settings -- sent the operator to verify
+        something already correct. What the provider was refusing was the
+        credential's right to call `/v1/messages` at all.
+        """
+
+        failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
+
+        assert failure is not None
+        text = str(failure).lower()
+        assert "credential" in text
+        assert "api key" in text, "the remedy that works has to be named"
+
+    def test_it_still_says_waiting_will_not_help(self):
+        failure = _upstream_failure("extraction", _rate_limited_without_a_hint())
+
+        assert "should succeed shortly" not in str(failure)
+        assert failure is not None and failure.retry_after is None
