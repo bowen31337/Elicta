@@ -40,6 +40,18 @@ echo "==> building the service for $TRIPLE with $("$PYTHON" --version) ($PYTHON)
 "$WORK/venv/bin/pip" install --quiet "$ROOT/apps/service"
 "$WORK/venv/bin/pip" install --quiet pyinstaller
 
+# `uvicorn[standard]` brings three native extras that a frozen service has no
+# use for, and one of them cannot be frozen at all: `watchfiles` exists to
+# power `--reload`, ships no universal2 wheel, and stops a universal build with
+# "is not a fat binary". `uvloop` and `httptools` are speed-ups for a server
+# under load; this one serves a single operator on the loopback address, and
+# uvicorn falls back to asyncio and h11 without them.
+#
+# Removed after the install rather than avoided in the dependency list,
+# because that list is the service's own and the reload extra is genuinely
+# wanted by everybody running it from a terminal.
+"$WORK/venv/bin/pip" uninstall --quiet --yes watchfiles uvloop httptools || true
+
 mkdir -p "$OUT"
 "$WORK/venv/bin/pyinstaller" \
   --onefile \
@@ -53,6 +65,11 @@ mkdir -p "$OUT"
   `# so nothing static points at them and the freezer cannot see them.` \
   --collect-submodules app \
   --collect-all uvicorn \
+  `# Belt and braces: excluded as well as uninstalled, so a transitive` \
+  `# reinstall does not quietly put the unfreezable binary back.` \
+  --exclude-module watchfiles \
+  --exclude-module uvloop \
+  --exclude-module httptools \
   "${ARCH_FLAG[@]}" \
   "$ROOT/apps/service/service_main.py"
 
