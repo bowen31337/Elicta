@@ -437,5 +437,3 @@ cd handbook/tools && python3 -m unittest   # pytest does not collect these
 - Report task complete: `PATCH /features/{id}` with `status=done`
 - Request human input: `POST /features/{id}/human-input`
 - Repo slash-commands live in `.claude/commands/`
-- Feature agents leave a `HANDOFF.md` at the root when a task's footprint required touching
-  shared scaffolding — read it before assuming a crate or module is unowned.
