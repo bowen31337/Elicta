@@ -33,7 +33,15 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError};
+use std::time::Duration;
+
+/// How long a running device may deliver nothing before it is called broken.
+///
+/// Generous rather than tight: the first buffer can take a moment after the
+/// unit starts, and calling a working microphone dead mid-meeting would be
+/// worse than the silence it is meant to explain.
+const SILENT_DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
@@ -148,9 +156,26 @@ impl AudioSource for CoreAudioLineInSource {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>, AudioSourceError> {
-        match self.events_rx.recv() {
+        // Waited for with a limit, not indefinitely. A device that is open and
+        // delivering nothing is the failure this backend actually meets —
+        // permission never granted, or granted to a differently-signed build
+        // of the same app — and an unbounded `recv` turns it into a thread
+        // parked for the length of the meeting: no frames, no error, and a
+        // screen that can only report that no level has arrived.
+        //
+        // Silence is not this. CoreAudio delivers buffers continuously while
+        // a device is running, and a quiet room arrives as buffers of zeros,
+        // so several seconds with no buffer at all means the device is not
+        // running rather than that nobody is speaking.
+        match self.events_rx.recv_timeout(SILENT_DEVICE_TIMEOUT) {
             Ok(samples) => Ok(Some(RawFrame::new(self.format, samples))),
-            Err(_) => Err(AudioSourceError::Disconnected(
+            Err(RecvTimeoutError::Timeout) => Err(AudioSourceError::Disconnected(format!(
+                "the microphone delivered no audio for {} seconds. macOS may not have \
+                 granted this build access to it — check System Settings, Privacy & \
+                 Security, Microphone",
+                SILENT_DEVICE_TIMEOUT.as_secs()
+            ))),
+            Err(RecvTimeoutError::Disconnected) => Err(AudioSourceError::Disconnected(
                 "CoreAudio input callback stopped delivering audio".to_string(),
             )),
         }

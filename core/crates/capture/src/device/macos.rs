@@ -30,7 +30,16 @@
 
 #![cfg(target_os = "macos")]
 
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::time::Duration;
+
+/// How long a running stream may deliver nothing before it is called broken.
+///
+/// The same limit, and the same reasoning, as the line-in backend: a stream
+/// that is open and silent is a real failure here, and waiting for it without
+/// a limit turns that failure into a thread parked for the length of the
+/// meeting, reporting nothing to anybody.
+const SILENT_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
 use screencapturekit::cm::{CMSampleBuffer, CMSampleBufferExt};
 use screencapturekit::error::SCError;
@@ -199,12 +208,23 @@ impl AudioSource for ScreenCaptureLoopbackSource {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>, AudioSourceError> {
-        match self.events_rx.recv() {
+        match self.events_rx.recv_timeout(SILENT_STREAM_TIMEOUT) {
             Ok(StreamEvent::Samples(samples)) => Ok(Some(RawFrame::new(self.format, samples))),
             Ok(StreamEvent::StoppedWithError(reason)) => {
                 Err(AudioSourceError::Disconnected(reason))
             }
-            Err(_) => Err(AudioSourceError::Disconnected(
+            // ScreenCaptureKit delivers buffers continuously while a stream is
+            // running, and a silent room arrives as buffers of zeros — so
+            // nothing at all means the stream is not running. The usual reason
+            // is the permission this capture needs, which is not the
+            // microphone's and is asked for separately.
+            Err(RecvTimeoutError::Timeout) => Err(AudioSourceError::Disconnected(format!(
+                "no system audio for {} seconds. Capturing what the meeting app plays \
+                 needs Screen Recording permission — check System Settings, Privacy & \
+                 Security, Screen Recording",
+                SILENT_STREAM_TIMEOUT.as_secs()
+            ))),
+            Err(RecvTimeoutError::Disconnected) => Err(AudioSourceError::Disconnected(
                 "ScreenCaptureKit audio stream ended unexpectedly".to_string(),
             )),
         }
