@@ -1,6 +1,6 @@
 import type { ConsentGateStatus } from '../features/consent/route';
 import { createChunkUploader, type ChunkUploader } from './chunkUploader';
-import { loadSelectedEngagementId, loadSelectedMeetingId } from './selection';
+import { loadEffectiveEngagementId, loadEffectiveMeetingId } from './selection';
 import { apiUrl } from './apiClient';
 
 /**
@@ -181,8 +181,8 @@ export function createAudioBridge(deps: AudioBridgeDeps): AudioBridge {
 /** The bridge this application runs, wired to the real service. */
 export function defaultAudioBridge(onNote: (note: string | null) => void): AudioBridge {
   return createAudioBridge({
-    meetingId: loadSelectedMeetingId,
-    engagementId: loadSelectedEngagementId,
+    meetingId: loadEffectiveMeetingId,
+    engagementId: loadEffectiveEngagementId,
     readGate: readConsentGate,
     createUploader: (meetingId, onFailure) => createChunkUploader({ meetingId, onFailure }),
     transcribe: startRecordPath,
