@@ -72,6 +72,20 @@ macOS desktop bundle (`.app` + `.dmg`) — **build locally, not in CI**:
 ./scripts/build-macos.sh              # host arch only; what you want for testing
 ./scripts/build-macos.sh --universal  # arm64 + x86_64, as shipped
 ```
+**The bundle carries the service.** Somebody who opens the `.dmg` has no
+Python, so `service_main.py` is frozen by `scripts/build-service-sidecar.sh`
+into `src-tauri/binaries/elicta-service-<target>`, declared as an `externalBin`,
+and started by the shell when nothing is already answering on port 8000. The
+build script freezes it first and reuses an existing one unless `apps/service`
+is newer; a missing binary stops the bundler outright. The freeze needs a
+`python3` and takes minutes.
+
+There is no universal2 route: pydantic-core, cryptography, asyncpg, jiter,
+rpds-py and cffi publish one wheel per architecture and none for universal2, so
+`--universal` freezes each architecture and joins them with `lipo`, building the
+second through Rosetta. Where Rosetta is absent the arm64 half ships alone and
+says so.
+
 Needs **Xcode 26+**: `screencapturekit` vendors a Swift bridge over Metal 4, and
 SDK 15 compiles most of it before failing. The script preflights that, the Node
 floor and the Rust targets, then checks the result is loadable by dyld — the

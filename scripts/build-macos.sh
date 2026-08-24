@@ -42,6 +42,10 @@ node_major="$(node -p 'process.versions.node.split(".")[0]')"
 
 command -v pnpm >/dev/null || fail "pnpm not found. Install with: corepack enable && corepack prepare --activate"
 command -v cargo >/dev/null || fail "cargo not found. Install from https://rustup.rs"
+# The service is frozen with PyInstaller into the bundle; without a Python
+# there is no service to ship, and the bundler's own error names a missing
+# binary rather than a missing interpreter.
+command -v python3 >/dev/null || fail "python3 not found. The bundled service is frozen from it."
 
 if (( universal )); then
   target="universal-apple-darwin"
@@ -66,6 +70,21 @@ echo "==> SDK ${sdk}, Node $(node -v), target ${target}"
 # @tauri-apps/cli is a devDependency, so this uses the same pinned bundler
 # version CI does rather than a separately installed cargo-tauri.
 pnpm install --frozen-lockfile
+
+# The service ships inside the bundle, so it has to exist before the bundler
+# looks for it. Declared in `tauri.conf.json` as an external binary, a missing
+# one stops the build outright — which is the right failure, and a confusing
+# one to meet without knowing this step exists.
+#
+# Skipped when the binary is already there and newer than the service, because
+# freezing takes minutes and most rebuilds here are of the front end.
+sidecar="apps/desktop/src-tauri/binaries/elicta-service-${target}"
+if [[ -x "$sidecar" ]] && [[ -z "$(find apps/service -newer "$sidecar" -name '*.py' -print -quit)" ]]; then
+  echo "==> reusing the frozen service at $sidecar"
+else
+  ./scripts/build-service-sidecar.sh "$target"
+fi
+
 pnpm --filter elicta-desktop exec tauri build --target "$target"
 
 bundle_dir="apps/desktop/src-tauri/target/${target}/release/bundle"
