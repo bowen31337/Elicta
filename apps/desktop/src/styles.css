@@ -4,10 +4,11 @@
    Reset.
 
    This was `@tailwind base` — Tailwind's Preflight — until Tailwind was
-   removed. Nothing in this app used a utility class (one `p-4 text-sm` in the empty
-   router, since replaced), so the framework was earning its keep entirely
-   through this reset, invisibly, and dropping it wholesale would have moved
-   every screen.
+   removed. Almost nothing here used a utility class: one `p-4 text-sm` in the
+   empty router, and `sr-only` on six labels, both since replaced below. The
+   framework was earning its keep almost entirely through this reset, and
+   invisibly, so dropping it wholesale moved every screen — and un-hid the six
+   labels, which is the louder of the two.
 
    Ported deliberately rather than copied whole: only the rules this app's own
    CSS is written against. Two are load-bearing in ways that are easy to miss.
