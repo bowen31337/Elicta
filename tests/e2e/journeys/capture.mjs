@@ -305,13 +305,13 @@ async function main() {
           const section = heading.closest('section') ?? heading.parentElement;
           const end = section.getBoundingClientRect().bottom + window.scrollY + 18;
 
-          // A bottom-anchored sticky bar — Settings has one carrying Save —
-          // floats over the foot of whatever window it is given, so cutting
-          // at the section boundary puts it straight across the last card.
-          // Leaving its full footprint below the boundary is what makes the
-          // shot look like the screen rather than like a broken render.
-          // Anchored at the bottom is the test: a sticky *header* resolves
-          // \`bottom\` to 'auto' and must not be counted.
+          // A bottom-anchored sticky bar floats over the foot of whatever
+          // window it is given, so cutting at the section boundary would put
+          // it straight across the last card. Leaving its full footprint below
+          // the boundary is what makes the shot look like the screen rather
+          // than like a broken render. Anchored at the bottom is the test: a
+          // sticky *header* resolves \`bottom\` to 'auto' and must not be
+          // counted.
           const overlay = [...document.querySelectorAll('body *')].reduce((tallest, node) => {
             const style = getComputedStyle(node);
             if (style.position !== 'sticky' && style.position !== 'fixed') return tallest;
@@ -321,7 +321,18 @@ async function main() {
             return box.height > 0 ? Math.max(tallest, box.height + offset) : tallest;
           }, 0);
 
-          return Math.ceil(end + overlay);
+          // And an action bar that is *not* floating still has to be in the
+          // picture. Settings carries Save at the end of the form now, which
+          // is below the section this shot stops after — so the cut reaches
+          // down to it rather than leaving the screen looking like it has no
+          // way to commit anything. Only when it really is below the cut: on a
+          // tab whose form ends lower, the bar is already inside the shot.
+          const trailing = [...document.querySelectorAll('[class*="-actions"]')]
+            .map((node) => node.getBoundingClientRect())
+            .filter((box) => box.height > 0 && box.bottom + window.scrollY > end)
+            .reduce((lowest, box) => Math.max(lowest, box.bottom + window.scrollY + 18), 0);
+
+          return Math.ceil(Math.max(end + overlay, trailing));
         })()`,
         returnByValue: true,
       });

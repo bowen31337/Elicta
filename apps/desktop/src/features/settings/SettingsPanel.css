@@ -7,9 +7,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-7);
-  /* The foot clears the floating save bar, so the last field can be scrolled
-     out from under it rather than living permanently behind it. */
-  padding: var(--space-7) var(--space-6) calc(var(--space-10) + 56px);
+  /* No reserve at the foot any more: the save bar is in the flow and takes its
+     own space, so there is nothing left to scroll out from under. */
+  padding: var(--space-7) var(--space-6) var(--space-10);
   max-width: 640px;
   margin: 0 auto;
   box-sizing: border-box;
@@ -567,18 +567,28 @@
 }
 
 /* --- The save bar -----------------------------------------------------------
-   This form is long enough that a button at its foot is a scroll away from the
-   field that changed. The bar rides the bottom of the viewport as a floating
-   material — `.glass` carries the tint, blur, specular edge and depth — so the
-   action is always where the operator's eyes already are.
-
    It is deliberately not an instant-apply screen. Every other Apple settings
    surface applies as you type; a screen that writes credentials should not,
-   because a half-typed key is not a state anyone wants saved. */
+   because a half-typed key is not a state anyone wants saved. So there is a
+   bar, and it carries the `.glass` material.
+
+   It used to ride the bottom of the viewport — `position: sticky; bottom:
+   var(--space-5)` — so the action stayed where the operator's eyes were. It
+   does not any more, and the reason is measurable. A bottom-sticky bar floats
+   over the middle of any page taller than the window, and on a 390x844 phone
+   it sat at y 778-828, directly across the credential row's own controls. The
+   `Clear` button beside a configured key is 34px tall and lands at y 798-832:
+   four pixels of it clear the bar, where WCAG 2.2 asks for 24 (2.5.8). The
+   audit caught it as `target-size`, twice, in both themes.
+
+   That overlap was always there — for a while `Clear` happened to sit low
+   enough to poke out by 26px and pass — so pinning the bar lower, shrinking it
+   or padding the page cannot fix it: something is always behind a floating
+   bar. Only real layout space is a fix, so the bar takes some. It sits at the
+   end of the form now, and on a long form Save is a scroll away, which is the
+   cost that was paid to stop the bar covering a control nobody could then
+   fully tap. */
 .settings-actions {
-  position: sticky;
-  bottom: var(--space-5);
-  z-index: 2;
   display: flex;
   gap: var(--space-4);
   align-items: center;
