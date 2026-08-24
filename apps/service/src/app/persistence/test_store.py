@@ -1072,3 +1072,160 @@ def test_the_record_path_artifacts_are_now_continuity_not_scratch() -> None:
     assert isinstance(backend.record_path_transcripts, DurableMapping)
     assert isinstance(backend.session_alignments, DurableMapping)
     assert isinstance(backend.audio_destruction_events, DurableMapping)
+
+
+def _engagement_with_a_meeting(client: TestClient) -> tuple[str, str]:
+    created = client.post(
+        "/api/engagements",
+        json={
+            "client_organisation": "Northwind Logistics",
+            "sector": "Freight and warehousing",
+            "commercial_context": "Fleet visibility programme",
+        },
+    )
+    assert created.status_code == 201, created.text
+    engagement_id = created.json()["engagement_id"]
+
+    meeting = client.post(
+        "/api/meetings",
+        json={"engagement_id": engagement_id, "capture_mode": "live"},
+    )
+    assert meeting.status_code == 201, meeting.text
+    return engagement_id, meeting.json()["meeting_id"]
+
+
+def test_a_deleted_meeting_stays_deleted_after_a_restart(database: str) -> None:
+    """A removal that only emptied a dict would come back on the next launch."""
+
+    with client_for(database) as first:
+        engagement_id, meeting_id = _engagement_with_a_meeting(first)
+        assert first.delete(f"/api/meetings/{meeting_id}").status_code == 204
+
+    with client_for(database) as second:
+        listed = second.get(f"/api/engagements/{engagement_id}/meetings")
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["meetings"] == []
+        assert second.get(f"/api/meetings/{meeting_id}").status_code == 404
+
+
+def test_a_deleted_meeting_does_not_hand_its_id_to_the_next_one(database: str) -> None:
+    """`next_meeting_id` counts rows, so the marked row has to still be counted.
+
+    This is the reason the removal marks rather than erases at the storage
+    layer as well as the API one: an erased row lowers the high-water mark, and
+    the next launch mints an id that is not free.
+    """
+
+    with client_for(database) as first:
+        engagement_id, meeting_id = _engagement_with_a_meeting(first)
+        assert first.delete(f"/api/meetings/{meeting_id}").status_code == 204
+
+    with client_for(database) as second:
+        replacement = second.post(
+            "/api/meetings",
+            json={"engagement_id": engagement_id, "capture_mode": "record"},
+        )
+        assert replacement.status_code == 201, replacement.text
+        assert replacement.json()["meeting_id"] != meeting_id
+
+
+def test_a_meeting_can_be_renamed_after_a_restart(database: str) -> None:
+    """PATCH guarded on a dict only creation writes, so a rename 404'd after a launch.
+
+    The durable record of which engagement a meeting belongs to is the meeting's
+    own row; `meeting_engagement_ids` is a same-process shortcut to it.
+    """
+
+    with client_for(database) as first:
+        _, meeting_id = _engagement_with_a_meeting(first)
+
+    with client_for(database) as second:
+        renamed = second.patch(
+            f"/api/meetings/{meeting_id}",
+            json={"session_purpose": "Validate the depot scheduling scope"},
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["session_purpose"] == "Validate the depot scheduling scope"
+
+
+def test_a_renamed_meeting_keeps_its_purpose_across_a_restart(database: str) -> None:
+    """The rename is what the operator typed, so it belongs on disk, not in a dict."""
+
+    with client_for(database) as first:
+        engagement_id, meeting_id = _engagement_with_a_meeting(first)
+        renamed = first.patch(
+            f"/api/meetings/{meeting_id}",
+            json={"session_purpose": "Validate the depot scheduling scope"},
+        )
+        assert renamed.status_code == 200, renamed.text
+
+    with client_for(database) as second:
+        listed = second.get(f"/api/engagements/{engagement_id}/meetings")
+        assert listed.status_code == 200, listed.text
+        purposes = {row["meeting_id"]: row["session_purpose"] for row in listed.json()["meetings"]}
+        assert purposes[meeting_id] == "Validate the depot scheduling scope"
+
+
+def test_a_deleted_meeting_cannot_be_renamed_after_a_restart(database: str) -> None:
+    """The marked row is still on disk; it must not be reachable through PATCH."""
+
+    with client_for(database) as first:
+        _, meeting_id = _engagement_with_a_meeting(first)
+        assert first.delete(f"/api/meetings/{meeting_id}").status_code == 204
+
+    with client_for(database) as second:
+        renamed = second.patch(
+            f"/api/meetings/{meeting_id}",
+            json={"session_purpose": "Should not resurrect it"},
+        )
+        assert renamed.status_code == 404, renamed.text
+
+
+def test_a_meeting_id_is_not_reissued_while_anything_still_holds_it(database: str) -> None:
+    """The id guard has to look everywhere the id was used, not only at meetings.
+
+    `highest_meeting_ordinal` reads the meetings table, on the principle that a
+    row still holds its id even once marked deleted. The principle is right and
+    the reach was too short: a session's transcripts, its alignment and its
+    audio-destruction record are keyed by the same id in tables of their own,
+    and they outlive the meetings row independently.
+
+    Reissuing such an id hands the new meeting the old one's history. Two
+    things follow, and the second is the serious one. Recording is refused,
+    because an audio-destruction record says this session's audio is already
+    gone. And `record-path-transcript` answers with the earlier meeting's
+    words — one client's session served under another's id, which is a
+    confidentiality failure rather than an inconvenience.
+
+    Observed live: a meeting issued this evening answered with a transcript
+    recorded that afternoon, and refused to accept audio of its own.
+    """
+
+    import sqlalchemy as sa
+
+    from app.persistence.models import metadata
+
+    engine = sa.create_engine(database)
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        # No meetings row at all — the state a hard-deleted or never-persisted
+        # meeting leaves behind, with its durable children still in place.
+        connection.execute(
+            sa.insert(metadata.tables["audio_destruction_events"]).values(
+                id="meeting-37:0",
+                session_id="meeting-37",
+                audio_ref="session:meeting-37",
+                status="complete",
+                requested_at="2026-08-23T13:54:30+00:00",
+                completed_at="2026-08-23T13:54:30+00:00",
+                error=None,
+                ordinal=0,
+            )
+        )
+
+    store = open_state_store(database)
+
+    assert store.highest_meeting_ordinal() >= 37, (
+        "meeting-37 would be issued again, over a destruction record that "
+        "still refers to it"
+    )

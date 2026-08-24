@@ -32,7 +32,7 @@ import threading
 from collections.abc import Callable, Iterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import ClassVar, Any, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import sqlalchemy as sa
@@ -491,6 +491,53 @@ class StateStore:
         ]
         return max(ordinals, default=0)
 
+    #: Tables whose rows are keyed by a meeting's id, under whichever name that
+    #: id travels as. The desktop uploads a meeting's audio under
+    #: `/api/sessions/{id}`, passing the meeting id, so a "session id" here is
+    #: a meeting id and holds the same ordinal.
+    _MEETING_ID_COLUMNS: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("meetings", "id"),
+        ("record_path_transcripts", "session_id"),
+        ("session_alignments", "session_id"),
+        ("audio_destruction_events", "session_id"),
+        ("consent_records", "meeting_id"),
+    )
+
+    def highest_meeting_ordinal(self) -> int:
+        """The largest `meeting-N` suffix anything still refers to, or 0.
+
+        Counts every row, **including the soft-deleted ones**, for the reason
+        `highest_document_ordinal` gives: `meetings.id` is a primary key, and a
+        marked row is still holding its id. Derived from the loaded mapping
+        instead, this would walk backwards the moment a meeting was removed —
+        delete the only meeting, restart, create another, and it would be
+        issued `meeting-1` against a row the table still has.
+
+        And not only that table. A session's transcripts, its alignment, its
+        consent record and its audio-destruction record are keyed by the same
+        id in tables of their own, and outlive the meetings row independently.
+        An id reissued over them hands the new meeting the old one's history:
+        recording is refused because a destruction record says this session's
+        audio is already gone, and — the half that matters — the transcript
+        route answers with the earlier meeting's words, one client's session
+        served under another's id.
+
+        Seen live rather than reasoned about: a meeting issued one evening
+        answered with a transcript recorded that afternoon.
+        """
+
+        highest = 0
+        for table_name, column in self._MEETING_ID_COLUMNS:
+            table = metadata.tables[table_name]
+            for row in self._rows(table):
+                identifier = getattr(row, column, None)
+                if not isinstance(identifier, str) or not identifier.startswith("meeting-"):
+                    continue
+                suffix = identifier.removeprefix("meeting-")
+                if suffix.isdigit():
+                    highest = max(highest, int(suffix))
+        return highest
+
     def highest_document_ordinal(self) -> int:
         """The largest `doc-N` suffix on record, or 0 for an empty database.
 
@@ -519,7 +566,9 @@ class StateStore:
 
         table = metadata.tables["meetings"]
         loaded = {
-            row.id: decode(row.detail) for row in self._rows(table) if row.detail is not None
+            row.id: decode(row.detail)
+            for row in self._rows(table)
+            if row.detail is not None and row.deleted_at is None
         }
 
         def persist(key: str, value: Any) -> None:
@@ -539,7 +588,66 @@ class StateStore:
         return DurableMapping(
             loaded=loaded,
             persist=persist,
-            forget=lambda key: self._delete(table, "id", key),
+            # Marked, not erased — the same choice `engagements` makes, and for
+            # a stronger reason: the id is what a consent record, a record-path
+            # transcript and an audio-destruction event all point at. Erasing
+            # the row would also lower the high-water mark `next_meeting_id` is
+            # derived from, and the next launch would mint an id that is not
+            # free.
+            forget=lambda key: self.soft_delete("meetings", key),
+            lock=self._lock,
+        )
+
+    def meeting_updates(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
+        """What an operator typed about a meeting: its purpose and target sections (FR-3.8).
+
+        Durable because nothing rebuilds it. The purpose is a sentence a person
+        wrote on the Preparation screen; it is not derived from the audio, the
+        template or the engagement, so a restart that dropped it would be
+        losing the only copy — the same test `record_path_artifacts` failed.
+
+        Its own collection rather than a field on `meeting_details` because the
+        two are written by different routes at different times, and the
+        `meetings` table has carried the `purpose` and `target_sections`
+        columns for this since it was created. `_upsert` keys on the row that
+        `meeting_details` already wrote, so the two never race to create it.
+        """
+
+        table = metadata.tables["meetings"]
+        loaded = {
+            row.id: decode(
+                {
+                    "meeting_id": row.id,
+                    "session_purpose": row.purpose or None,
+                    "target_template_sections": row.target_sections or None,
+                }
+            )
+            for row in self._rows(table)
+            # An untouched meeting has neither, and decoding one would put an
+            # all-`None` update in the map that reads as "somebody set this".
+            if row.deleted_at is None and (row.purpose or row.target_sections)
+        }
+
+        def persist(key: str, value: Any) -> None:
+            payload = dump(value)
+            self._upsert(
+                table,
+                "id",
+                key,
+                {
+                    "purpose": payload.get("session_purpose") or "",
+                    "target_sections": payload.get("target_template_sections") or [],
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            # The meeting's removal is recorded once, by `meeting_details`'s
+            # forget, on this same row. Marking it again here would be a second
+            # record of one decision, and clearing the columns instead would
+            # destroy the purpose a soft delete promises to keep.
+            forget=lambda key: self.soft_delete("meetings", key),
             lock=self._lock,
         )
 
