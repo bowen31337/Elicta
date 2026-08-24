@@ -1,4 +1,5 @@
 import type { FollowOnCandidate, Thread } from './types';
+import { apiUrl } from '../../../services/apiClient';
 
 interface WireFollowOnCandidate {
   question: string;
@@ -26,7 +27,7 @@ export async function requestFollowOnCandidate(
 ): Promise<FollowOnCandidate> {
   const { fetch: fetchImpl = fetch } = options;
 
-  const response = await fetchImpl(`/api/threads/${encodeURIComponent(thread.id)}/go-deeper`, {
+  const response = await fetchImpl(apiUrl(`/api/threads/${encodeURIComponent(thread.id)}/go-deeper`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),

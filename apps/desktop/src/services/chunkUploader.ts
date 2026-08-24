@@ -1,4 +1,5 @@
 import { base64OfInt16 } from '../features/capture/pcm';
+import { apiUrl } from './apiClient';
 
 /**
  * A meeting's audio, on its way to the service one chunk at a time.
@@ -63,7 +64,7 @@ const DEFAULT_ATTEMPTS = 3;
 
 /** The real `POST`, for callers that are not a test. */
 export const postAudioChunk: PostChunk = async (meetingId, body) => {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(meetingId)}/audio-chunk`, {
+  const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(meetingId)}/audio-chunk`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),

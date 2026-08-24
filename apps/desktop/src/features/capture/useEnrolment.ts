@@ -17,6 +17,7 @@ import {
 } from './levelMeter';
 import { base64OfInt16, TARGET_SAMPLE_RATE } from './pcm';
 import { currentPcmContextFactory, openPcmTap, type PcmContextLike } from './pcmTap';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * Recording the operator's voice once, so their speech can be told from the
@@ -104,7 +105,7 @@ export interface EnrolmentDeps {
   readonly fetch?: typeof fetch;
 }
 
-const PATH = '/api/operator/voiceprint';
+const PATH = apiUrl('/api/operator/voiceprint');
 
 /** Until the service answers, assume the cap the service actually enforces. */
 const FALLBACK_MAX_SECONDS = 60;

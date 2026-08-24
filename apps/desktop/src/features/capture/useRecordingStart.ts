@@ -4,6 +4,7 @@ import { captureSession, type CaptureStore } from '../../services/captureSession
 import { useCurrentEngagement, useCurrentMeeting } from '../../services/selection';
 import { useResource } from '../../services/useResource';
 import { goLive } from './goLive';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * Beginning a meeting, from the screen that can show you the microphone.
@@ -41,7 +42,7 @@ export function useRecordingStart(store?: CaptureStore): RecordingStart {
   const gate = useResource<WireGate>(
     meeting.meetingId === null || engagement.engagementId === null
       ? null
-      : `/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-gate` +
+      : apiUrl(`/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-gate`) +
           `?engagement_id=${encodeURIComponent(engagement.engagementId)}`,
   );
 

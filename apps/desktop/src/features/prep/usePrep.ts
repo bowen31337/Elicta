@@ -12,6 +12,7 @@ import type {
   ReferenceDocument,
   VocabularyEntry,
 } from './types';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the preparation screen shows, read from the service (PRD FR-3.1, FR-3.6, FR-4.8).
@@ -187,7 +188,7 @@ export function usePrep(): PrepData {
   const current = useCurrentEngagement();
   const id = current.engagementId;
   const scoped = (suffix: string) =>
-    id === null ? null : `/api/engagements/${encodeURIComponent(id)}/${suffix}`;
+    id === null ? null : apiUrl(`/api/engagements/${encodeURIComponent(id)}/${suffix}`);
 
   const documents = useResource<WireDocumentList>(scoped('documents'));
   const vocabulary = useResource<WireVocabulary>(scoped('vocabulary'));

@@ -1,4 +1,5 @@
 import type { CoverageSummary, SessionStopResult } from './types';
+import { apiUrl } from '../../../services/apiClient';
 
 interface WireCoverageSlot {
   id: string;
@@ -50,7 +51,7 @@ export async function stopSession(
 ): Promise<SessionStopResult> {
   const { fetch: fetchImpl = fetch } = options;
 
-  const response = await fetchImpl(`/api/meetings/${encodeURIComponent(meetingId)}/session/stop`, {
+  const response = await fetchImpl(apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/session/stop`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ coverage: toWireCoverage(coverage) }),

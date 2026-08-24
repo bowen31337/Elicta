@@ -9,12 +9,13 @@ import {
 } from '../../services/selection';
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
 import type { Claim, DebriefScreenProps } from './route';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the debrief artifacts screen shows, read from the service (PRD FR-8.3, FR-8.4, FR-8.5, FR-8.8).
  *
  * The record path keys its artifacts by the meeting id and calls it a session
- * id, which is why these are `/api/sessions/{meetingId}/...`.
+ * id, which is why these are apiUrl(`/api/sessions/{meetingId}/...`).
  *
  * FR-8.8 is the rule that shapes every mapping here: anything the system
  * inferred rather than heard must be visibly flagged as inference. The service
@@ -178,7 +179,7 @@ export function useDebrief(): DebriefData {
   const meeting = useCurrentMeeting(engagement.engagementId);
   const id = meeting.meetingId;
   const scoped = (suffix: string) =>
-    id === null ? null : `/api/sessions/${encodeURIComponent(id)}/${suffix}`;
+    id === null ? null : apiUrl(`/api/sessions/${encodeURIComponent(id)}/${suffix}`);
 
   const questions = useResource<readonly WireOpenQuestion[]>(scoped('open-questions'));
   const decisions = useResource<readonly WireDecision[]>(scoped('decision-log'));
@@ -186,7 +187,7 @@ export function useDebrief(): DebriefData {
   // Keyed by meeting rather than session: this one is about the pipeline run,
   // not about an artifact the record path filed under a session id.
   const completion = useResource<WireCompletion>(
-    id === null ? null : `/api/meetings/${encodeURIComponent(id)}/debrief/completion`,
+    id === null ? null : apiUrl(`/api/meetings/${encodeURIComponent(id)}/debrief/completion`),
   );
 
   const incomplete = incompleteNotice(completion.data);

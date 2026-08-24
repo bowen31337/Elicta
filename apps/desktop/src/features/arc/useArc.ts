@@ -8,6 +8,7 @@ import {
 } from '../../services/selection';
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
 import type { ArcScreenProps, Meeting, StandingQuestion } from './route';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the engagement arc screen shows, read from the service (PRD FR-3.11, FR-4.8, FR-8.9).
@@ -53,7 +54,7 @@ export function useArc(): ArcData {
   const id = engagement.engagementId;
 
   const state = useResource<WireEngagementState>(
-    id === null ? null : `/api/engagements/${encodeURIComponent(id)}/state`,
+    id === null ? null : apiUrl(`/api/engagements/${encodeURIComponent(id)}/state`),
   );
 
   return {

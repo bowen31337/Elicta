@@ -10,6 +10,7 @@ import {
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
 import { confirmConsent } from './consentActions';
 import type { ConsentGateStatus, ConsentScreenProps } from './route';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the consent screen shows, read from the service (PRD L1/L2, D3).
@@ -70,14 +71,14 @@ export function useConsent(navigate: (to: string) => void = defaultNavigate): Co
   const gatePath =
     meeting.meetingId === null || engagement.engagementId === null
       ? null
-      : `/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-gate` +
+      : apiUrl(`/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-gate`) +
         `?engagement_id=${encodeURIComponent(engagement.engagementId)}`;
 
   const gate = useResource<WireGate>(gatePath);
   const record = useResource<WireConsentRecord>(
     meeting.meetingId === null
       ? null
-      : `/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-record`,
+      : apiUrl(`/api/meetings/${encodeURIComponent(meeting.meetingId)}/consent-record`),
   );
 
   // Until the gate has answered, the safe assumption is the one that asks:

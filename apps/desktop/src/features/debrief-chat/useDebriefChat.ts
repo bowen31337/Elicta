@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * The conversational half of debrief mode (FR-7.3).
@@ -118,13 +119,13 @@ export function useDebriefChat(meetingId: string): UseDebriefChat {
     error,
     started,
     start: useCallback(
-      () => run(() => post(`/api/meetings/${encoded}/debrief/start`)),
+      () => run(() => post(apiUrl(`/api/meetings/${encoded}/debrief/start`))),
       [encoded, run],
     ),
     ask: useCallback(
       (question: string) =>
         run(
-          () => post(`/api/meetings/${encoded}/debrief/message`, { message: question }),
+          () => post(apiUrl(`/api/meetings/${encoded}/debrief/message`), { message: question }),
           { role: 'user', text: question },
         ),
       [encoded, run],

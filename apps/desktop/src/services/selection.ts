@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
 import { useResource, type Resource, type ResourceStatus } from './useResource';
+import { apiUrl } from './apiClient';
 
 /**
  * Which engagement, and which meeting, the screens are currently about.
@@ -132,7 +133,7 @@ export interface CurrentEngagement {
  * engagement without first being asked to pick it out of a list of one.
  */
 export function useCurrentEngagement(): CurrentEngagement {
-  const list = useResource<EngagementListBody>('/api/engagements');
+  const list = useResource<EngagementListBody>(apiUrl('/api/engagements'));
   // Read straight through to storage on every render rather than caching the
   // value here: a cached copy outlives a `localStorage.clear()` and starts
   // answering for a store that no longer holds it.
@@ -180,7 +181,7 @@ export interface CurrentMeeting {
  */
 export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
   const list = useResource<MeetingListBody>(
-    engagementId === null ? null : `/api/engagements/${encodeURIComponent(engagementId)}/meetings`,
+    engagementId === null ? null : apiUrl(`/api/engagements/${encodeURIComponent(engagementId)}/meetings`),
   );
   const chosen = useSyncExternalStore(subscribe, loadSelectedMeetingId, loadSelectedMeetingId);
 

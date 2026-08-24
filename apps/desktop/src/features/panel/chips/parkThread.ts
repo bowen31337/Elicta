@@ -1,4 +1,5 @@
 import type { ParkedThread, Thread } from './types';
+import { apiUrl } from '../../../services/apiClient';
 
 interface WireParkedThread {
   open_question_id: string;
@@ -23,7 +24,7 @@ export interface ParkThreadOptions {
 export async function parkThread(thread: Thread, options: ParkThreadOptions = {}): Promise<ParkedThread> {
   const { fetch: fetchImpl = fetch } = options;
 
-  const response = await fetchImpl(`/api/threads/${encodeURIComponent(thread.id)}/park`, {
+  const response = await fetchImpl(apiUrl(`/api/threads/${encodeURIComponent(thread.id)}/park`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),

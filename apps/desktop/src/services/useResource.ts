@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * fault. Telling an operator "something is broken" there would train them to
  * ignore the message that means it.
  *
- * Requests go to a relative `/api/...` path: the panel is served same-origin
+ * Requests go to a relative apiUrl(`/api/...`) path: the panel is served same-origin
  * with an `/api` proxy (`vite.config.ts`), so there is no base URL to
  * configure and no CORS to negotiate. That is the same choice
  * `useDebriefChat` makes.

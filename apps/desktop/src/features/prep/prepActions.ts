@@ -1,4 +1,5 @@
 import type { DocumentStatus, VocabularyTermType } from './types';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * The writes the preparation screen makes (PRD FR-3.1, FR-3.2, FR-3.6, FR-4.8).
@@ -97,7 +98,7 @@ export async function createMeeting(
   options: PrepActionOptions = {},
 ): Promise<string> {
   const created = await post<{ meeting_id: string }>(
-    '/api/meetings',
+    apiUrl('/api/meetings'),
     { engagement_id: meeting.engagementId, capture_mode: meeting.captureMode },
     options,
   );
@@ -116,7 +117,7 @@ export async function linkDocument(
   options: PrepActionOptions = {},
 ): Promise<string> {
   const attached = await post<{ id: string }>(
-    `/api/engagements/${id(engagementId)}/documents/link`,
+    apiUrl(`/api/engagements/${id(engagementId)}/documents/link`),
     { url: link.url, status: link.status },
     options,
   );
@@ -146,7 +147,7 @@ export async function uploadDocument(
   const { fetch: fetchImpl = fetch } = options;
   let response: Response;
   try {
-    response = await fetchImpl(`/api/engagements/${id(engagementId)}/documents`, {
+    response = await fetchImpl(apiUrl(`/api/engagements/${id(engagementId)}/documents`), {
       method: 'POST',
       body: form,
     });
@@ -164,7 +165,7 @@ export async function retagDocument(
   status: DocumentStatus,
   options: PrepActionOptions = {},
 ): Promise<void> {
-  await patch(`/api/documents/${id(documentId)}/status`, { status }, options);
+  await patch(apiUrl(`/api/documents/${id(documentId)}/status`), { status }, options);
 }
 
 export interface NewVocabularyTerm {
@@ -179,7 +180,7 @@ export async function addVocabularyTerm(
   options: PrepActionOptions = {},
 ): Promise<void> {
   await post(
-    `/api/engagements/${id(engagementId)}/vocabulary`,
+    apiUrl(`/api/engagements/${id(engagementId)}/vocabulary`),
     { term: entry.term, term_type: entry.termType },
     options,
   );
@@ -190,7 +191,7 @@ export async function compileBank(
   engagementId: string,
   options: PrepActionOptions = {},
 ): Promise<void> {
-  await post(`/api/engagements/${id(engagementId)}/bank/compile`, undefined, options);
+  await post(apiUrl(`/api/engagements/${id(engagementId)}/bank/compile`), undefined, options);
 }
 
 /**
@@ -202,7 +203,7 @@ export async function pruneCandidate(
   candidateId: string,
   options: PrepActionOptions = {},
 ): Promise<void> {
-  await patch(`/api/bank/candidates/${id(candidateId)}`, { pruned: true }, options);
+  await patch(apiUrl(`/api/bank/candidates/${id(candidateId)}`), { pruned: true }, options);
 }
 
 /**
@@ -217,7 +218,7 @@ export async function deleteDocument(
   documentId: string,
   options: PrepActionOptions = {},
 ): Promise<void> {
-  await send(`/api/documents/${id(documentId)}`, { method: 'DELETE' }, options);
+  await send(apiUrl(`/api/documents/${id(documentId)}`), { method: 'DELETE' }, options);
 }
 
 export async function deleteVocabularyTerm(
@@ -226,7 +227,7 @@ export async function deleteVocabularyTerm(
   options: PrepActionOptions = {},
 ): Promise<void> {
   await send(
-    `/api/engagements/${id(engagementId)}/vocabulary/${id(termId)}`,
+    apiUrl(`/api/engagements/${id(engagementId)}/vocabulary/${id(termId)}`),
     { method: 'DELETE' },
     options,
   );
@@ -241,5 +242,5 @@ export async function moveCandidate(
   if (!Number.isInteger(priority) || priority < 1) {
     throw new Error('priority must be a whole number of at least 1');
   }
-  await patch(`/api/bank/candidates/${id(candidateId)}`, { priority }, options);
+  await patch(apiUrl(`/api/bank/candidates/${id(candidateId)}`), { priority }, options);
 }

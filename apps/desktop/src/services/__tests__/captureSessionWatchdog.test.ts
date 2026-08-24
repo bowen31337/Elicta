@@ -61,7 +61,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     getAudioTracks: () => [
       { kind: 'audio', enabled: true, stop() {}, getSettings: () => ({ deviceId: 'mic-1' }) },
     ],
-    getTracks: () => [{ stop() {} }],
+    getTracks: () => [{ kind: 'audio', enabled: true, stop() {} }],
   };
   return {
     shellAvailable: () => false,

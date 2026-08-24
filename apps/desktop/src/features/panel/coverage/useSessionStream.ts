@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { parseSessionStreamEvent } from './sessionStreamEvents';
 import type { DetectedLanguage } from '../language/types';
 import type { CoverageSummary, SessionStreamNudge } from './types';
+import { apiUrl } from '../../../services/apiClient';
 
 /**
  * The subset of `EventSource` this hook relies on. Kept as a narrow
@@ -79,7 +80,7 @@ export function useSessionStream(
     if (meetingId === null) {
       return;
     }
-    const source = createSource(`/api/meetings/${encodeURIComponent(meetingId)}/session/stream`);
+    const source = createSource(apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/session/stream`));
 
     const handleCoverage = (event: MessageEvent<string>) => {
       const parsed = parseSessionStreamEvent('coverage', event.data);

@@ -1,6 +1,7 @@
 import type { ConsentGateStatus } from '../features/consent/route';
 import { createChunkUploader, type ChunkUploader } from './chunkUploader';
 import { loadSelectedEngagementId, loadSelectedMeetingId } from './selection';
+import { apiUrl } from './apiClient';
 
 /**
  * Whether this recording's audio may leave the machine — and, if it may,
@@ -69,7 +70,7 @@ export async function readConsentGate(
   engagementId: string,
 ): Promise<ConsentGateStatus | null> {
   const response = await fetch(
-    `/api/meetings/${encodeURIComponent(meetingId)}/consent-gate` +
+    apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/consent-gate`) +
       `?engagement_id=${encodeURIComponent(engagementId)}`,
     { headers: { Accept: 'application/json' } },
   );
@@ -81,7 +82,7 @@ export async function readConsentGate(
 /** The real record-path kick-off, for callers that are not a test. */
 export async function startRecordPath(meetingId: string): Promise<void> {
   const response = await fetch(
-    `/api/meetings/${encodeURIComponent(meetingId)}/record/transcribe`,
+    apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/record/transcribe`),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

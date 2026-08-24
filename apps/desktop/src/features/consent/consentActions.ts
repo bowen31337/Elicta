@@ -1,3 +1,4 @@
+import { apiUrl } from '../../services/apiClient';
 /**
  * The write the consent screen makes (PRD feature 246, L1/L2).
  *
@@ -97,7 +98,7 @@ export async function confirmConsent(
   }
 
   const record = await post<WireConsentRecord>(
-    `/api/meetings/${encodeURIComponent(meetingId)}/consent-confirmation`,
+    apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/consent-confirmation`),
     { confirmed_by: name },
     options,
   );
@@ -134,7 +135,7 @@ export async function startSession(
   options: ConsentActionOptions = {},
 ): Promise<SessionStarted> {
   const session = await post<WireSessionStart>(
-    `/api/meetings/${encodeURIComponent(meetingId)}/session/start`,
+    apiUrl(`/api/meetings/${encodeURIComponent(meetingId)}/session/start`),
     undefined,
     options,
   );

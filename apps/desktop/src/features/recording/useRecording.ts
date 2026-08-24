@@ -10,6 +10,7 @@ import {
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
 import { readableTimestamp } from '../consent/useConsent';
 import type { Divergence, RecordingScreenProps } from './route';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the recording review screen shows, read from the service (PRD FR-2.6, FR-2.8, NFR-2.4).
@@ -88,13 +89,13 @@ export function useRecording(): RecordingData {
   const encoded = id === null ? null : encodeURIComponent(id);
 
   const alignment = useResource<WireAlignment>(
-    encoded === null ? null : `/api/meetings/${encoded}/record/divergences`,
+    encoded === null ? null : apiUrl(`/api/meetings/${encoded}/record/divergences`),
   );
   const transcripts = useResource<readonly WireTranscript[]>(
-    encoded === null ? null : `/api/sessions/${encoded}/record-path-transcript`,
+    encoded === null ? null : apiUrl(`/api/sessions/${encoded}/record-path-transcript`),
   );
   const destruction = useResource<WireDestruction>(
-    encoded === null ? null : `/api/sessions/${encoded}/audio-destruction`,
+    encoded === null ? null : apiUrl(`/api/sessions/${encoded}/audio-destruction`),
   );
 
   const spans = alignment.data?.spans ?? [];

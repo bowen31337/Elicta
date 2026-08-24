@@ -1,3 +1,4 @@
+import { apiUrl } from '../../services/apiClient';
 /**
  * Creating and removing a client engagement.
  *
@@ -73,7 +74,7 @@ export async function createEngagement(
   options: EngagementActionOptions = {},
 ): Promise<string> {
   const created = await send<{ engagement_id: string }>(
-    '/api/engagements',
+    apiUrl('/api/engagements'),
     {
       method: 'POST',
       body: JSON.stringify({
@@ -96,7 +97,7 @@ export async function deleteEngagement(
   options: EngagementActionOptions = {},
 ): Promise<void> {
   await send(
-    `/api/engagements/${encodeURIComponent(engagementId)}`,
+    apiUrl(`/api/engagements/${encodeURIComponent(engagementId)}`),
     { method: 'DELETE' },
     options,
   );

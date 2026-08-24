@@ -69,7 +69,22 @@ describe('recordNudgeDisposition', () => {
 });
 
 describe('serviceBaseUrl', () => {
-  it('falls back to the local service so a dev run needs no configuration', () => {
-    expect(serviceBaseUrl()).toBe(DEFAULT_SERVICE_BASE_URL);
+  it('falls back to the local service in the shell, which cannot use a relative path', () => {
+    // The fallback used to be unconditional, which was wrong in the direction
+    // nobody notices: it sent a browser's requests cross-origin to a service
+    // that mounts no CORS middleware, where the same page is served with an
+    // `/api` proxy in front of it. Relative is correct there; only the
+    // packaged shell, serving the page from its own protocol, needs an
+    // address. See `apiUrl.test.ts` for both halves.
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    try {
+      expect(serviceBaseUrl()).toBe(DEFAULT_SERVICE_BASE_URL);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    }
+  });
+
+  it('stays relative in a browser, so the request is same-origin through the proxy', () => {
+    expect(serviceBaseUrl()).toBe('');
   });
 });

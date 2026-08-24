@@ -1,3 +1,5 @@
+import { shellAvailable } from './shell';
+
 import {
   browserCaptureBlockedReason,
   currentAudioEnvironment,
@@ -173,7 +175,7 @@ const EMPTY: CaptureSnapshot = {
 
 /** Whether this bundle is running inside the desktop shell at all. */
 export function defaultShellAvailable(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  return shellAvailable();
 }
 
 /**

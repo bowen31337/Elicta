@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { combineStatus, useResource, type ResourceStatus } from '../../services/useResource';
 import type { ReplayScreenProps } from './route';
+import { apiUrl } from '../../services/apiClient';
 
 /**
  * What the replay screen shows, read from the service (PRD §5, T13).
@@ -59,7 +60,7 @@ export interface ReplayData extends ReplayScreenProps {
 }
 
 export function useReplay(): ReplayData {
-  const list = useResource<WireRunList>('/api/replay/runs');
+  const list = useResource<WireRunList>(apiUrl('/api/replay/runs'));
   const [chosen, setChosen] = useState<string | null>(null);
 
   const runs = list.data?.runs ?? [];
@@ -68,7 +69,7 @@ export function useReplay(): ReplayData {
   const run = runs.find((candidate) => candidate.run_id === chosen) ?? runs[runs.length - 1] ?? null;
 
   const metrics = useResource<WireMetrics>(
-    run === null ? null : `/api/replay/runs/${encodeURIComponent(run.run_id)}/metrics`,
+    run === null ? null : apiUrl(`/api/replay/runs/${encodeURIComponent(run.run_id)}/metrics`),
   );
 
   const figure =
