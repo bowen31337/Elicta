@@ -166,11 +166,17 @@ const STATE_COPY: Record<CaptureState, { word: string; detail: string; pill: str
   },
   capturing: {
     word: 'Recording',
-    // Not "and transcribed": nothing transcribes during a meeting here.
-    // The audio uploaded from this screen becomes a transcript on the
-    // record path afterwards, and an operator told otherwise would go
-    // looking for a live transcript that does not exist.
-    detail: 'Audio is being captured. It becomes a transcript after the meeting, not during it.',
+    // This line has been wrong in both directions, which is the argument for
+    // it claiming nothing about transcription. It said "and transcribed" when
+    // nothing transcribed during a meeting; that was corrected to "after the
+    // meeting, not during it", and then the live path was built and made the
+    // correction false the other way. Whether speech becomes words during the
+    // meeting depends on a provider configured in Settings, which this screen
+    // does not know about.
+    //
+    // Where the audio goes is true in every configuration, and when it stops
+    // going there the watchdog says so — which is the pairing that matters.
+    detail: 'Audio is being captured and sent to the service for this meeting.',
     pill: 'pill pill--alert',
   },
   paused: {
