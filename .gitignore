@@ -90,3 +90,6 @@ scripts/ralph/archive/
 
 # Worktrees created for isolated task execution.
 .claude/worktrees/
+
+# Frozen service binaries, built per platform by scripts/build-service-sidecar.sh
+apps/desktop/src-tauri/binaries/

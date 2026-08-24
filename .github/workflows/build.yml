@@ -77,6 +77,19 @@ jobs:
       - name: Build desktop frontend assets
         run: pnpm --filter elicta-desktop build
 
+      # The service ships inside the bundle so somebody who downloads the
+      # .dmg needs no Python of their own. `actions/setup-python` is used here
+      # and nowhere else in this job because its macOS builds are universal2,
+      # which is what lets one frozen binary cover both architectures; the
+      # standalone builds `uv` fetches are per-architecture.
+      - name: Set up Python for the bundled service
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Freeze the service into the bundle
+        run: ./scripts/build-service-sidecar.sh universal-apple-darwin
+
       - name: Build universal macOS bundle
         working-directory: apps/desktop
         env:
