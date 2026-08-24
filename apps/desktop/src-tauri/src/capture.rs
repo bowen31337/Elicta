@@ -242,6 +242,20 @@ struct Session {
     running: Arc<AtomicBool>,
     frames: Arc<std::sync::atomic::AtomicU64>,
     thread: Option<JoinHandle<()>>,
+    /// Whether the capture thread is still on the device.
+    ///
+    /// Distinct from `running`, which is the *instruction*: `stop_capture`
+    /// clears that to ask the thread to finish. This is the *fact*, set false
+    /// by the thread itself however it leaves — including the way it actually
+    /// leaves on a laptop whose microphone yields nothing, which is a
+    /// `Disconnected` error five seconds in.
+    ///
+    /// Without it a dead thread left `session` as `Some` for ever. The UI got
+    /// `capture://disconnected`, went back to showing "Stopped" and offered
+    /// the Check button again, and every press after that was refused with
+    /// "capture is already running" by a session with nothing behind it. The
+    /// only way out was quitting the app.
+    alive: Arc<AtomicBool>,
 }
 
 /// Tauri-managed state holding at most one session.
@@ -254,7 +268,15 @@ impl CaptureManager {
     fn status(&self) -> CaptureStatus {
         let guard = self.session.lock().expect("capture session lock poisoned");
         match guard.as_ref() {
+            // A session whose thread has gone is reported as idle, not as
+            // whatever state the machine was left in. The alternative is a
+            // screen that says "Recording" over a device nothing is reading.
             None => CaptureStatus {
+                state: CaptureState::Idle.to_string(),
+                source: None,
+                frames: 0,
+            },
+            Some(session) if !session.alive.load(Ordering::Relaxed) => CaptureStatus {
                 state: CaptureState::Idle.to_string(),
                 source: None,
                 frames: 0,
@@ -288,8 +310,20 @@ pub fn start_capture(
     device_id: Option<String>,
 ) -> Result<CaptureStatus, String> {
     let mut guard = manager.session.lock().map_err(|_| "capture lock poisoned")?;
-    if guard.is_some() {
+    if guard
+        .as_ref()
+        .is_some_and(|session| session.alive.load(Ordering::Relaxed))
+    {
         return Err("capture is already running".into());
+    }
+    // A session whose thread has already gone is cleared rather than refused.
+    // The device it held is released — the thread only leaves after dropping
+    // its source — so refusing here protects nothing, and refusing is what
+    // made a microphone that delivers nothing unrecoverable without a restart.
+    if let Some(mut dead) = guard.take() {
+        if let Some(thread) = dead.thread.take() {
+            let _ = thread.join();
+        }
     }
 
     let kind = kind_from_id(&source_id).ok_or_else(|| format!("unknown source {source_id}"))?;
@@ -302,14 +336,28 @@ pub fn start_capture(
 
     let pause = machine.pause_signal();
     let running = Arc::new(AtomicBool::new(true));
+    let alive = Arc::new(AtomicBool::new(true));
     let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     let thread = {
         let running = Arc::clone(&running);
         let frames = Arc::clone(&frames);
+        let alive = Arc::clone(&alive);
         thread::Builder::new()
             .name("elicta-capture".into())
             .spawn(move || {
+                // Set however this thread leaves — the loop ending, the
+                // device failing, or a panic unwinding past it. A guard rather
+                // than a line at the bottom, because the bottom is exactly
+                // what an early `break` skips.
+                struct MarkDead(Arc<AtomicBool>);
+                impl Drop for MarkDead {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::Relaxed);
+                    }
+                }
+                let _dead = MarkDead(alive);
+
                 let mut pipeline = NormalizingPipeline::new();
                 while running.load(Ordering::Relaxed) {
                     match source.next_frame() {
@@ -367,6 +415,7 @@ pub fn start_capture(
         machine,
         source: describe(kind),
         running,
+        alive,
         frames,
         thread: Some(thread),
     });
@@ -466,6 +515,58 @@ mod tests {
         // device list there would be a control that changes nothing.
         assert!(describe(AudioSourceKind::Loopback).devices.is_empty());
     }
+
+    /// A session with no thread behind it, as the manager is left holding
+    /// after a device fails. `thread: None` because the real one has exited;
+    /// what matters is that `alive` is false while the session is still there.
+    fn planted_session(alive: bool) -> Session {
+        let mut machine = CaptureStateMachine::new();
+        machine.start().expect("a fresh machine starts");
+        Session {
+            machine,
+            source: describe(AudioSourceKind::LineIn),
+            running: Arc::new(AtomicBool::new(true)),
+            alive: Arc::new(AtomicBool::new(alive)),
+            frames: Arc::new(std::sync::atomic::AtomicU64::new(7)),
+            thread: None,
+        }
+    }
+
+    fn manager_holding(session: Session) -> CaptureManager {
+        let manager = CaptureManager::default();
+        *manager.session.lock().expect("fresh lock") = Some(session);
+        manager
+    }
+
+    #[test]
+    fn a_session_whose_thread_has_gone_reports_idle() {
+        // The device is released the moment the thread leaves, so anything
+        // else is a screen saying "Recording" over an input nothing is
+        // reading. This is the state a microphone that delivers nothing
+        // leaves behind, five seconds in.
+        let status = manager_holding(planted_session(false)).status();
+
+        assert_eq!(status.state, "idle");
+        assert!(status.source.is_none());
+        assert_eq!(status.frames, 0);
+    }
+
+    #[test]
+    fn a_session_with_a_live_thread_still_reports_what_it_is_doing() {
+        // The other half: the flag must not make every session read as idle,
+        // which would hide a recording that is working perfectly well.
+        let status = manager_holding(planted_session(true)).status();
+
+        assert_eq!(status.state, "capturing");
+        assert_eq!(status.frames, 7);
+        assert_eq!(status.source.map(|source| source.id), Some("line-in".into()));
+    }
+
+    // The reclaim in `start_capture` -- clearing a dead session instead of
+    // refusing with "capture is already running" -- is not unit-tested here:
+    // the command takes an `AppHandle`, which cannot be built without a
+    // running Tauri application. What is tested is the flag it reads and the
+    // status it produces, which is the half a screen can observe.
 
     #[test]
     fn an_idle_manager_reports_idle_with_no_source() {

@@ -66,7 +66,10 @@ mod wasapi_line_in;
 
 pub use input::{is_built_in_transport, select, InputDevice, TRANSPORT_TYPE_BUILT_IN};
 pub use kind::{AudioSourceKind, DegradedCaptureWarning};
-pub use permission::{describe_failure, explain, reads_as_tcc_refusal, Permission, PermissionState};
+pub use permission::{
+    describe_failure, explain, reads_as_tcc_refusal, silent_device_reason, Permission,
+    PermissionState,
+};
 pub use managed::{
     ManagedParticipantSource, MeetingSession, Participant, ParticipantFrame, RecordedMeeting,
 };

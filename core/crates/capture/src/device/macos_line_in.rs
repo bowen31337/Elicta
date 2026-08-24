@@ -46,7 +46,7 @@ const SILENT_DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, get_audio_device_ids_for_scope, get_default_device_id,
-    get_device_name, get_device_transport_type,
+    get_device_name, get_device_transport_type, get_hogging_pid,
 };
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
@@ -54,6 +54,7 @@ use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamForma
 use crate::ring::{AudioFormat, RawFrame};
 
 use super::input::{is_built_in_transport, select, InputDevice};
+use super::permission::silent_device_reason;
 use super::kind::AudioSourceKind;
 use super::source::{AudioSource, AudioSourceError};
 
@@ -75,6 +76,14 @@ pub struct CoreAudioLineInSource {
     audio_unit: AudioUnit,
     events_rx: Receiver<Vec<f32>>,
     format: AudioFormat,
+    /// Kept so a device that goes quiet can be asked who is holding it.
+    ///
+    /// Spelled `u32` rather than `AudioDeviceID`: that alias lives in
+    /// `objc2-core-audio`, which this crate reaches only through
+    /// `coreaudio-rs`, and taking a direct dependency to name one integer
+    /// would be more surface than the name is worth. A struct field cannot
+    /// defer to inference the way the local in `open_device` does.
+    device_id: u32,
 }
 
 /// Every input CoreAudio can see, in the order it reports them.
@@ -209,6 +218,7 @@ impl CoreAudioLineInSource {
             audio_unit,
             events_rx: rx,
             format,
+            device_id,
         })
     }
 }
@@ -236,15 +246,31 @@ impl AudioSource for CoreAudioLineInSource {
         // running rather than that nobody is speaking.
         match self.events_rx.recv_timeout(SILENT_DEVICE_TIMEOUT) {
             Ok(samples) => Ok(Some(RawFrame::new(self.format, samples))),
-            Err(RecvTimeoutError::Timeout) => Err(AudioSourceError::Disconnected(format!(
-                "the microphone delivered no audio for {} seconds. macOS may not have \
-                 granted this build access to it — check System Settings, Privacy & \
-                 Security, Microphone",
-                SILENT_DEVICE_TIMEOUT.as_secs()
-            ))),
+            Err(RecvTimeoutError::Timeout) => Err(AudioSourceError::Disconnected(
+                silent_device_reason(SILENT_DEVICE_TIMEOUT.as_secs(), self.holder()),
+            )),
             Err(RecvTimeoutError::Disconnected) => Err(AudioSourceError::Disconnected(
                 "CoreAudio input callback stopped delivering audio".to_string(),
             )),
+        }
+    }
+}
+
+impl CoreAudioLineInSource {
+    /// The process holding this input exclusively, if one is.
+    ///
+    /// CoreAudio calls it hog mode. Asked only when the device has already
+    /// gone quiet, because it turns "no audio, cause unknown" into a cause
+    /// with an owner — and because an operator sent to look at code signing
+    /// over another app holding the microphone has been sent a long way from
+    /// the fix.
+    ///
+    /// `-1` is CoreAudio's "nobody", and an unreadable property is treated the
+    /// same: not knowing who holds it is not evidence that somebody does.
+    fn holder(&self) -> Option<i32> {
+        match get_hogging_pid(self.device_id) {
+            Ok(pid) if pid >= 0 => Some(pid),
+            _ => None,
         }
     }
 }

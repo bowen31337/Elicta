@@ -158,6 +158,46 @@ pub fn describe_failure(permission: Permission, context: &str, error: &str) -> S
     format!("{context}: {error}")
 }
 
+/// What to tell an operator whose input opened and then delivered nothing.
+///
+/// This is the failure a laptop actually meets, and the old text got it wrong
+/// in the way that wastes the most time: it said macOS "may not have granted
+/// this build access", which sends somebody to a switch they have already
+/// turned on. Seeing it on and being told it is off is worse than no
+/// explanation — it makes the app look broken rather than the grant look
+/// stale, and there is nothing to do about a broken app.
+///
+/// Silence is not this. CoreAudio delivers buffers continuously while a device
+/// is running and a quiet room arrives as buffers of zeros, so no buffer at all
+/// means the device is not running. The two causes worth naming:
+///
+/// - Another process holds the input exclusively, which CoreAudio can say
+///   outright — `holder` is that process, and it makes the permission story
+///   irrelevant.
+/// - The grant does not describe *this* binary. A locally built app is ad-hoc
+///   signed, so its code-signing hash changes with every rebuild while its
+///   name in System Settings does not. The row stays, switched on, describing
+///   a build that no longer exists.
+pub fn silent_device_reason(seconds: u64, holder: Option<i32>) -> String {
+    if let Some(pid) = holder {
+        return format!(
+            "the microphone delivered no audio for {seconds} seconds because another \
+             application (process {pid}) has exclusive use of it. Quit that application, \
+             or pick a different input."
+        );
+    }
+    format!(
+        "the microphone opened but delivered no audio for {seconds} seconds. macOS gives a \
+         denied microphone to an app exactly this way — it starts, and nothing arrives. If \
+         {pane} already lists Elicta as allowed, the grant may describe an earlier build: a \
+         locally built app is signed afresh each time, so the switch stays on while the \
+         permission stops applying. Remove Elicta from that list with the minus button, \
+         reopen it and allow it again. Granting it while Elicta is running never takes \
+         effect — quit and open it again either way.",
+        pane = Permission::Microphone.settings_pane(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +320,41 @@ window, display capture";
             described,
             "failed to enumerate shareable content: no display attached"
         );
+    }
+
+    #[test]
+    fn a_silent_device_does_not_claim_the_permission_is_missing() {
+        // The operator can see the switch is on. Being told it is off is what
+        // makes the app look broken rather than the grant look stale.
+        let reason = silent_device_reason(5, None);
+
+        assert!(!reason.contains("may not have granted"), "{reason}");
+        assert!(reason.contains("already lists Elicta as allowed"), "{reason}");
+    }
+
+    #[test]
+    fn a_silent_device_names_the_stale_grant_and_what_clears_it() {
+        let reason = silent_device_reason(5, None);
+
+        assert!(reason.contains("earlier build"), "{reason}");
+        assert!(reason.contains("minus button"), "{reason}");
+        assert!(reason.contains("quit and open it again"), "{reason}");
+    }
+
+    #[test]
+    fn a_device_another_application_holds_says_that_instead() {
+        // A different cause with a different remedy. Telling this operator
+        // about code signing would be a wild goose chase.
+        let reason = silent_device_reason(5, Some(4321));
+
+        assert!(reason.contains("process 4321"), "{reason}");
+        assert!(reason.contains("exclusive use"), "{reason}");
+        assert!(!reason.contains("earlier build"), "{reason}");
+    }
+
+    #[test]
+    fn the_wait_it_actually_gave_up_after_is_the_one_reported() {
+        assert!(silent_device_reason(5, None).contains("5 seconds"));
+        assert!(silent_device_reason(30, None).contains("30 seconds"));
     }
 }
