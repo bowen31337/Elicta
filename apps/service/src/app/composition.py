@@ -818,6 +818,39 @@ def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
     return read
 
 
+def _coverage_slots_for_meeting(backend: Backend, meeting_id: str) -> list[dict]:
+    """The sections this meeting is trying to fill, as the panel's slots.
+
+    Taken from the meeting's own bank rather than from a list invented here:
+    the bank is drafted section by section, and those sections are what the
+    meeting is *for*. A meter counting anything else would be measuring
+    against something nobody is working from.
+
+    `filled` is false for all of them, and that is the honest starting state
+    rather than a placeholder — nothing has been asked yet. The operator's
+    taps fill them in the panel, which is what `useAskedItChip` already
+    documents: the confirmation is the local mutation, and durable
+    satisfaction is tracked separately from what the chip shows.
+    """
+
+    engagement_id = _engagement_of_meeting(backend, meeting_id)
+    if engagement_id is None:
+        return []
+
+    seen: list[str] = []
+    for candidate in backend.compiled_candidates.get(engagement_id, []):
+        section = getattr(candidate, "template_section", None)
+        if section and section not in seen:
+            seen.append(section)
+
+    # A meeting has sections to cover whether or not a bank has been drafted
+    # — the bank holds questions *about* those sections, and a meeting held
+    # before the compile finished still needs a meter. The compiler's own
+    # taxonomy is what it would have drafted against.
+    sections = seen or list(_agent_models.DEFAULT_TEMPLATE_SECTIONS)
+    return [{"id": section, "label": section, "filled": False} for section in sections]
+
+
 def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
     """Drop every live session for this meeting.
 
@@ -2229,6 +2262,21 @@ def _include_operational_routers(
         # that no audio supports.
         for language in _expected_languages_for_meeting(backend, meeting_id):
             yield "language", {"language": language, "expected": True}
+
+        # What there is to cover, before any nudge. Two of the four one-tap
+        # responses FR-6.6 calls the primary input — `Asked it` and `What am I
+        # missing?` — render only when the panel holds a summary, and nothing
+        # anywhere put one on the stream: the only frame kind ever queued was
+        # `nudge`. Observed on a real recording as five nudges with two chips
+        # under them, the two missing being the ones that mark a section
+        # covered and say what is left.
+        yield "coverage", {
+            "slots": _coverage_slots_for_meeting(backend, meeting_id),
+            # Not tracked yet. `null` is what the panel reads as "no clock",
+            # and inventing a number here would put a countdown on screen that
+            # nothing is counting.
+            "time_remaining_ms": None,
+        }
 
         for name, payload in backend.session_stream_events.get(meeting_id, []):
             yield name, payload

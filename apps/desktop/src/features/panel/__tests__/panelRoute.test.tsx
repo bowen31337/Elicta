@@ -178,6 +178,36 @@ describe('the live panel', () => {
     expect(screen.getByRole('button', { name: /deeper/i })).toBeInTheDocument();
   });
 
+  it('is short two of the four responses when no coverage frame arrives', async () => {
+    /* The failure this pair documents, and the reason the test above passed
+       while the panel was broken in a real meeting: it *emits* the coverage
+       frame, and nothing proved the service sends one. It did not — the only
+       frame kind ever queued was `nudge` — so `Asked it` and `What am I
+       missing?` never rendered, and the operator had two chips where FR-6.6
+       says four.
+
+       Asserted rather than left implicit so the frame cannot be removed as
+       cosmetic: it is what half the primary input is gated on. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    stream().emit('nudge', {
+      id: 'nudge-1',
+      stub: 'Fast in seconds?',
+      question: 'What does fast mean in seconds?',
+      trigger_reason: 'unquantified adjective',
+      created_at: 1,
+    });
+
+    // The two that need only a nudge are there.
+    expect(await screen.findByRole('button', { name: /park it/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /deeper/i })).toBeInTheDocument();
+    // The two that need coverage are not.
+    expect(screen.queryByRole('button', { name: /asked it/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /missing/i })).not.toBeInTheDocument();
+  });
+
   /**
    * "An empty panel is the right resting state" — so with nothing selected the
    * panel still renders, and simply opens no stream. It must not become an
