@@ -133,6 +133,89 @@ describe('the recording review screen', () => {
     expect(screen.getByText('failed')).toBeInTheDocument();
   });
 
+  /**
+   * What an operator sees when nothing was configured.
+   *
+   * This is the state that prompted the question. Both engines refused for
+   * the same reason, the reason was recorded on each of them, and the screen
+   * showed neither — it showed a fixed sentence claiming the *other* engine
+   * had succeeded, twice, about two engines that had both failed.
+   */
+  const BOTH_FAILED = [
+    {
+      engine: 'deepgram',
+      status: 'failed',
+      segments: [],
+      requested_at: '2026-08-25T03:33:30Z',
+      error: 'the deepgram record-path engine needs a key for deepgram, and none is configured.',
+    },
+    {
+      engine: 'assemblyai',
+      status: 'failed',
+      segments: [],
+      requested_at: '2026-08-25T03:33:30Z',
+      error: 'the assemblyai record-path engine needs a key for assemblyai, and none is configured.',
+    },
+  ];
+
+  it('gives the reason a failed engine recorded, rather than a fixed sentence', async () => {
+    stubService({
+      ...BASE,
+      '/api/sessions/meeting-1/record-path-transcript': BOTH_FAILED,
+    });
+    render(<RecordingRoute />);
+
+    expect(await screen.findByText(/needs a key for deepgram/)).toBeInTheDocument();
+    expect(screen.getByText(/needs a key for assemblyai/)).toBeInTheDocument();
+  });
+
+  it('does not claim the other engine succeeded when it also failed', async () => {
+    stubService({
+      ...BASE,
+      '/api/sessions/meeting-1/record-path-transcript': BOTH_FAILED,
+    });
+    render(<RecordingRoute />);
+
+    await screen.findByText(/needs a key for deepgram/);
+
+    // The sentence was printed unconditionally, so with both failed it told
+    // the operator twice that the one beside it had worked. Neither had, and
+    // there is no transcript at all — which is the thing they most need to
+    // know.
+    expect(screen.queryByText(/the other engine still produced a transcript/)).toBeNull();
+  });
+
+  it('shows the latest attempt per engine, not every attempt ever made', async () => {
+    // Eighteen rows had accumulated on one meeting from repeated retries, so
+    // "Engines" listed nine failures per engine and read as nine broken
+    // engines rather than one run that has been tried nine times.
+    stubService({
+      ...BASE,
+      '/api/sessions/meeting-1/record-path-transcript': [
+        ...BOTH_FAILED,
+        {
+          engine: 'deepgram',
+          status: 'complete',
+          segments: [{ start_seconds: 0, end_seconds: 1, text: 'later', speaker: null }],
+          requested_at: '2026-08-25T05:20:00Z',
+          error: null,
+        },
+        {
+          engine: 'assemblyai',
+          status: 'complete',
+          segments: [{ start_seconds: 0, end_seconds: 1, text: 'later', speaker: null }],
+          requested_at: '2026-08-25T05:20:00Z',
+          error: null,
+        },
+      ],
+    });
+    render(<RecordingRoute />);
+
+    expect(await screen.findAllByText('complete')).toHaveLength(2);
+    expect(screen.queryByText('failed')).toBeNull();
+    expect(screen.queryByText(/needs a key for deepgram/)).toBeNull();
+  });
+
   it('attributes a divergence to the speaker the transcript recorded', async () => {
     stubService({
       ...BASE,

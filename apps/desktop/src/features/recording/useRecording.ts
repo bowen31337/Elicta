@@ -55,6 +55,10 @@ interface WireTranscript {
   readonly engine: string;
   readonly status: string;
   readonly segments: readonly WireSegment[];
+  /** When this attempt was requested. Several accumulate per meeting. */
+  readonly requested_at?: string;
+  /** Why it failed, in the engine's own words. Null on a completed one. */
+  readonly error?: string | null;
 }
 
 interface WireDestruction {
@@ -107,7 +111,27 @@ export function useRecording(): RecordingData {
     );
   }, [transcripts.data, alignment.data]);
 
-  const engineTranscripts = transcripts.data ?? [];
+  /**
+   * The latest attempt per engine, not every attempt ever made.
+   *
+   * Retries accumulate: one meeting here had eighteen rows, and the Engines
+   * list rendered all of them — nine failures per engine, which reads as nine
+   * broken engines rather than one run tried nine times. Per engine rather
+   * than per run, so a single engine re-run on its own is not hidden behind
+   * the older attempt of the other.
+   */
+  const engineTranscripts = useMemo(() => {
+    const latest = new Map<string, WireTranscript>();
+    for (const transcript of transcripts.data ?? []) {
+      const held = latest.get(transcript.engine);
+      // No timestamp means an older service that sent one row per engine, and
+      // there the last one wins — which is what reading them in order gives.
+      if (held === undefined || (transcript.requested_at ?? '') >= (held.requested_at ?? '')) {
+        latest.set(transcript.engine, transcript);
+      }
+    }
+    return [...latest.values()];
+  }, [transcripts.data]);
 
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
@@ -120,7 +144,21 @@ export function useRecording(): RecordingData {
     engines: engineTranscripts.map((transcript) => ({
       name: transcript.engine,
       status: transcript.status === 'complete' ? ('complete' as const) : ('failed' as const),
+      // The engine's own reason, carried through rather than replaced by a
+      // fixed sentence. It was recorded on every failed attempt and shown on
+      // none of them, so the one screen built to explain the record path was
+      // the one place its explanation could not be read.
+      detail: transcript.error ?? null,
     })),
+    /**
+     * Whether any engine produced a transcript at all.
+     *
+     * The screen used to tell a failed engine that "the other engine still
+     * produced a transcript" unconditionally. With both failed it said so
+     * twice, about two engines that had both failed and a meeting with no
+     * transcript — the fact an operator most needs, stated backwards.
+     */
+    anyComplete: engineTranscripts.some((transcript) => transcript.status === 'complete'),
     // The share of aligned spans the two engines agreed on, or `null` when
     // there is nothing to take a share of.
     //
