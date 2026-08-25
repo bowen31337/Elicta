@@ -146,6 +146,8 @@ class SettingsStore(Protocol):
 
     def write_consent(self, consent: ConsentSettings) -> None: ...
 
+    def write_speech(self, speech: SpeechCredentialPool) -> None: ...
+
     def set_secret(self, key: SecretKey, value: str) -> None:
         """Store a secret. An empty value clears it."""
 

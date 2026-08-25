@@ -24,6 +24,12 @@ from .models import (
 from .probes import ProbeFailed
 from .router import build_settings_router
 from .service import apply_settings_update, check_secret_connection
+from .speech_admin import (
+    add_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
 from .store import InMemorySettingsStore
 
 REAL_KEY = "sk-ant-api03-VERYSECRETVALUE-abcd"
@@ -41,7 +47,23 @@ def _client(store: InMemorySettingsStore) -> TestClient:
     async def check(key):
         return await check_secret_connection(store, key)
 
-    app.include_router(build_settings_router(read_settings, apply, check))
+    async def add_speech(payload):
+        return add_credential(store, payload)
+
+    async def update_speech(credential_id, payload):
+        return update_credential(store, credential_id, payload)
+
+    async def remove_speech(credential_id):
+        remove_credential(store, credential_id)
+
+    async def speech_policy(payload):
+        return set_policy(store, payload)
+
+    app.include_router(
+        build_settings_router(
+            read_settings, apply, check, add_speech, update_speech, remove_speech, speech_policy
+        )
+    )
     return TestClient(app)
 
 

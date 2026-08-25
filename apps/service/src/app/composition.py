@@ -206,6 +206,17 @@ from app.modules.settings.models import (
 from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
+from app.modules.settings.speech_admin import (
+    SpeechCredentialCreate,
+    SpeechCredentialUpdate,
+    SpeechCredentialView,
+    SpeechPolicyUpdate,
+    add_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
+from app.modules.settings.speech_credentials import SpeechCredentialPool
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.modules.trigger.gate import evaluate as evaluate_utterance
 from app.modules.trigger.listener import LiveUtterances
@@ -1966,8 +1977,32 @@ def build_app(
 
         return await check_secret_connection(settings_store, key, probe)
 
+    async def add_speech_credential(
+        payload: SpeechCredentialCreate,
+    ) -> SpeechCredentialView:
+        return add_credential(settings_store, payload)
+
+    async def update_speech_credential(
+        credential_id: str, payload: SpeechCredentialUpdate
+    ) -> SpeechCredentialView:
+        return update_credential(settings_store, credential_id, payload)
+
+    async def remove_speech_credential(credential_id: str) -> None:
+        remove_credential(settings_store, credential_id)
+
+    async def set_speech_policy(payload: SpeechPolicyUpdate) -> SpeechCredentialPool:
+        return set_policy(settings_store, payload)
+
     app.include_router(
-        build_settings_router(read_settings, apply_settings, check_connection)
+        build_settings_router(
+            read_settings,
+            apply_settings,
+            check_connection,
+            add_speech_credential,
+            update_speech_credential,
+            remove_speech_credential,
+            set_speech_policy,
+        )
     )
 
     _include_operational_routers(

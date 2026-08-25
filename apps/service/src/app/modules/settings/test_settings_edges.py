@@ -30,6 +30,12 @@ from .models import (
 from .probes import ProbeFailed, probe_deepgram
 from .router import build_settings_router
 from .service import apply_settings_update
+from .speech_admin import (
+    add_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
 from .sqlite_store import (
     SettingsKeyUnavailableError,
     SqliteSettingsStore,
@@ -167,8 +173,30 @@ def _client(check_connection) -> TestClient:
     async def apply_settings(payload):
         return await apply_settings_update(store, payload)
 
+    async def add_speech(payload):
+        return add_credential(store, payload)
+
+    async def update_speech(credential_id, payload):
+        return update_credential(store, credential_id, payload)
+
+    async def remove_speech(credential_id):
+        remove_credential(store, credential_id)
+
+    async def speech_policy(payload):
+        return set_policy(store, payload)
+
     app = FastAPI()
-    app.include_router(build_settings_router(read_settings, apply_settings, check_connection))
+    app.include_router(
+        build_settings_router(
+            read_settings,
+            apply_settings,
+            check_connection,
+            add_speech,
+            update_speech,
+            remove_speech,
+            speech_policy,
+        )
+    )
     return TestClient(app)
 
 

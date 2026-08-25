@@ -414,13 +414,20 @@ def test_testing_an_oauth_token_probes_it_in_its_own_mode(
     )
 
 
-def test_testing_a_speech_key_uses_the_probe_for_the_configured_vendor(
+def test_testing_a_speech_key_uses_the_probe_for_the_provider_it_will_serve(
     client: TestClient, vendor_refuses: list[httpx.Request]
 ) -> None:
+    """`live_vendor` used to name the provider here and no longer exists.
+
+    It selected nothing the live path honoured — the recogniser was Deepgram
+    whatever it said — so the pool took over choosing the provider and this
+    key, which predates the pool, is probed against the one the live path can
+    drive.
+    """
+
     client.put(
         "/api/admin/settings",
         json={
-            "connectors": {"live_vendor": "deepgram"},
             "vendors": {"asr_base_url": "https://api.deepgram.example/v1/projects"},
             "secrets": [{"key": "asr_vendor_api_key", "value": "dg-not-real"}],
         },
