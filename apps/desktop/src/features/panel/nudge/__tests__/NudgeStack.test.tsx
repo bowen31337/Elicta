@@ -177,3 +177,67 @@ describe('NudgeStack', () => {
     });
   });
 });
+
+describe('reaching a nudge that has receded', () => {
+  /**
+   * Reported with eight on screen: "there is no way to navigate to any of
+   * it". Every chip acts on the active nudge, and a history entry was two
+   * spans in a list item — not focusable, not pressable. So the moment a
+   * second nudge arrived the first became unactionable for good, and in a
+   * meeting where one can arrive every minute that is most of them.
+   *
+   * FR-6.3 constrains *prominence* — one shown prominently at a time — not
+   * reachability. Bringing one forward keeps exactly one prominent; it just
+   * lets the operator choose which.
+   */
+  const HISTORY: Nudge[] = [
+    { id: 'n-2', stub: 'Second', question: 'The second question?', triggerReason: 'r2', createdAt: 2 },
+    { id: 'n-1', stub: 'First', question: 'The first question?', triggerReason: 'r1', createdAt: 1 },
+  ];
+  const ACTIVE: Nudge = {
+    id: 'n-3',
+    stub: 'Third',
+    question: 'The third question?',
+    triggerReason: 'r3',
+    createdAt: 3,
+  };
+
+  it('offers each past nudge as something that can be pressed', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.getAllByRole('button', { name: /Second|First/ })).toHaveLength(2);
+  });
+
+  it('says which nudge pressing one would bring forward', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(
+      screen.getByRole('button', { name: /Bring back Second/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hands the whole nudge back, not just its id', () => {
+    /* The caller has to put the displaced one somewhere, and it needs the
+       nudge to do it — an id would make it look the demoted one up in a list
+       it is in the middle of rewriting. */
+    const onSelect = vi.fn();
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={onSelect} />);
+
+    screen.getByRole('button', { name: /Bring back First/i }).click();
+
+    expect(onSelect).toHaveBeenCalledWith(HISTORY[1]);
+  });
+
+  it('leaves the active nudge unpressable, since it is already here', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.queryByRole('button', { name: /Bring back Third/i })).toBeNull();
+  });
+
+  it('still renders without a handler, for a screenshot that cannot press anything', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} />);
+
+    expect(screen.getByText('Second')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Bring back/i })).toBeNull();
+  });
+});

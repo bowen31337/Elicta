@@ -15,6 +15,21 @@ export interface NudgeStackProps {
    * the meeting language (FR-2.24). Defaults to English.
    */
   operatorLanguage?: string;
+  /**
+   * Bring a nudge that has receded back to the front.
+   *
+   * Every chip acts on the active nudge, and a history entry used to be two
+   * spans in a list item — not focusable, not pressable. So the moment a
+   * second nudge arrived the first became unactionable for good, and in a
+   * meeting where one can arrive every minute that is most of them.
+   *
+   * FR-6.3 constrains prominence, not reachability: one shown prominently at
+   * a time. This keeps exactly one; it lets the operator choose which.
+   *
+   * Optional because a fixed scene has nothing to press. Given none, the
+   * entries render as the plain list they were.
+   */
+  onSelect?: (nudge: Nudge) => void;
 }
 
 /* The floor is a contrast constraint, not a taste one.
@@ -55,7 +70,12 @@ export function historyOpacity(index: number): number {
  * FR-6.4), matching the design system's "no typing animation, no streaming"
  * rule for nudge entry.
  */
-export function NudgeStack({ active, history, operatorLanguage }: NudgeStackProps) {
+export function NudgeStack({
+  active,
+  history,
+  operatorLanguage,
+  onSelect,
+}: NudgeStackProps) {
   const chrome = getNudgeChromeCopy(operatorLanguage);
 
   return (
@@ -78,8 +98,25 @@ export function NudgeStack({ active, history, operatorLanguage }: NudgeStackProp
               className="nudge-stack__history-item"
               style={{ opacity: historyOpacity(index) }}
             >
-              <span className="nudge-stack__history-stub">{nudge.stub}</span>
-              <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+              {onSelect === undefined ? (
+                <>
+                  <span className="nudge-stack__history-stub">{nudge.stub}</span>
+                  <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="nudge-stack__history-button"
+                  /* Named by what pressing it does, not by the stub alone:
+                     read out of context, "Second" says nothing about the
+                     consequence, and several stubs can be identical. */
+                  aria-label={`Bring back ${nudge.stub}`}
+                  onClick={() => onSelect(nudge)}
+                >
+                  <span className="nudge-stack__history-stub">{nudge.stub}</span>
+                  <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+                </button>
+              )}
             </li>
           ))}
         </ol>

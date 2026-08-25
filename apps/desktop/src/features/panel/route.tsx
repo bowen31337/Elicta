@@ -134,6 +134,30 @@ export function OperatorPanel({
     }
   };
 
+  /**
+   * Bring a nudge that has receded back to the front.
+   *
+   * A swap, not a reordering: the one being brought back leaves history and
+   * the one it displaces takes the front of it, so nothing is lost and the
+   * one just put down is a single press away. Exactly one stays prominent,
+   * which is what FR-6.3 asks — it constrains prominence, not which nudge
+   * the operator is allowed to be looking at.
+   *
+   * Without this every chip acted on whatever arrived last, and a nudge
+   * became unactionable the moment the next one landed. With one arriving
+   * as often as a minute apart, that is most of a meeting's worth.
+   */
+  const onSelectNudge = (nudge: Nudge) => {
+    setState((current) => {
+      if (current.active === null || current.active.id === nudge.id) return current;
+      return {
+        ...current,
+        active: nudge,
+        history: [current.active, ...current.history.filter((held) => held.id !== nudge.id)],
+      };
+    });
+  };
+
   const onParked = () => {
     if (state.meetingId && state.active) {
       void recordNudgeDisposition({
@@ -191,6 +215,7 @@ export function OperatorPanel({
           active={state.active}
           history={[...state.history]}
           operatorLanguage={state.operatorLanguage}
+          onSelect={onSelectNudge}
         />
       </section>
 

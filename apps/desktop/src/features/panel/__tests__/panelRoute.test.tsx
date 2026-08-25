@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import PanelRoute from '../route';
@@ -176,6 +177,58 @@ describe('the live panel', () => {
     expect(screen.getByRole('button', { name: /park it/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /missing/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /deeper/i })).toBeInTheDocument();
+  });
+
+  it('brings a receded nudge back, and the chips then act on it', async () => {
+    /* The whole point of reaching one: not to read it — the history already
+       shows its headline — but to be able to park or deepen it. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    for (const n of [1, 2]) {
+      stream().emit('nudge', {
+        id: `nudge-${n}`,
+        stub: `Stub ${n}`,
+        question: `Question ${n}?`,
+        trigger_reason: `reason ${n}`,
+        created_at: n,
+      });
+    }
+    expect(await screen.findByText('Question 2?')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /Bring back Stub 1/i }));
+
+    // The first is prominent now — its question is the one shown in full.
+    expect(await screen.findByText('Question 1?')).toBeInTheDocument();
+    expect(screen.queryByText('Question 2?')).not.toBeInTheDocument();
+    // And the one it displaced is reachable in turn: nothing is lost.
+    expect(
+      screen.getByRole('button', { name: /Bring back Stub 2/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps exactly one nudge prominent while doing it', async () => {
+    /* FR-6.3's constraint is prominence, and swapping must not breach it. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    for (const n of [1, 2, 3]) {
+      stream().emit('nudge', {
+        id: `nudge-${n}`,
+        stub: `Stub ${n}`,
+        question: `Question ${n}?`,
+        trigger_reason: `reason ${n}`,
+        created_at: n,
+      });
+    }
+    await screen.findByText('Question 3?');
+
+    await userEvent.click(screen.getByRole('button', { name: /Bring back Stub 1/i }));
+
+    expect(screen.getAllByText(/^Question \d\?$/)).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /Bring back/i })).toHaveLength(2);
   });
 
   it('is short two of the four responses when no coverage frame arrives', async () => {
