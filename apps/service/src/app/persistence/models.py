@@ -186,6 +186,11 @@ class Candidate(Base):
     # to prevent in its other half.
     source_doc: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
     authority_match: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    # Carried for the live path: the panel's headline, and which of the
+    # gate's conditions this question answers. Both nullable to match the
+    # chain, and both absent on a bank compiled before they were kept.
+    stub: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    trigger_types: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
     # Position within the engagement's bank, so the list reads back in the
     # order it was compiled in rather than in whatever order the rows return.
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)

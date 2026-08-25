@@ -91,6 +91,11 @@ class Candidate(Protocol):
     template_section: str
     phrasing: str
     priority: int
+    #: What the compiler drafted this question to answer, in the gate's own
+    #: vocabulary, and its glanceable form. Both optional: a bank compiled
+    #: before they were carried has neither, and must go on working.
+    trigger_types: list[str]
+    stub: str
 
 
 @dataclass(frozen=True)
@@ -145,8 +150,24 @@ def select(
     # them the product misheard the room. That is the M2 embarrassment case,
     # and it costs the reason line its credibility for the rest of the
     # meeting.
+    # Relevance in two tiers, and the order matters.
+    #
+    # A question naming what the client just said is about *that sentence*.
+    # One merely drafted for the same kind of ambiguity is about the same kind
+    # of thing — weaker, but far better than the templated fallback, which is
+    # what a bank of twenty quantity questions was reduced to whenever none of
+    # them happened to contain the word "several".
+    #
+    # Additive on purpose: the first tier is exactly what this did before, so
+    # a bank compiled without `trigger_types` — every bank that exists today —
+    # selects precisely as it always has, and gains the second tier when it is
+    # next compiled.
     about_this = [
         candidate for candidate in unused if mentions_term(hit.term, candidate.phrasing)
+    ] or [
+        candidate
+        for candidate in unused
+        if hit.category in (getattr(candidate, "trigger_types", None) or ())
     ]
     # Lower `priority` ranks higher — the ascending convention `OpenQuestion`
     # and `BankCandidate` already use. Ties keep the order the bank was
@@ -163,7 +184,12 @@ def select(
         )
 
     return SelectedNudge(
-        stub=stub,
+        # The bank's own headline where it has one. The term-anchored stub
+        # above was built because the bank carried none, and it is still what
+        # a templated question gets — there is no candidate to take one from.
+        # A drafted question has a stub written for it, which says what *this*
+        # question asks rather than which rule fired.
+        stub=(getattr(chosen, "stub", "") or "").strip() or stub,
         question=chosen.phrasing,
         trigger_reason=hit.reason,
         created_at=now,

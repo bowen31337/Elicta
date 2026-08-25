@@ -66,3 +66,18 @@ TERMS: dict[str, str] = {
     "typically": QUALIFIED_AGREEMENT,
     "generally": QUALIFIED_AGREEMENT,
 }
+
+
+#: The four conditions the gate can fire on, as the compiler must name them.
+#:
+#: Exported so the Analyst's schema is generated from the runtime's own
+#: vocabulary rather than restating it. The two lists disagreeing is not a
+#: hypothetical: `trigger_types` was free text, the prompt described the
+#: conditions in prose, and nothing downstream could match a hit's category
+#: against what came back.
+GATE_TRIGGER_TYPES: tuple[str, ...] = (
+    UNQUANTIFIED_AMOUNT,
+    UNQUANTIFIED_PROPERTY,
+    UNQUANTIFIED_TIME,
+    QUALIFIED_AGREEMENT,
+)

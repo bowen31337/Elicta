@@ -3827,6 +3827,8 @@ def _store_compiled_candidates(backend: Backend, engagement_id: str, run: Any) -
             pruned=False,
             source_doc=getattr(candidate, "source_doc", None),
             authority_match=list(getattr(candidate, "authority_match", []) or []),
+            stub=getattr(candidate, "stub", "") or "",
+            trigger_types=list(getattr(candidate, "trigger_types", []) or []),
         )
         for candidate in compiled
     ]

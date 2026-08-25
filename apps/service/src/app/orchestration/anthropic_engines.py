@@ -69,6 +69,7 @@ from app.modules.debrief.pipeline.models import (
     BmadProjectBriefDraft,
     TranslationOutcome,
 )
+from app.modules.trigger.lexicon import GATE_TRIGGER_TYPES
 
 from .engines import (
     STAGE_CLASSIFY,
@@ -110,7 +111,15 @@ _BANK_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "template_section": {"type": "string"},
-                    "trigger_types": {"type": "array", "items": {"type": "string"}},
+                    # A closed vocabulary, and the gate's own. Free strings
+                    # were accepted here and nothing could consume them: the
+                    # runtime matches a hit's category against this list, and
+                    # a model writing "vague quantity" where the gate says
+                    # `unquantified_amount` records a fact no one can use.
+                    "trigger_types": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(GATE_TRIGGER_TYPES)},
+                    },
                     "phrasing": {"type": "string"},
                     "stub": {"type": "string"},
                     "lang": {"type": "string"},
@@ -335,9 +344,16 @@ Tag every candidate:
   not a question for this template; leave it out. Never file a candidate under
   a meeting artifact such as an open-questions list or a decision log; those
   are written after a meeting, and this is a bank for going into one.
-- `trigger_types`: the conversational conditions that should surface it — an
-  unquantified quantity, a vague adjective, a named system nobody briefed you
-  on, a contradiction with a document, a topic left uncovered.
+- `trigger_types`: which conversational conditions should surface it, from
+  this exact list and no other wording:
+  `unquantified_amount` (a quantity nobody put a number on — "many", "a few"),
+  `unquantified_property` (a quality nobody measured — "fast", "flexible"),
+  `unquantified_time` (a date nobody fixed — "soon", "shortly"),
+  `qualified_agreement` (an answer that agreed with conditions — "typically",
+  "if possible").
+  Name every one the question would genuinely answer; a question that answers
+  none of them belongs to no trigger and will only ever be read on the
+  preparation screen.
 - `stub`: the same question at a glance, short enough to read without breaking
   eye contact.
 - `phrasing`: the exact wording, ready to be read aloud.

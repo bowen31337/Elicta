@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.modules.trigger.gate import evaluate
+from app.modules.trigger.lexicon import UNQUANTIFIED_AMOUNT, UNQUANTIFIED_TIME
 from app.modules.trigger.selection import select
 
 NOW = datetime(2026, 8, 23, 9, 0, 0, tzinfo=UTC)
@@ -238,3 +239,108 @@ def _hit_on(utterance: str):
     hit = evaluate(utterance)
     assert hit is not None, utterance
     return hit
+
+
+class TestTheBankIsAskedByWhatItWasDraftedFor:
+    """The reasoning the compiler did and the runtime threw away.
+
+    Relevance was decided by whether the *question text* happened to contain
+    the word the client said. The compiler already records `trigger_types` —
+    which kinds of ambiguity each question was drafted to answer — and
+    selection never looked at it.
+
+    The cost is a templated question in place of a drafted one. A bank can
+    hold twenty questions written for unquantified quantities, and a client
+    saying "several" still got the generic fallback, because none of the
+    twenty happened to contain the word "several".
+    """
+
+    def _candidate(self, identifier, phrasing, priority, *, triggers=(), stub=""):
+        candidate = _Candidate(identifier, "Volumes", phrasing, priority)
+        candidate.trigger_types = list(triggers)
+        candidate.stub = stub
+        return candidate
+
+    def test_a_question_drafted_for_this_trigger_beats_the_templated_one(self):
+        bank = [
+            self._candidate(
+                "cand-1",
+                "How many consignments cross the dock in a week?",
+                1,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "cand-1", "the bank had one and it was not used"
+
+    def test_a_question_about_the_actual_word_is_still_preferred(self):
+        """Category is the fallback for relevance, not a replacement for it.
+
+        A question naming what the client just said is about *that sentence*;
+        one merely drafted for the same kind of ambiguity is about the same
+        kind of thing. The first is the better pairing with the reason line
+        the operator reads beside it.
+        """
+
+        bank = [
+            self._candidate(
+                "by-category", "How many crates in a week?", 1,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            ),
+            self._candidate(
+                "by-term", "Several pallets — how many is several?", 9,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            ),
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "by-term"
+
+    def test_a_question_for_a_different_trigger_is_not_offered(self):
+        """The embarrassment case: a mismatched pairing costs the reason line
+        its credibility for the rest of the meeting."""
+
+        bank = [
+            self._candidate(
+                "wrong-kind", "What date does that need to be?", 1,
+                triggers=[UNQUANTIFIED_TIME],
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id is None, "a time question was offered for a quantity"
+
+    def test_the_bank_supplies_the_headline_when_it_supplies_the_question(self):
+        """The compiler drafts a stub per question; it was dropped in transit.
+
+        The term-anchored stub built to work around that is still right for a
+        templated question — there is no candidate to take one from — but a
+        drafted question has its own, written for it.
+        """
+
+        bank = [
+            self._candidate(
+                "cand-1", "How many consignments cross the dock in a week?", 1,
+                triggers=[UNQUANTIFIED_AMOUNT], stub="A week's crossings?",
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.stub == "A week's crossings?"
+
+    def test_a_templated_question_still_names_what_was_said(self):
+        """No candidate means no drafted stub, and the fallback still applies."""
+
+        nudge = select(_hit_on("We move several pallets a day."), [], now=NOW)
+
+        assert nudge is not None
+        assert "several" in nudge.stub

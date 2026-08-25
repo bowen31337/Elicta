@@ -1169,6 +1169,8 @@ class StateStore:
                         "pruned": row.pruned,
                         "source_doc": row.source_doc,
                         "authority_match": row.authority_match or [],
+                        "stub": row.stub or "",
+                        "trigger_types": row.trigger_types or [],
                     }
                 )
             )
@@ -1187,6 +1189,8 @@ class StateStore:
                     "pruned": item.get("pruned", False),
                     "source_doc": item.get("source_doc"),
                     "authority_match": item.get("authority_match") or [],
+                    "stub": item.get("stub") or None,
+                    "trigger_types": item.get("trigger_types") or [],
                     "ordinal": ordinal,
                 }
                 for ordinal, item in enumerate(dump(entry) for entry in value)
