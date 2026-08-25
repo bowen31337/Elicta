@@ -288,6 +288,45 @@ describe('an engagement that has been deleted', () => {
     );
   });
 
+  it('offers an engagement the moment it is created', async () => {
+    /* The same staleness in the other direction, and the reason the fix
+       belongs in the write rather than at each call site: every mutation can
+       make some mounted read wrong, and "remember to invalidate" is the
+       habit that produced the bug. */
+    const extra: { engagement_id: string; client_organisation: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          extra.push({ engagement_id: 'eng-9', client_organisation: 'Third Client' });
+          return jsonResponse({ engagement_id: 'eng-9' }, 201);
+        }
+        if (path === '/api/engagements') {
+          return jsonResponse({
+            items: [...ENGAGEMENTS.items, ...extra],
+            total: ENGAGEMENTS.items.length + extra.length,
+          });
+        }
+        const meetings = /^\/api\/engagements\/([^/]+)\/meetings$/.exec(path);
+        if (meetings) return jsonResponse(MEETINGS[decodeURIComponent(meetings[1])]);
+        return jsonResponse(null, 404);
+      }),
+    );
+    const { createEngagement } = await import(
+      '../../features/engagements/engagementActions'
+    );
+    render(<SelectionPicker />);
+    await screen.findByText('Northwind Freight');
+
+    await createEngagement({
+      clientOrganisation: 'Third Client',
+      sector: 'testing',
+      commercialContext: 'verification',
+    });
+
+    await waitFor(() => expect(screen.getByText('Third Client')).toBeInTheDocument());
+  });
+
   it('stops offering a meeting that has been deleted', async () => {
     /* The same staleness one level down, and the same toolbar. The prep
        screen deletes a meeting and reloads its own list; the dropdown beside

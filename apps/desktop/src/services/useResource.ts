@@ -80,16 +80,23 @@ export function announceServiceReady(): void {
 const mounted = new Map<string, Set<() => void>>();
 
 /**
- * Tell every mounted read of a path, or of anything beneath it, to ask again.
+ * Tell every mounted read to ask again, whatever it is a read of.
  *
- * Called after a write, by the code that made it. Prefix rather than exact
- * match because deleting an engagement invalidates its meetings too, and the
- * caller should not have to enumerate what hangs off what.
+ * Called by the write helpers after any successful mutation, which is what
+ * makes this hard to get wrong: a caller cannot forget to say what it
+ * changed, because it does not have to know. Remembering per call site is the
+ * habit that produced the bug this exists for — the toolbar naming a client
+ * that had been deleted, because the screen that deleted it refreshed only
+ * itself.
+ *
+ * Blunt on purpose. A handful of reads are mounted at once, they are all
+ * conditional GETs against a service on this machine, and a discrete write is
+ * a thing the operator did once — not a keystroke. Being exactly right about
+ * which read a write invalidated is work that buys nothing here and is wrong
+ * the moment the service grows a relationship nobody updated.
  */
-export function invalidateResource(path: string): void {
-  for (const [held, reloaders] of [...mounted]) {
-    if (held !== path && !held.startsWith(`${path}/`)) continue;
-    // Copied first, as above: a reloader may re-subscribe.
+export function invalidateReads(): void {
+  for (const [, reloaders] of [...mounted]) {
     for (const reload of [...reloaders]) reload();
   }
 }

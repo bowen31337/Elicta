@@ -1,5 +1,5 @@
 import { apiUrl } from '../../services/apiClient';
-import { invalidateResource } from '../../services/useResource';
+import { invalidateReads } from '../../services/useResource';
 /**
  * Creating and removing a client engagement.
  *
@@ -53,6 +53,11 @@ async function send<T>(
     throw new Error('The service could not be reached.');
   }
   if (!response.ok) throw new Error(await failureMessage(response));
+  // The write landed, so every mounted read may now be answering for a state
+  // that no longer exists. Invalidated here rather than at each call site
+  // because a call site that forgets is exactly what left the toolbar naming
+  // a deleted client.
+  if ((init.method ?? 'GET') !== 'GET') invalidateReads();
   try {
     return (await response.json()) as T;
   } catch {
@@ -102,9 +107,4 @@ export async function deleteEngagement(
     { method: 'DELETE' },
     options,
   );
-  // Every mounted read of the list, not merely the caller's own. The toolbar
-  // holds one too and is a different component: without this it went on
-  // naming the deleted client, and offering its meetings, because as far as
-  // its copy of the list was concerned the client still existed.
-  invalidateResource(apiUrl('/api/engagements'));
 }
