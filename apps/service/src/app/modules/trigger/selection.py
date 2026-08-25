@@ -31,14 +31,38 @@ from .lexicon import (
 #: cost is not recovered by going quiet again later.
 MINIMUM_GAP = timedelta(seconds=60)
 
-#: The glanceable half (FR-6.3): what an operator can take in without turning
-#: away from the client. Deliberately not the question itself.
-STUBS: dict[str, str] = {
-    UNQUANTIFIED_AMOUNT: "How many, exactly?",
-    UNQUANTIFIED_PROPERTY: "In numbers?",
-    UNQUANTIFIED_TIME: "By when, exactly?",
-    QUALIFIED_AGREEMENT: "Always, or sometimes?",
+#: The ask, per category, in as few words as it can be put.
+#:
+#: Joined to the term that fired rather than used alone. Alone there are four
+#: of these and a meeting raises many more nudges than that, so every nudge
+#: from one category carried the identical headline — reported from a live
+#: meeting as "why do I just see one nudge?", with three on screen and the
+#: largest text on each of them the same four words.
+#:
+#: The term is what makes them differ, and it is also the more useful half:
+#: the stub is the one line an operator reads without turning away from the
+#: client, and "which of their words did this react to" is what tells them
+#: whether it heard the room — before they read the question.
+ASKS: dict[str, str] = {
+    UNQUANTIFIED_AMOUNT: "how many?",
+    UNQUANTIFIED_PROPERTY: "in numbers?",
+    UNQUANTIFIED_TIME: "by when?",
+    QUALIFIED_AGREEMENT: "always?",
 }
+
+
+def stub_for(category: str, term: str) -> str:
+    """The glanceable half (FR-6.3), anchored to what was actually said.
+
+    Built here rather than read off the chosen candidate because the bank
+    does not carry one: the compiler drafts a stub per question and it is
+    dropped before persistence, so recovering it needs a schema change and a
+    recompile of every candidate. This costs nothing, works on a bank already
+    compiled, and stays a pure function — which the replay parity gates
+    require of everything on this path.
+    """
+
+    return f"\u201c{term}\u201d \u2014 {ASKS[category]}"
 
 #: Asked when the operator wants to follow a thread further, and the bank has
 #: nothing left about it. Deliberately a different question from the first
@@ -109,7 +133,7 @@ def select(
     if last_surfaced_at is not None and now - last_surfaced_at < MINIMUM_GAP:
         return None
 
-    stub = STUBS[hit.category]
+    stub = stub_for(hit.category, hit.term)
     unused = [
         candidate for candidate in candidates if candidate.id not in already_surfaced
     ]

@@ -170,3 +170,71 @@ def test_a_bank_question_about_the_term_that_fired_is_preferred() -> None:
 
     assert nudge is not None
     assert nudge.candidate_id == "cand-4", "the drafted question about this term should win"
+
+
+class TestTheStubTellsOneNudgeFromAnother:
+    """Reported from a live meeting: "why do I just see one nudge?"
+
+    Three had fired, the panel was rendering all three, and every one carried
+    the same headline — because the stub was looked up by trigger *category*
+    and there are four categories. Same category, same words, however
+    different the questions underneath.
+
+    The glanceable half is the largest thing on the panel and was the only
+    part carrying no information at all.
+    """
+
+    def test_two_hits_on_one_category_do_not_share_a_headline(self):
+        """The exact shape of the report: "many", then "several"."""
+
+        first = select(_hit_on("We move many pallets a day."), [], now=NOW)
+        second = select(
+            _hit_on("There are several bays."), [], now=NOW + timedelta(minutes=5)
+        )
+
+        assert first is not None and second is not None
+        assert first.stub != second.stub
+
+    def test_the_headline_names_what_the_client_actually_said(self):
+        """Which is the fact worth the biggest text on the screen.
+
+        It tells the operator which sentence the panel reacted to, so they can
+        decide whether it read the room before they read the question.
+        """
+
+        nudge = select(_hit_on("There are several bays."), [], now=NOW)
+
+        assert nudge is not None
+        assert "several" in nudge.stub
+
+    def test_it_stays_glanceable(self):
+        """FR-6.1's cap is the whole reason the stub exists."""
+
+        for utterance in (
+            "We move many pallets a day.",
+            "It needs to be fast.",
+            "We need it soon.",
+            "Typically that works.",
+        ):
+            nudge = select(_hit_on(utterance), [], now=NOW)
+            if nudge is not None:
+                assert len(nudge.stub.split()) <= 8, nudge.stub
+
+    def test_a_chosen_bank_question_gets_the_same_treatment(self):
+        """Not only the templated fallback — the reported case had a bank."""
+
+        first = select(_hit_on("The dashboard must be fast."), BANK, now=NOW)
+        second = select(
+            _hit_on("Reporting should be flexible."),
+            BANK,
+            now=NOW + timedelta(minutes=5),
+        )
+
+        assert first is not None and second is not None
+        assert first.stub != second.stub
+
+
+def _hit_on(utterance: str):
+    hit = evaluate(utterance)
+    assert hit is not None, utterance
+    return hit
