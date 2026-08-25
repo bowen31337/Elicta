@@ -1453,6 +1453,38 @@ export interface components {
             pruned?: boolean | null;
         };
         /**
+         * Capability
+         * @description The things an operator would notice not working.
+         * @enum {string}
+         */
+        Capability: "inference" | "live_nudges" | "record_transcription" | "document_links";
+        /**
+         * CapabilityReadiness
+         * @description One capability, and why it is or is not available.
+         */
+        CapabilityReadiness: {
+            capability: components["schemas"]["Capability"];
+            /** Ready */
+            ready: boolean;
+            /**
+             * Missing
+             * @description The secrets that would make it ready, in the modes currently selected.
+             * @default []
+             */
+            missing: components["schemas"]["SecretKey"][];
+            /**
+             * Consequence
+             * @description What does not happen without them, in the operator's terms — what stops, not which field is blank. The screen already shows which field is blank.
+             */
+            consequence: string;
+            /**
+             * Optional
+             * @description Whether the deployment is usable without it. An optional capability is an extra somebody may not want; a required one missing means a core promise of the product silently does not happen.
+             * @default false
+             */
+            optional: boolean;
+        };
+        /**
          * CitationRow
          * @description One durable citations-table row binding a single BMAD analyst claim to one grounding utterance (PRD FR-8.7, FR-8.7a).
          *
@@ -2923,6 +2955,15 @@ export interface components {
             durable: boolean;
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Readiness
+             * @description What is not configured, and what it costs.
+             *
+             *     Derived here rather than assembled by each store, so the two stores
+             *     cannot disagree and no caller has to remember a second request. The
+             *     rules live in `readiness.py`; this is only where they meet the wire.
+             */
+            readonly readiness: components["schemas"]["CapabilityReadiness"][];
         };
         /**
          * SessionAlignment

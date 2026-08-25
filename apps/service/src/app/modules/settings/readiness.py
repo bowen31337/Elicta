@@ -23,47 +23,13 @@ credential exists" would pass exactly the deployments this exists to catch.
 
 from __future__ import annotations
 
-from enum import Enum
-
-from pydantic import BaseModel, Field
-
-from .models import AuthMode, SecretKey, SpeechVendor
-
-
-class Capability(str, Enum):
-    """The things an operator would notice not working."""
-
-    INFERENCE = "inference"
-    LIVE_NUDGES = "live_nudges"
-    RECORD_TRANSCRIPTION = "record_transcription"
-    DOCUMENT_LINKS = "document_links"
-
-
-class CapabilityReadiness(BaseModel):
-    """One capability, and why it is or is not available."""
-
-    capability: Capability
-    ready: bool
-    missing: tuple[SecretKey, ...] = Field(
-        default=(),
-        description="The secrets that would make it ready, in the modes currently selected.",
-    )
-    consequence: str = Field(
-        description=(
-            "What does not happen without them, in the operator's terms — what "
-            "stops, not which field is blank. The screen already shows which "
-            "field is blank."
-        )
-    )
-    optional: bool = Field(
-        default=False,
-        description=(
-            "Whether the deployment is usable without it. An optional "
-            "capability is an extra somebody may not want; a required one "
-            "missing means a core promise of the product silently does not "
-            "happen."
-        ),
-    )
+from .models import (
+    AuthMode,
+    Capability,
+    CapabilityReadiness,
+    SecretKey,
+    SpeechVendor,
+)
 
 
 def _vendor_key(vendor: SpeechVendor) -> SecretKey | None:
@@ -158,3 +124,6 @@ def readiness_of(
     )
 
     return entries
+
+
+__all__ = ["Capability", "CapabilityReadiness", "readiness_of"]

@@ -66,3 +66,43 @@ describe('what is not configured, and what it costs', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+
+describe('after the key is set', () => {
+  it('the warning is gone', () => {
+    // The screen replaces its state from the save response, so this is what
+    // an operator sees the moment a save succeeds — not after a reload. A
+    // warning that outlives its fix is how the next real one gets ignored.
+    const { container, rerender } = render(
+      <ReadinessWarnings
+        readiness={[
+          {
+            capability: 'live_nudges',
+            ready: false,
+            missing: ['deepgram_api_key'],
+            consequence: 'no nudge ever reaches the panel',
+            optional: false,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    rerender(
+      <ReadinessWarnings
+        readiness={[
+          {
+            capability: 'live_nudges',
+            ready: true,
+            missing: [],
+            consequence: 'no nudge ever reaches the panel',
+            optional: false,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+});

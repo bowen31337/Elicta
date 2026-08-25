@@ -117,3 +117,66 @@ class TestTheScreenIsToldWithoutAsking:
         blocked = {e.capability for e in settings.readiness if not e.ready}
         assert Capability.LIVE_NUDGES in blocked
         assert Capability.INFERENCE not in blocked
+
+
+class TestSettingAKeyClearsItsWarning:
+    """The screen replaces its state from the save response, not from a refetch.
+
+    So a warning that outlived a successful save would need the operator to
+    reload the app to find out they had fixed it — and a warning that stays up
+    after the fix is how the next real one gets ignored.
+    """
+
+    def test_the_save_response_carries_fresh_readiness(self):
+        from fastapi.testclient import TestClient
+
+        from app.composition import Backend, build_app
+        from app.modules.settings.store import InMemorySettingsStore
+
+        store = InMemorySettingsStore(read_environment=False)
+        client = TestClient(build_app(Backend(), settings_store=store))
+
+        def live_entry(body):
+            return next(
+                e for e in body["readiness"] if e["capability"] == "live_nudges"
+            )
+
+        before = client.get("/api/admin/settings")
+        assert live_entry(before.json())["ready"] is False
+
+        # The vendor as well as the key: readiness follows the selected
+        # vendor, so a Deepgram key against an AssemblyAI lane is correctly
+        # still not ready — which is the rule, not an accident of the test.
+        saved = client.put(
+            "/api/admin/settings",
+            json={
+                "connectors": {"live_vendor": "deepgram"},
+                "secrets": [{"key": "deepgram_api_key", "value": "dg-the-key"}],
+            },
+        )
+
+        assert saved.status_code == 200, saved.text
+        # The response the screen renders from, not a later read.
+        assert live_entry(saved.json())["ready"] is True
+        assert live_entry(saved.json())["missing"] == []
+
+    def test_and_a_later_read_agrees(self):
+        from fastapi.testclient import TestClient
+
+        from app.composition import Backend, build_app
+        from app.modules.settings.store import InMemorySettingsStore
+
+        store = InMemorySettingsStore(read_environment=False)
+        client = TestClient(build_app(Backend(), settings_store=store))
+        client.put(
+            "/api/admin/settings",
+            json={
+                "connectors": {"live_vendor": "deepgram"},
+                "secrets": [{"key": "deepgram_api_key", "value": "dg-the-key"}],
+            },
+        )
+
+        body = client.get("/api/admin/settings").json()
+        live = next(e for e in body["readiness"] if e["capability"] == "live_nudges")
+
+        assert live["ready"] is True

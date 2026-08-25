@@ -3716,6 +3716,56 @@
         "title": "CandidatePatchRequest",
         "description": "A partial update to one bank candidate: edit its phrasing, reorder its priority, or prune it (PRD FR-4.8).\n\nAll fields are optional so a caller can change just one aspect at a\ntime, but at least one must be supplied, since a PATCH with nothing to\nchange has no meaningful effect to report as a 200."
       },
+      "Capability": {
+        "type": "string",
+        "enum": [
+          "inference",
+          "live_nudges",
+          "record_transcription",
+          "document_links"
+        ],
+        "title": "Capability",
+        "description": "The things an operator would notice not working."
+      },
+      "CapabilityReadiness": {
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/SecretKey"
+            },
+            "type": "array",
+            "title": "Missing",
+            "description": "The secrets that would make it ready, in the modes currently selected.",
+            "default": []
+          },
+          "consequence": {
+            "type": "string",
+            "title": "Consequence",
+            "description": "What does not happen without them, in the operator's terms \u2014 what stops, not which field is blank. The screen already shows which field is blank."
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "description": "Whether the deployment is usable without it. An optional capability is an extra somebody may not want; a required one missing means a core promise of the product silently does not happen.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "capability",
+          "ready",
+          "consequence"
+        ],
+        "title": "CapabilityReadiness",
+        "description": "One capability, and why it is or is not available."
+      },
       "CitationRow": {
         "properties": {
           "session_id": {
@@ -6338,10 +6388,22 @@
               }
             ],
             "title": "Updated At"
+          },
+          "readiness": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityReadiness"
+            },
+            "type": "array",
+            "title": "Readiness",
+            "description": "What is not configured, and what it costs.\n\nDerived here rather than assembled by each store, so the two stores\ncannot disagree and no caller has to remember a second request. The\nrules live in `readiness.py`; this is only where they meet the wire.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "readiness"
+        ],
         "title": "ServiceSettings",
         "description": "Everything an operator can administer, with no secret values in it."
       },
