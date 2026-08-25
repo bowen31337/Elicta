@@ -202,6 +202,7 @@ from app.modules.settings.models import (
     SecretKey,
     ServiceSettings,
     SettingsUpdateRequest,
+    SpeechVendor,
 )
 from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
@@ -219,6 +220,7 @@ from app.modules.settings.speech_admin import (
     update_credential,
 )
 from app.modules.settings.speech_credentials import SpeechCredentialPool
+from app.modules.settings.speech_resolution import resolve_speech_key
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.modules.trigger.gate import evaluate as evaluate_utterance
 from app.modules.trigger.listener import LiveUtterances
@@ -1103,8 +1105,6 @@ def _vendor_probe_for(key: SecretKey, settings_store: SettingsStore) -> Any:
         # The pool decides which provider the live path uses, so there is no
         # separate setting to consult. The generic key predates the pool and
         # is probed against the provider the live path can actually drive.
-        from app.modules.settings.models import SpeechVendor
-
         return probe_for_vendor(SpeechVendor.DEEPGRAM.value)
     return None
 
@@ -3008,10 +3008,19 @@ def _include_operational_routers(
         # Only asked of the vendor-backed default. A recogniser handed in by a
         # caller answers for its own readiness, and gating it on a Deepgram
         # credential would make an injected one untestable without buying one.
+        #
+        # Through `resolve_speech_key`, which is the function the recogniser
+        # itself calls. That is the point rather than a convenience: these are
+        # two askings of one question, and when they consulted different
+        # places they disagreed — the recogniser moved to the pool, this gate
+        # kept reading the fixed key, and an operator who added their key on
+        # the Settings screen got silence. Not an error and not a log line;
+        # the chunk returned quietly, exactly as on a deployment that has
+        # bought no speech at all.
         if (
             live_recogniser is None
             and settings_store is not None
-            and settings_store.get_secret(SecretKey.DEEPGRAM_API_KEY) is None
+            and resolve_speech_key(settings_store, SpeechVendor.DEEPGRAM) is None
         ):
             return
         await live_utterances.feed(session_id, pcm)
