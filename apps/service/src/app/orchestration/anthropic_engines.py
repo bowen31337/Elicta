@@ -725,6 +725,38 @@ def _by_utterance(lines: list[Any], count: int, stage: str) -> list[Any | None]:
     return slots
 
 
+def analyst_prompt(context_pack: Any) -> str:
+    """The one place the Analyst request is written.
+
+    Every route to the same pass reads this — the batch, the direct request,
+    and the Agent SDK adapter. Written more than once they would drift, and a
+    bank drafted by one route would quietly stop matching one drafted by
+    another: the kind of difference nobody notices until two engagements
+    disagree for no reason anyone can find.
+
+    Module-level rather than a closure because it is now shared across
+    modules, not just across the two routes in this one.
+    """
+
+    documents = "\n\n".join(
+        f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
+        for d in getattr(context_pack, "documents", [])
+    )
+    # In the request rather than the system prompt: the system prompt is
+    # cached across every engagement, and these vary per engagement.
+    sections = list(getattr(context_pack, "template_sections", None) or ())
+    if not sections:
+        sections = list(DEFAULT_TEMPLATE_SECTIONS)
+    listed = "\n".join(f"- {section}" for section in sections)
+    return (
+        f"Sector: {context_pack.sector}\n"
+        f"Project type: {context_pack.project_type}\n\n"
+        f"Template sections — file every candidate under exactly one of "
+        f"these, and cover all of them:\n{listed}\n\n"
+        f"Documents:\n\n{documents}"
+    )
+
+
 def anthropic_compiler_engines(
     client: AsyncAnthropic | None = None, *, model: str = DEFAULT_MODEL
 ) -> CompilerEngines:
@@ -781,32 +813,7 @@ def anthropic_compiler_engines(
             ]
         )
 
-    def _analyst_prompt(context_pack: Any) -> str:
-        """The one place the Analyst request is written.
-
-        Both routes to the same pass read this. Written twice they would drift,
-        and a bank drafted by the fallback would quietly stop matching one
-        drafted by the batch — the kind of difference nobody notices until two
-        engagements disagree for no reason anyone can find.
-        """
-
-        documents = "\n\n".join(
-            f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
-            for d in getattr(context_pack, "documents", [])
-        )
-        # In the request rather than the system prompt: the system prompt is
-        # cached across every engagement, and these vary per engagement.
-        sections = list(getattr(context_pack, "template_sections", None) or ())
-        if not sections:
-            sections = list(DEFAULT_TEMPLATE_SECTIONS)
-        listed = "\n".join(f"- {section}" for section in sections)
-        return (
-            f"Sector: {context_pack.sector}\n"
-            f"Project type: {context_pack.project_type}\n\n"
-            f"Template sections — file every candidate under exactly one of "
-            f"these, and cover all of them:\n{listed}\n\n"
-            f"Documents:\n\n{documents}"
-        )
+    _analyst_prompt = analyst_prompt
 
     @_upstream_aware(STAGE_RUN_ANALYST)
     async def run_analyst(engagement_id: str, context_pack: Any) -> list[AnalystBatchResult]:
@@ -1074,11 +1081,37 @@ def engines_from_settings(
     unconfigured environment does.
     """
 
+    from app.modules.settings.models import AuthMode, SecretKey
+
     client = SettingsBackedClient(store)
-    model = store.read().inference.model or DEFAULT_MODEL
+    settings = store.read()
+    model = settings.inference.model or DEFAULT_MODEL
+
+    # ADR-012 names the Agent SDK as the compiler's harness; the compiler
+    # shipped on the Messages API for both. With an API key that difference is
+    # a tidiness matter and the Messages API is the better of the two here —
+    # it has the Batch API, which §3.10 wants and the agent loop has not.
+    #
+    # With an OAuth token it stops being a preference. `claude setup-token`
+    # issues a credential entitled to Claude Code's surface, which is what the
+    # Agent SDK runs; `/v1/messages` refuses it with a 429 carrying no
+    # rate-limit headers, so on that credential the Messages API compiler
+    # cannot draft a bank at all. The credential decides the harness because
+    # only one harness will accept it.
+    compiler: CompilerEngines
+    if settings.inference.auth_mode is AuthMode.OAUTH_TOKEN:
+        from .agent_sdk_engines import agent_sdk_compiler_engines
+
+        token = store.get_secret(SecretKey.ANTHROPIC_OAUTH_TOKEN)
+        compiler = agent_sdk_compiler_engines(
+            oauth_token=token.reveal() if token else None, model=model
+        )
+    else:
+        compiler = anthropic_compiler_engines(client, model=model)
+
     return (
         anthropic_debrief_engines(client, model=model, diarize=diarize),
-        anthropic_compiler_engines(client, model=model),
+        compiler,
     )
 
 
