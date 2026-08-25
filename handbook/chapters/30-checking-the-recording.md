@@ -29,6 +29,15 @@ agreement and say nothing. It is the numbers and the names that decide what
 gets built, and they are exactly what two services disagree about, so those
 are the ones put in front of you.
 
+What does not count as a difference is where each service chose to break the
+text up. They do not agree about that and never will: one starts a new line
+wherever the room goes quiet, the other at the end of a sentence. Comparing
+them used to treat that as disagreement, which made two transcriptions that
+matched word for word come back as though they agreed about almost nothing —
+a paragraph shown against four words, and every line flagged. What is
+compared now is what was said over the same stretch of the recording, so what
+is left flagged is what the two services actually heard differently.
+
 ## Before there is anything to check
 
 Most of the time you will open this page for a meeting that has not been
