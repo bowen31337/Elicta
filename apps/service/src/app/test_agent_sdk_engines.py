@@ -107,3 +107,75 @@ class TestWhichHarnessTheCredentialGets:
         _debrief, compiler = engines_from_settings(self._store(AuthMode.API_KEY))
 
         assert compiler.name != AGENT_SDK
+
+
+class TestTestingTheCredentialTheWayItWillBeUsed:
+    """The probe has to follow the harness, because the harness follows the credential.
+
+    Testing an OAuth token against `/v1/messages` reports a 429 for a
+    credential that drafts a bank perfectly well through the agent loop — the
+    same defect as the `models.list` probe that preceded it, inverted. Then it
+    passed something that could not work; now it fails something that does.
+    """
+
+    def test_an_oauth_token_is_probed_through_the_agent_sdk(self):
+        import asyncio
+
+        from app.modules.settings.models import AuthMode
+        from app.orchestration.anthropic_engines import probe_anthropic_credential
+
+        asked: list[tuple[str, str]] = []
+
+        async def fake_run(system: str, prompt: str) -> str:
+            asked.append((system, prompt))
+            return "ok"
+
+        asyncio.run(
+            probe_anthropic_credential(
+                "sk-ant-oat01-token",
+                mode=AuthMode.OAUTH_TOKEN,
+                model="claude-opus-5",
+                run=fake_run,
+            )
+        )
+
+        assert asked, "the agent loop was never asked anything"
+
+    def test_an_api_key_is_still_probed_on_the_messages_api(self, monkeypatch):
+        import asyncio
+
+        import httpx
+
+        from app.modules.settings.models import AuthMode
+        from app.orchestration.anthropic_engines import probe_anthropic_credential
+
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-opus-5",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "stop_reason": "max_tokens",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            )
+
+        original = httpx.AsyncClient.__init__
+
+        def patched_init(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            original(self, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+        asyncio.run(
+            probe_anthropic_credential("sk-ant-the-key", mode=AuthMode.API_KEY)
+        )
+
+        assert seen and "/v1/messages" in str(seen[0].url)

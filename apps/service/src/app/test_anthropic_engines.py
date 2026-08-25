@@ -1087,16 +1087,37 @@ async def test_probing_a_credential_sends_it_on_the_header_its_mode_requires(
     assert b'"max_tokens":1' in seen[0].content.replace(b", ", b",")
 
 
-async def test_probing_an_oauth_token_uses_the_bearer_pairing(monkeypatch) -> None:
-    # A bearer token without the beta flag returns a 401 that reads like a bad
-    # credential rather than a missing header.
+async def test_an_oauth_token_is_sent_with_the_bearer_pairing(monkeypatch) -> None:
+    """A bearer token without the beta flag returns a 401 that reads like a bad credential.
+
+    Asserted against `build_anthropic_client`, which owns the pairing, rather
+    than through the credential probe. The probe used to reach it because it
+    called `/v1/messages` for every credential; it now follows the harness and
+    tests an OAuth token through the Agent SDK, so it no longer travels this
+    path. The pairing still does — the debrief engine and the slow lane both
+    build a client this way — so the check moved to where the behaviour is
+    instead of being deleted with the route that happened to exercise it.
+    """
+
     from app.modules.settings.models import AuthMode
+    from app.orchestration.anthropic_engines import build_anthropic_client
 
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"data": [], "has_more": False})
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": DEFAULT_MODEL,
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "max_tokens",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
 
     original = httpx.AsyncClient.__init__
 
@@ -1106,7 +1127,10 @@ async def test_probing_an_oauth_token_uses_the_bearer_pairing(monkeypatch) -> No
 
     monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
 
-    await probe_anthropic_credential("oat-the-token", mode=AuthMode.OAUTH_TOKEN)
+    client = build_anthropic_client(AuthMode.OAUTH_TOKEN, "oat-the-token")
+    await client.messages.create(
+        model=DEFAULT_MODEL, max_tokens=1, messages=[{"role": "user", "content": "."}]
+    )
 
     assert seen[0].headers["authorization"] == "Bearer oat-the-token"
     assert "oauth-2025-04-20" in seen[0].headers["anthropic-beta"]

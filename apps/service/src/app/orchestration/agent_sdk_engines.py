@@ -285,3 +285,27 @@ def _schema_instructed(system: str, model_cls: Any) -> str:
         "explanation, no prose after it. It must validate against this JSON "
         f"Schema:\n\n{schema}"
     )
+
+
+async def probe_agent_sdk_credential(
+    secret: str, *, model: str = DEFAULT_MODEL, run: Any = None
+) -> None:
+    """Verify an OAuth credential on the surface it is actually used on.
+
+    The smallest possible turn through the agent loop — no tools, one short
+    answer — because that is the request the compiler makes with this
+    credential, and the only one whose success means anything for it.
+
+    Raises whatever the SDK raises. The settings surface renders it by type
+    and message and never echoes the credential back.
+    """
+
+    call = run or _default_run(oauth_token=secret, model=model)
+    answer = await call(
+        "You answer with a single word and nothing else.",
+        "Reply with the word ok.",
+    )
+    if not answer.strip():
+        raise AgentSdkUnavailableError(
+            "the agent loop ended without an assistant turn"
+        )

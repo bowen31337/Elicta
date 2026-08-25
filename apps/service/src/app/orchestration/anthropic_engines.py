@@ -1144,6 +1144,7 @@ async def probe_anthropic_credential(
     base_url: str | None = None,
     mode: Any = None,
     model: str | None = None,
+    run: Any = None,
 ) -> None:
     """Verify an Anthropic credential, raising if it does not work.
 
@@ -1166,9 +1167,24 @@ async def probe_anthropic_credential(
 
     from app.modules.settings.models import AuthMode
 
+    chosen = model or DEFAULT_MODEL
+
+    # The probe follows the harness, because the harness follows the
+    # credential. `engines_from_settings` runs the compiler on the Agent SDK
+    # for an OAuth token, so probing that credential against `/v1/messages`
+    # reports the 429 it is refused with there — for a token that drafts a
+    # bank perfectly well through the agent loop. That is the `models.list`
+    # mistake inverted: it passed a credential that could not work, this would
+    # fail one that does.
+    if (mode or AuthMode.API_KEY) is AuthMode.OAUTH_TOKEN:
+        from .agent_sdk_engines import probe_agent_sdk_credential
+
+        await probe_agent_sdk_credential(secret, model=chosen, run=run)
+        return
+
     client = build_anthropic_client(mode or AuthMode.API_KEY, secret, base_url=base_url)
     await client.messages.create(
-        model=model or DEFAULT_MODEL,
+        model=chosen,
         max_tokens=1,
         messages=[{"role": "user", "content": "."}],
     )
