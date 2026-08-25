@@ -25,8 +25,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 
 class SecretKey(str, Enum):
@@ -470,6 +471,27 @@ class ServiceSettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     consent: ConsentSettings = Field(default_factory=ConsentSettings)
     secrets: list[SecretStatus] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def readiness(self) -> list[Any]:
+        """What is not configured, and what it costs.
+
+        Derived here rather than assembled by each store, so the two stores
+        cannot disagree and no caller has to remember a second request. The
+        rules live in `readiness.py`; this is only where they meet the wire.
+        """
+
+        from .readiness import readiness_of
+
+        return list(
+            readiness_of(
+                configured={s.key for s in self.secrets if s.configured},
+                auth_mode=self.inference.auth_mode,
+                live_vendor=self.connectors.live_vendor,
+            )
+        )
+
     durable: bool = Field(
         default=False,
         description=(

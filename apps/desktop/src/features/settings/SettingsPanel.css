@@ -616,3 +616,52 @@
 @media (prefers-reduced-transparency: reduce) {
   .settings-actions { background: var(--bg-tertiary); }
 }
+
+/* What is not configured, and what it costs.
+ *
+ * Two tones, because two different things are being said. A blocked
+ * capability is a promise of the product that silently does not happen and
+ * gets the same orange as the durability warning above it. An optional one is
+ * a feature nobody may want, and is deliberately quiet — an operator told
+ * twice that they have a problem stops reading the one that mattered.
+ *
+ * Colours come from the ink tokens rather than the vivid fills: `--label` on a
+ * tinted ground is what the rest of this screen uses, and `--label-secondary`
+ * fails AA at this size. */
+.settings-readiness {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+.settings-readiness--blocked {
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+.settings-readiness-lead {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-footnote);
+  color: var(--label);
+}
+.settings-readiness-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.settings-readiness-title {
+  margin: 0;
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--label);
+}
+.settings-readiness-consequence {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+  color: var(--label-supporting);
+}
+.settings-readiness-keys {
+  margin: 0;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+  color: var(--label-supporting);
+}

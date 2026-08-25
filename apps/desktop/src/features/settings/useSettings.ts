@@ -1,3 +1,5 @@
+import type { CapabilityReadiness } from './ReadinessWarnings';
+
 import { useCallback, useEffect, useState } from 'react';
 
 import { getApiClient, type ApiClient } from '../../services/apiClient';
@@ -107,6 +109,13 @@ export interface ServiceSettings {
   readonly storage?: StorageSettings;
   readonly consent?: ConsentSettings;
   readonly secrets: readonly SecretStatus[];
+  /**
+   * What cannot run, and what it costs. Computed by the service from the
+   * secrets and the modes actually selected, so the screen never has to know
+   * which key matters for which capability — a rule that lived only in the
+   * composition root, where no operator could read it.
+   */
+  readonly readiness?: readonly CapabilityReadiness[];
   readonly durable: boolean;
 }
 

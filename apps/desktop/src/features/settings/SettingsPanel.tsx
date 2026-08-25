@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 
 import './SettingsPanel.css';
+import { ReadinessWarnings } from './ReadinessWarnings';
 import { ScreenEyebrow } from '../../ui/Mark';
 import {
   AUTH_MODE_SECRET,
@@ -622,6 +623,13 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
           {error}
         </p>
       ) : null}
+
+      {/* Above the tabs on purpose. A capability that cannot run is not a
+          property of one tab — the missing key for nudges lives under Speech
+          while the symptom shows up in the live panel — and a warning filed
+          under the tab you would only open if you already knew is a warning
+          for somebody who does not need it. */}
+      <ReadinessWarnings readiness={settings.readiness ?? []} />
 
       <SettingsTabs tabs={tabs} active={tab} onSelect={setTab} />
 
