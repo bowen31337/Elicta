@@ -720,6 +720,16 @@
   line-height: var(--leading-relaxed);
   color: var(--label-supporting);
 }
+/* The last test's answer, under what the key is for rather than instead of
+ * it. `--label`, not the supporting ink: this is the sentence the operator
+ * asked for and it should not be the quietest thing in the row. */
+.speech-key-verdict {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-caption-1);
+  line-height: var(--leading-relaxed);
+  color: var(--label);
+}
+
 .speech-key-actions {
   display: flex;
   gap: var(--space-2);

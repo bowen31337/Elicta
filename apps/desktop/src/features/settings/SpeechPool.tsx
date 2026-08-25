@@ -74,8 +74,22 @@ export function SpeechPool({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, string>>({});
 
-  const run = async (action: () => Promise<string | null>) => {
+  /**
+   * `forgets` is the credential whose last verdict this action invalidates.
+   *
+   * A verdict answers "does this key work, in the state it was in?". Change
+   * that state and the sentence is about a key that no longer exists in that
+   * form — left on screen it reads as current, which is worse than showing
+   * nothing.
+   */
+  const run = async (action: () => Promise<string | null>, forgets?: string) => {
     setBusy(true);
+    if (forgets !== undefined) {
+      setVerdicts((current) => {
+        const { [forgets]: _gone, ...rest } = current;
+        return rest;
+      });
+    }
     setFailure(await action());
     setBusy(false);
   };
@@ -127,9 +141,10 @@ export function SpeechPool({
                     <span className="speech-key-badge">Serving</span>
                   ) : null}
                 </div>
-                <p className="speech-key-note">
-                  {verdicts[credential.id] ?? statusOf(credential, pool)}
-                </p>
+                <p className="speech-key-note">{statusOf(credential, pool)}</p>
+                {verdicts[credential.id] ? (
+                  <p className="speech-key-verdict">{verdicts[credential.id]}</p>
+                ) : null}
                 <div className="speech-key-actions">
                   <button
                     type="button"
@@ -145,7 +160,7 @@ export function SpeechPool({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => run(() => onSetEnabled(credential.id, !credential.enabled))}
+                    onClick={() => run(() => onSetEnabled(credential.id, !credential.enabled), credential.id)}
                   >
                     {credential.enabled ? 'Take out of service' : 'Put back in service'}
                   </button>
@@ -157,7 +172,7 @@ export function SpeechPool({
                         disabled={busy}
                         onClick={() => {
                           setConfirming(null);
-                          void run(() => onRemove(credential.id));
+                          void run(() => onRemove(credential.id), credential.id);
                         }}
                       >
                         Remove for good

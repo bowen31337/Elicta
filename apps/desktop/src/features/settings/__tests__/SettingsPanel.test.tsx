@@ -519,6 +519,39 @@ describe('reading the screen at a glance', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps saying what a key is doing after it has been tested', async () => {
+    // The verdict used to replace the status line rather than join it, so a
+    // tested key stopped saying what it was for — and kept showing a stale
+    // verdict after being taken out of service, which is the state that
+    // matters most to see.
+    const testSpeechKey = vi.fn().mockResolvedValue('Deepgram rejected the key (401)');
+    const setSpeechKeyEnabled = vi.fn().mockResolvedValue(null);
+    render(
+      <SettingsPanel
+        controller={controller({
+          settings: WITH_SPEECH_KEYS,
+          testSpeechKey,
+          setSpeechKeyEnabled,
+        })}
+      />,
+    );
+
+    await openTab('Speech');
+    const row = screen.getAllByRole('listitem')[0];
+    await userEvent.click(within(row).getByRole('button', { name: 'Test' }));
+
+    expect(await within(row).findByText(/rejected the key/)).toBeInTheDocument();
+    expect(within(row).getByText(/Serving the nudges/)).toBeInTheDocument();
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Take out of service' }));
+
+    // The verdict was about a key that was in service. It is not an answer
+    // about this row any more.
+    await waitFor(() =>
+      expect(within(row).queryByText(/rejected the key/)).not.toBeInTheDocument(),
+    );
+  });
+
   it('has no unsaved speech key for a test to answer about', async () => {
     // Two guards used to live here, both about the same gap: a test asks the
     // service about the key it has *stored*, and the single field could be
