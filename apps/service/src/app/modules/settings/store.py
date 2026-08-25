@@ -201,7 +201,7 @@ class InMemorySettingsStore:
             updated_at=self._secret_updated.get(key),
         )
 
-    def write_speech(self, speech: Any) -> None:
+    def write_speech(self, speech: SpeechCredentialPool) -> None:
         self._speech = speech
 
     def write_inference(self, inference: InferenceSettings) -> None:
