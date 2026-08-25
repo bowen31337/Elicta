@@ -860,6 +860,20 @@ function BankSection({
 }
 
 /**
+ * Where this question came from, in the reviewer's terms.
+ *
+ * Stated on every row rather than only where there is a document, because
+ * silence would be ambiguous exactly where it matters: a row saying nothing
+ * about its source reads the same as a row whose source failed to load, and
+ * that is the bug this replaced rather than a new way to have it.
+ */
+function provenanceOf(candidate: BankCandidate): string {
+  if (candidate.sourceDoc === null) return 'Reasoned from the engagement';
+  const authority = candidate.authorityMatch.join(', ');
+  return authority ? `${candidate.sourceDoc} (${authority})` : candidate.sourceDoc;
+}
+
+/**
  * One candidate, with the two edits a reviewer makes: move it earlier, or take
  * it out. Promotion takes the priority of the question above it rather than
  * `priority - 1`, so a bank whose priorities are not contiguous still reorders
@@ -882,7 +896,9 @@ function CandidateRow({
     <div className="row">
       <div className="row-main">
         <span className="t-body">{candidate.phrasing}</span>
-        <span className="t-footnote">Priority {candidate.priority}</span>
+        <span className="t-footnote">
+          Priority {candidate.priority} · {provenanceOf(candidate)}
+        </span>
       </div>
       <button
         type="button"

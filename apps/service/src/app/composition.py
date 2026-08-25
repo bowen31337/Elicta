@@ -3825,6 +3825,8 @@ def _store_compiled_candidates(backend: Backend, engagement_id: str, run: Any) -
             # question — that is `recompile_meeting_bank`'s flag to set.
             inherited_from_open_question=False,
             pruned=False,
+            source_doc=getattr(candidate, "source_doc", None),
+            authority_match=list(getattr(candidate, "authority_match", []) or []),
         )
         for candidate in compiled
     ]

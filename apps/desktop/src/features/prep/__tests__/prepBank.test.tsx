@@ -44,7 +44,14 @@ const BANK = {
     {
       template_section: 'Scope and outcomes',
       candidates: [
-        { id: 'c-1', phrasing: 'Is the February go-live firm?', priority: 1, pruned: false },
+        {
+          id: 'c-1',
+          phrasing: 'Is the February go-live firm?',
+          priority: 1,
+          pruned: false,
+          source_doc: '01-scoping-deck.pptx',
+          authority_match: ['ground truth'],
+        },
         { id: 'c-2', phrasing: 'Is Derby in phase one?', priority: 2, pruned: false },
       ],
     },
@@ -278,5 +285,36 @@ describe('finding a question in a bank too long to scan', () => {
 
     expect(screen.getByText('Is the February go-live firm?')).toBeInTheDocument();
     expect(screen.getByText(/5 questions across 3 sections/)).toBeInTheDocument();
+  });
+});
+
+
+describe('telling evidence from inference', () => {
+  /**
+   * The judgement the bank screen could not support.
+   *
+   * The Analyst drafts some questions off a document and reasons others out
+   * of the engagement, and it records which is which. All of it was dropped
+   * at the API boundary, so a bank grounded in a rich scoping pack and one
+   * reasoned out of a one-page invite arrived looking identical — same
+   * shape, same count, same confidence. "Can I trust these 164 questions"
+   * had no answer on the screen that shows them, and pruning was a read of
+   * every row rather than a filter.
+   */
+  it('names the document a question was drafted from', async () => {
+    await ready();
+
+    expect(await screen.findByText(/01-scoping-deck\.pptx/)).toBeInTheDocument();
+  });
+
+  it('says plainly when a question was reasoned rather than read', async () => {
+    /* Silence is the wrong way to show this. An operator scanning a list
+       cannot tell a row that has nothing to say about its source from one
+       whose source failed to load, and the second is the bug this replaced. */
+    await ready();
+
+    expect(await screen.findByText(/Is Derby in phase one\?/)).toBeInTheDocument();
+    const rows = screen.getAllByText(/Reasoned from the engagement/);
+    expect(rows.length).toBeGreaterThan(0);
   });
 });

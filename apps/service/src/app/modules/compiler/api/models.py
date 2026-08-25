@@ -54,6 +54,20 @@ class BankCandidate(BaseModel):
     priority: int = Field(ge=1)
     inherited_from_open_question: bool = False
     pruned: bool = False
+    #: The document this question was drafted from, or `None` where the
+    #: Analyst reasoned it out of the engagement rather than off a page.
+    #:
+    #: Absence is the signal and is kept as absence: a default of "unknown"
+    #: or an empty string would make an inferred question indistinguishable
+    #: from one whose provenance was lost on the way here, which is the thing
+    #: this exists to fix rather than a new way to have it. It is what lets an
+    #: operator judge a bank — a rich pack and a one-page invite otherwise
+    #: produce banks that look identical — and what turns pruning from a read
+    #: of every row into a filter.
+    source_doc: str | None = None
+    #: The document statuses this question rests on (FR-3.4's taxonomy).
+    #: `ground truth` and `hypothesis` are not the same standing to ask from.
+    authority_match: list[str] = Field(default_factory=list)
 
 
 class CandidatePatchRequest(BaseModel):

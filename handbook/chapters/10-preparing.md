@@ -166,6 +166,18 @@ knowing.
 
 ![The preparation screen: documents, the client's vocabulary, and the question bank grouped by section](../../docs/journeys/screenshots/prep-question-tree.png)
 
+Under each question is where it came from: the document it was drafted from
+and how you tagged that document, or *reasoned from the engagement* where
+there was no page behind it and Elicta worked it out from the sector and the
+commercial shape instead.
+
+That line is the one to read when you are deciding what to cut. A question
+drawn from a document you called ground truth stands on something the client
+wrote down. A reasoned one is a guess — often a good guess, and on a thin set
+of documents most of the bank will be guesses, which is worth knowing before
+you walk in rather than after. It also makes a long bank quicker to review:
+you can take out the guesses in one pass and read the rest properly.
+
 This review is worth doing even if you never open Elicta during the meeting. A
 good question list makes you better prepared on its own — which is why it comes
 first, and why you are meant to edit it rather than trust it.

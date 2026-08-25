@@ -18,6 +18,18 @@ export interface BankCandidate {
   readonly id: string;
   readonly phrasing: string;
   readonly priority: number;
+  /**
+   * The document this question was drafted from, or `null` where the Analyst
+   * reasoned it out of the engagement rather than off a page.
+   *
+   * Null is a real answer here, not a missing one. It is what tells a
+   * reviewer that a bank is inference rather than evidence — and a bank
+   * drafted from a rich scoping pack and one reasoned out of a one-page
+   * invite otherwise arrive looking identical.
+   */
+  readonly sourceDoc: string | null;
+  /** The document statuses it rests on — `ground truth` is not `hypothesis`. */
+  readonly authorityMatch: readonly string[];
 }
 
 export interface QuestionBankSection {

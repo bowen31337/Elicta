@@ -1167,6 +1167,8 @@ class StateStore:
                         "priority": row.priority,
                         "inherited_from_open_question": row.inherited_from_open_question,
                         "pruned": row.pruned,
+                        "source_doc": row.source_doc,
+                        "authority_match": row.authority_match or [],
                     }
                 )
             )
@@ -1183,6 +1185,8 @@ class StateStore:
                         "inherited_from_open_question", False
                     ),
                     "pruned": item.get("pruned", False),
+                    "source_doc": item.get("source_doc"),
+                    "authority_match": item.get("authority_match") or [],
                     "ordinal": ordinal,
                 }
                 for ordinal, item in enumerate(dump(entry) for entry in value)
