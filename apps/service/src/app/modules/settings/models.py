@@ -262,6 +262,22 @@ class SpeechVendor(str, Enum):
     CUSTOM = "custom"
 
 
+#: Connector keys that existed in saved settings and no longer exist here.
+#:
+#: `ConnectorSettings` forbids extra keys so a typo fails loudly instead of
+#: being ignored, which also means removing a field breaks every settings file
+#: still containing it — at startup, on the operator's own configuration.
+#: Naming the retired ones keeps both properties: these are dropped, anything
+#: else unknown still fails.
+RETIRED_CONNECTOR_KEYS: frozenset[str] = frozenset({"live_vendor"})
+
+
+def without_retired_connector_keys(stored: dict) -> dict:
+    """A saved connectors payload, minus fields this build has retired."""
+
+    return {k: v for k, v in stored.items() if k not in RETIRED_CONNECTOR_KEYS}
+
+
 class ConnectorSettings(BaseModel):
     """Which speech vendors serve each path (ADR-004's dual-path split).
 
@@ -273,14 +289,13 @@ class ConnectorSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    live_vendor: SpeechVendor = Field(
-        default=SpeechVendor.ASSEMBLYAI,
-        description=(
-            "Streaming engine for the live trigger path. AssemblyAI's "
-            "confidence-based turn model reaches a lower latency floor than a "
-            "silence timer (§14.2) and is the cheaper of the two per hour."
-        ),
-    )
+    # `live_vendor` was here, naming the streaming engine for the live path.
+    # It is gone because the speech credential pool decides: the ASR service
+    # takes one credential at a time and the credential carries its vendor, so
+    # choosing it *is* choosing the provider. Two places claiming to select a
+    # vendor could disagree, and did — a deployment read AssemblyAI here while
+    # the live path drove Deepgram regardless, which is what sent an operator
+    # to set the wrong key.
     record_vendors: list[SpeechVendor] = Field(
         default_factory=lambda: [SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI],
         description=(
@@ -327,7 +342,7 @@ class ConnectorSettings(BaseModel):
         operator can fix it, rather than in a meeting.
         """
 
-        selected = [self.live_vendor, *self.record_vendors]
+        selected = list(self.record_vendors)
         if SpeechVendor.CUSTOM in selected and not self.custom_base_url:
             raise ValueError(
                 "a custom speech service needs custom_base_url — the endpoint to call"
@@ -536,7 +551,7 @@ class ServiceSettings(BaseModel):
             readiness_of(
                 configured={s.key for s in self.secrets if s.configured},
                 auth_mode=self.inference.auth_mode,
-                live_vendor=self.connectors.live_vendor,
+                pool=self.speech,
             )
         )
 

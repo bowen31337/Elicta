@@ -49,6 +49,7 @@ from .models import (
     SecretValue,
     ServiceSettings,
     VendorSettings,
+    without_retired_connector_keys,
 )
 from .speech_credentials import SpeechCredentialPool
 
@@ -336,7 +337,11 @@ class SqliteSettingsStore:
                 written=inference is not None,
             ),
             vendors=VendorSettings(**vendors) if vendors else VendorSettings(),
-            connectors=ConnectorSettings(**connectors) if connectors else ConnectorSettings(),
+            connectors=(
+                ConnectorSettings(**without_retired_connector_keys(connectors))
+                if connectors
+                else ConnectorSettings()
+            ),
             storage=_storage_view(self.get_secret(SecretKey.STATE_DATABASE_URL)),
             documents=_documents_with_environment(
                 DocumentSourceSettings(**documents) if documents else DocumentSourceSettings(),

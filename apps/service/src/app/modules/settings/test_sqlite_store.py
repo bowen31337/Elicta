@@ -64,7 +64,6 @@ def test_connector_choices_persist(db: Path) -> None:
     store = _store(db)
     store.write_connectors(
         ConnectorSettings(
-            live_vendor=SpeechVendor.DEEPGRAM,
             record_vendors=[SpeechVendor.ASSEMBLYAI, SpeechVendor.DEEPGRAM],
             region="eu",
         )
@@ -72,7 +71,7 @@ def test_connector_choices_persist(db: Path) -> None:
 
     connectors = _store(db).read().connectors
 
-    assert connectors.live_vendor is SpeechVendor.DEEPGRAM
+    assert connectors.record_vendors == [SpeechVendor.ASSEMBLYAI, SpeechVendor.DEEPGRAM]
     assert connectors.region == "eu"
 
 

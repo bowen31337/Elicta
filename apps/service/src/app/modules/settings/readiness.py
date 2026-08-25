@@ -30,20 +30,25 @@ from .models import (
     SecretKey,
     SpeechVendor,
 )
+from .speech_credentials import SpeechCredentialPool
+
+#: The providers this build has a live recogniser for. A pool may hold keys
+#: for others — a credential can be stored and labelled before there is a
+#: client for it — and a report ignoring the difference would tell an operator
+#: holding a Gemini key that they have no key at all.
+LIVE_DRIVABLE: frozenset[SpeechVendor] = frozenset({SpeechVendor.DEEPGRAM})
 
 
 def readiness_of(
     *,
     configured: set[SecretKey],
     auth_mode: AuthMode,
-    live_vendor: SpeechVendor,
+    pool: SpeechCredentialPool | None = None,
 ) -> list[CapabilityReadiness]:
     """Each capability, whether it can run, and what it costs if it cannot.
 
-    `live_vendor` is taken and deliberately not used for the live lane — see
-    the comment there. It stays in the signature because the day a second live
-    recogniser exists, this is the argument that decides, and a caller already
-    passing it is one less thing to remember then.
+    The pool decides which providers are configured, so there is no separate
+    vendor setting to consult: choosing a credential is choosing a provider.
     """
 
     inference_key = (
@@ -51,14 +56,7 @@ def readiness_of(
         if auth_mode is AuthMode.API_KEY
         else SecretKey.ANTHROPIC_OAUTH_TOKEN
     )
-    # Deliberately not `live_vendor`'s key. The live path has one
-    # implementation — `composition.py` builds `deepgram_live_recogniser` and
-    # gates the fork on `DEEPGRAM_API_KEY` — and the vendor selector has no
-    # second recogniser behind it. Following the setting here sent an operator
-    # whose vendor read AssemblyAI to set an AssemblyAI key, which is stored,
-    # reported configured, and transcribes nothing: the same silence they came
-    # here to fix. This report is only worth reading if it names the key the
-    # code actually reads.
+    pool = pool if pool is not None else SpeechCredentialPool()
     live_key = SecretKey.DEEPGRAM_API_KEY
 
     entries: list[CapabilityReadiness] = []
@@ -75,17 +73,36 @@ def readiness_of(
         )
     )
 
-    live_ready = live_key is None or live_key in configured
+    # Either a pooled credential this build can drive, or the fixed key a
+    # deployment predating the pool still has.
+    live_ready = pool.has_any_for(LIVE_DRIVABLE) or live_key in configured
+    # A pool holding only keys for providers with no client is a third state,
+    # and reporting it as "no key" sends an operator to buy a credential they
+    # already have.
+    has_undrivable = not live_ready and bool(
+        [c for c in pool.credentials if c.enabled and c.vendor not in LIVE_DRIVABLE]
+    )
+    drivable = ", ".join(sorted(v.value for v in LIVE_DRIVABLE))
     entries.append(
         CapabilityReadiness(
             capability=Capability.LIVE_NUDGES,
             ready=live_ready,
-            missing=() if live_ready or live_key is None else (live_key,),
+            missing=() if live_ready else (live_key,),
             consequence=(
-                "Meetings still record and the audio is still kept, but nothing "
-                "is transcribed while people are talking, so no nudge ever "
-                "reaches the panel. The panel looks like it has nothing to say. "
-                "The live path uses Deepgram whichever vendor is selected."
+                (
+                    "Meetings still record and the audio is still kept, but the "
+                    "speech credentials configured are for providers this build "
+                    "cannot drive yet, so nothing is transcribed while people "
+                    f"are talking and no nudge reaches the panel. Live "
+                    f"transcription runs on: {drivable}."
+                )
+                if has_undrivable
+                else (
+                    "Meetings still record and the audio is still kept, but "
+                    "nothing is transcribed while people are talking, so no "
+                    "nudge ever reaches the panel. The panel looks like it has "
+                    f"nothing to say. Live transcription runs on: {drivable}."
+                )
             ),
         )
     )

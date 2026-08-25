@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from app.modules.settings.models import AuthMode, SecretKey, SpeechVendor
 from app.modules.settings.readiness import Capability, readiness_of
+from app.modules.settings.speech_credentials import SpeechCredential, SpeechCredentialPool
 
 
 def _configured(*keys: SecretKey) -> set[SecretKey]:
@@ -21,7 +22,7 @@ def _configured(*keys: SecretKey) -> set[SecretKey]:
 class TestWhatIsMissingAndWhatItCosts:
     def test_nothing_configured_reports_every_capability_unready(self):
         report = readiness_of(
-            configured=set(), auth_mode=AuthMode.API_KEY, live_vendor=SpeechVendor.DEEPGRAM
+            configured=set(), auth_mode=AuthMode.API_KEY
         )
 
         assert report, "an empty deployment must not read as ready"
@@ -31,7 +32,6 @@ class TestWhatIsMissingAndWhatItCosts:
         report = readiness_of(
             configured=_configured(SecretKey.ANTHROPIC_API_KEY),
             auth_mode=AuthMode.API_KEY,
-            live_vendor=SpeechVendor.DEEPGRAM,
         )
         live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
 
@@ -51,7 +51,6 @@ class TestWhatIsMissingAndWhatItCosts:
         report = readiness_of(
             configured=_configured(SecretKey.ANTHROPIC_OAUTH_TOKEN),
             auth_mode=AuthMode.API_KEY,
-            live_vendor=SpeechVendor.DEEPGRAM,
         )
         inference = next(e for e in report if e.capability is Capability.INFERENCE)
 
@@ -62,47 +61,47 @@ class TestWhatIsMissingAndWhatItCosts:
         report = readiness_of(
             configured=_configured(SecretKey.ANTHROPIC_OAUTH_TOKEN),
             auth_mode=AuthMode.OAUTH_TOKEN,
-            live_vendor=SpeechVendor.DEEPGRAM,
         )
         inference = next(e for e in report if e.capability is Capability.INFERENCE)
 
         assert inference.ready
 
-    def test_the_live_lane_needs_deepgram_whatever_the_vendor_setting_says(self):
-        """The live path is Deepgram-only in code, and the setting does not change it.
 
-        This asserted the opposite — that readiness follows `live_vendor` —
-        and passed, because it encoded a belief rather than the code. There is
-        no AssemblyAI live recogniser: `composition.py` builds
-        `deepgram_live_recogniser` and gates the fork on `DEEPGRAM_API_KEY`
-        regardless of the vendor chosen.
 
-        An operator whose vendor reads AssemblyAI, sent here to set an
-        AssemblyAI key, would set it and get the same silence — which is
-        precisely the afternoon this whole report exists to prevent.
+    def test_a_pooled_credential_satisfies_the_live_lane(self):
+        report = readiness_of(
+            configured=set(),
+            auth_mode=AuthMode.API_KEY,
+            pool=SpeechCredentialPool(
+                credentials=(
+                    SpeechCredential(id="dg1", vendor=SpeechVendor.DEEPGRAM),
+                ),
+            ),
+        )
+        live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
+
+        assert live.ready
+
+    def test_keys_for_a_provider_this_build_cannot_drive_are_not_silence(self):
+        """"No key" and "a key this build cannot use" are different problems.
+
+        One sends an operator to buy a credential; the other tells them the
+        one they already bought is for a provider with no client behind it
+        yet. Reporting them identically sends half of those operators to do
+        something they have already done.
         """
 
         report = readiness_of(
-            configured=_configured(SecretKey.ASSEMBLYAI_API_KEY),
+            configured=set(),
             auth_mode=AuthMode.API_KEY,
-            live_vendor=SpeechVendor.ASSEMBLYAI,
+            pool=SpeechCredentialPool(
+                credentials=(SpeechCredential(id="g1", vendor=SpeechVendor.GEMINI),),
+            ),
         )
         live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
 
         assert not live.ready
-        assert SecretKey.DEEPGRAM_API_KEY in live.missing
-        assert SecretKey.ASSEMBLYAI_API_KEY not in live.missing
-
-    def test_a_deepgram_key_makes_the_live_lane_ready_under_either_vendor(self):
-        for vendor in (SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI):
-            report = readiness_of(
-                configured=_configured(SecretKey.DEEPGRAM_API_KEY),
-                auth_mode=AuthMode.API_KEY,
-                live_vendor=vendor,
-            )
-            live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
-
-            assert live.ready, vendor
+        assert "cannot drive" in live.consequence.lower() or "no client" in live.consequence.lower()
 
     def test_the_key_that_does_nothing_is_not_offered_as_a_remedy(self):
         """`asr_vendor_api_key` is read by the probe dispatch and nothing else.
@@ -113,7 +112,7 @@ class TestWhatIsMissingAndWhatItCosts:
         """
 
         report = readiness_of(
-            configured=set(), auth_mode=AuthMode.API_KEY, live_vendor=SpeechVendor.DEEPGRAM
+            configured=set(), auth_mode=AuthMode.API_KEY
         )
         live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
 
@@ -128,7 +127,7 @@ class TestWhatIsMissingAndWhatItCosts:
         """
 
         report = readiness_of(
-            configured=set(), auth_mode=AuthMode.API_KEY, live_vendor=SpeechVendor.DEEPGRAM
+            configured=set(), auth_mode=AuthMode.API_KEY
         )
         links = next(e for e in report if e.capability is Capability.DOCUMENT_LINKS)
 
@@ -188,7 +187,6 @@ class TestSettingAKeyClearsItsWarning:
         saved = client.put(
             "/api/admin/settings",
             json={
-                "connectors": {"live_vendor": "deepgram"},
                 "secrets": [{"key": "deepgram_api_key", "value": "dg-the-key"}],
             },
         )
@@ -209,7 +207,6 @@ class TestSettingAKeyClearsItsWarning:
         client.put(
             "/api/admin/settings",
             json={
-                "connectors": {"live_vendor": "deepgram"},
                 "secrets": [{"key": "deepgram_api_key", "value": "dg-the-key"}],
             },
         )

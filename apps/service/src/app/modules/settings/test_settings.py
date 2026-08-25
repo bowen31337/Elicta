@@ -367,22 +367,32 @@ def test_cloud_providers_use_the_hosts_own_credentials() -> None:
 def test_a_custom_speech_service_can_be_configured() -> None:
     """An engagement may mandate a processor we have never heard of."""
 
-    from .models import ConnectorSettings, SpeechVendor
+    from .models import ConnectorSettings
 
     connectors = ConnectorSettings(
-        live_vendor=SpeechVendor.CUSTOM,
         custom_vendor_name="In-house STT",
         custom_base_url="https://stt.internal",
     )
 
-    assert connectors.live_vendor is SpeechVendor.CUSTOM
+    assert connectors.custom_base_url == "https://stt.internal"
 
 
 def test_a_custom_speech_service_without_an_endpoint_is_rejected() -> None:
+    """Asserted through the record pair now that the live path has no setting.
+
+    The rule is unchanged — a custom vendor without an endpoint is a meeting
+    that fails at the first call — and it was reached through `live_vendor`
+    only because that was the shortest way to name a custom vendor. The pool
+    chooses the live provider now; the record pair is where a vendor is still
+    named in settings.
+    """
+
     from .models import ConnectorSettings, SpeechVendor
 
     with pytest.raises(ValueError, match="custom_base_url"):
-        ConnectorSettings(live_vendor=SpeechVendor.CUSTOM)
+        ConnectorSettings(
+            record_vendors=[SpeechVendor.CUSTOM, SpeechVendor.DEEPGRAM]
+        )
 
 
 def test_the_record_pair_must_still_differ_even_when_custom() -> None:

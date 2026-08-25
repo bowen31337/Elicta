@@ -89,10 +89,10 @@ async def test_saving_connectors_alone_leaves_the_other_panels_untouched() -> No
 
     settings = await apply_settings_update(
         store,
-        SettingsUpdateRequest(connectors=ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM)),
+        SettingsUpdateRequest(connectors=ConnectorSettings(keyterm_prompting=False)),
     )
 
-    assert settings.connectors.live_vendor is SpeechVendor.DEEPGRAM
+    assert settings.connectors.keyterm_prompting is False
     assert settings.vendors.asr_base_url == "https://asr.example"
 
 
@@ -100,10 +100,10 @@ def test_writing_connectors_is_readable_back(tmp_path: Path) -> None:
     store = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
 
     store.write_vendors(VendorSettings(asr_base_url="https://asr.example"))
-    store.write_connectors(ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM))
+    store.write_connectors(ConnectorSettings(keyterm_prompting=False))
 
     reopened = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False).read()
-    assert reopened.connectors.live_vendor is SpeechVendor.DEEPGRAM
+    assert reopened.connectors.keyterm_prompting is False
     assert reopened.vendors.asr_base_url == "https://asr.example"
 
 

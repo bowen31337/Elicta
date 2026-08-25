@@ -1087,7 +1087,12 @@ def _vendor_probe_for(key: SecretKey, settings_store: SettingsStore) -> Any:
     if key is SecretKey.ASSEMBLYAI_API_KEY:
         return probe_for_vendor("assemblyai")
     if key is SecretKey.ASR_VENDOR_API_KEY:
-        return probe_for_vendor(settings_store.read().connectors.live_vendor.value)
+        # The pool decides which provider the live path uses, so there is no
+        # separate setting to consult. The generic key predates the pool and
+        # is probed against the provider the live path can actually drive.
+        from app.modules.settings.models import SpeechVendor
+
+        return probe_for_vendor(SpeechVendor.DEEPGRAM.value)
     return None
 
 
