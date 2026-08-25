@@ -38,6 +38,30 @@ export interface Resource<T> {
 
 export class ServiceUnreachable extends Error {}
 
+/**
+ * Everything currently waiting on a service that was not up when it asked.
+ *
+ * The shell brings the window up before the service answers — a frozen Python
+ * takes seconds to unpack, and blocking on it means no window at all for that
+ * long, which reads as an app that did not launch. The half that was missing
+ * is that the screens asked once: a genuine cold start made zero API requests
+ * for the life of the window and sat on "Cannot reach the service" against
+ * one that came up two seconds later.
+ *
+ * Deliberately a signal rather than a retry budget. The shell already knows
+ * when the service starts answering and now emits `service://ready`; guessing
+ * with a backoff instead would delay *every* genuine failure by the length of
+ * the guess, which is the one thing `useResource` exists to report promptly.
+ */
+const waiting = new Set<() => void>();
+
+/** Called when the shell says the service has started answering. */
+export function announceServiceReady(): void {
+  // Copied first: a listener that refetches and re-subscribes must not
+  // mutate the set being iterated.
+  for (const listener of [...waiting]) listener();
+}
+
 /** A GET that treats 404 as a value rather than a throw. */
 export async function fetchJson<T>(path: string): Promise<T | null> {
   let response: Response;
@@ -114,12 +138,22 @@ export function useResource<T>(path: string | null): Resource<T> {
     };
   }, [path, attempt]);
 
-  return {
-    data,
-    status,
-    error,
-    reload: useCallback(() => setAttempt((count) => count + 1), []),
-  };
+  const reload = useCallback(() => setAttempt((count) => count + 1), []);
+
+  // Only while this read has no answer. A screen showing data does not need
+  // re-asking because something else finally started, and re-asking every
+  // mounted resource on an announcement would be a thundering herd against a
+  // service that has just come up.
+  const unanswered = status === 'error';
+  useEffect(() => {
+    if (!unanswered) return;
+    waiting.add(reload);
+    return () => {
+      waiting.delete(reload);
+    };
+  }, [unanswered, reload]);
+
+  return { data, status, error, reload };
 }
 
 /** The worst of several statuses — what a screen assembled from more than one read should show. */

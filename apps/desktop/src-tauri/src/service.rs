@@ -65,6 +65,18 @@ pub fn start(state: &ServiceProcess) -> Result<(), String> {
 
     let child = Command::new(&binary)
         .env("ELICTA_SERVICE_PORT", SERVICE_PORT.to_string())
+        // Which process the service should end with. `stop` below covers a
+        // clean quit; a SIGTERM or a crash never runs it, and the service was
+        // left holding the port under launchd. That matters more than an
+        // ordinary leak because `start` only spawns when nothing already
+        // answers, so the next launch adopts the orphan — serving a stale
+        // backend from a binary since replaced on disk.
+        //
+        // Named explicitly rather than left to the service to look up: a
+        // PyInstaller onefile binary is two processes, and the one running
+        // the Python is a child of the bootloader, not of this. Asking its
+        // own parent gets it the bootloader, which outlives us.
+        .env("ELICTA_PARENT_PID", std::process::id().to_string())
         .spawn()
         .map_err(|cause| format!("the service would not start: {cause}"))?;
 

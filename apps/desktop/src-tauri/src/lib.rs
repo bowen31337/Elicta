@@ -28,9 +28,24 @@ pub fn run() {
             // they find; this only makes the difference between "starting" and
             // "never started" visible in the log, which is the distinction
             // nobody could make from the outside.
-            std::thread::spawn(|| {
+            //
+            // The window coming up first left the screens with a question
+            // nobody answered: they asked once, were refused by a service
+            // that had not finished unpacking, and sat on "Cannot reach the
+            // service" against one that came up two seconds later. A genuine
+            // cold start — nothing already holding the port — made zero API
+            // requests for the life of the window.
+            //
+            // So readiness is announced rather than left to be inferred. The
+            // front end reloads on it; guessing with a retry budget would
+            // have delayed every real failure by the length of the guess,
+            // and this is a fact already known here.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                use tauri::Emitter;
                 if service::wait_until_answering(std::time::Duration::from_secs(30)) {
                     eprintln!("elicta: the service is answering");
+                    let _ = handle.emit("service://ready", ());
                 } else {
                     eprintln!("elicta: the service did not answer within thirty seconds");
                 }
