@@ -47,6 +47,21 @@ offers the one step that would fill it. What is listed underneath is what the
 page will hold once a recording exists — worth saying while there is room to
 say it.
 
+## When one of them could not do it
+
+Each service is listed by name with what became of it, and if one could not
+transcribe, it says why in that service's own words — no credential, nothing
+to transcribe, a refusal from the company. That sentence is the one thing
+worth reading on this page when a figure looks wrong, and for a while it was
+the one thing the page would not tell you: it printed a fixed line instead,
+which said the other service had produced a transcript whether or not it had.
+When both had failed it said that twice, about a meeting with no transcript
+at all.
+
+It also shows the most recent attempt rather than every attempt ever made.
+Retrying a meeting a few times used to leave every one of those tries listed,
+so one meeting tried nine times read as nine broken services.
+
 ## It is still there tomorrow
 
 A checked recording is not something you have to deal with in one sitting.
