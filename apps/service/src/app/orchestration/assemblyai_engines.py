@@ -99,16 +99,83 @@ def to_batch_transcription(payload: Any, name: str) -> BatchTranscriptionOutput:
     return BatchTranscriptionOutput(
         engine=name,
         segments=[
+            segment
+            for utterance in utterances
+            for segment in _spans_of(utterance)
+        ],
+        text=payload.get("text", ""),
+    )
+
+
+#: A silence this long ends a span. Chosen to match Deepgram's `utt_split`
+#: default, because these two transcripts are compared against each other and
+#: the comparison is only meaningful at comparable granularity.
+_PAUSE_SECONDS = 0.8
+
+
+def _spans_of(utterance: dict) -> list[Any]:
+    """One speaker turn, cut into spans an alignment can actually compare.
+
+    `utterances` means different things at the two vendors, and the word
+    being the same hid it. Deepgram splits on silence, so a session arrives
+    as dozens of short spans; AssemblyAI splits on *speaker turn*, so one
+    person talking for ten minutes arrives as a single span covering the
+    whole meeting.
+
+    `align_transcripts` compares each reference span against the other
+    engine's overlapping text, and a span covering everything overlaps
+    everything — so every Deepgram span was scored against the entire
+    session. Measured on a real recording: 207 spans, 207 divergent, 0%
+    agreement, between two transcripts that plainly said the same thing.
+    Both engines reported `complete`, so nothing anywhere said it was wrong.
+
+    Cut on sentence end or on a pause, whichever comes first, which is as
+    close to Deepgram's own boundaries as this vendor's data allows.
+    """
+
+    speaker = str(utterance["speaker"])
+    words = utterance.get("words") or []
+    if not words:
+        # Nothing to cut on. One span, as before — an older response, or a
+        # turn the vendor sent unworded.
+        return [
             TranscriptSegment(
                 start_seconds=float(utterance["start"]) / 1000.0,
                 end_seconds=float(utterance["end"]) / 1000.0,
                 text=utterance["text"],
-                speaker=str(utterance["speaker"]),
+                speaker=speaker,
             )
-            for utterance in utterances
-        ],
-        text=payload.get("text", ""),
-    )
+        ]
+
+    spans: list[Any] = []
+    run: list[dict] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        spans.append(
+            TranscriptSegment(
+                start_seconds=float(run[0]["start"]) / 1000.0,
+                end_seconds=float(run[-1]["end"]) / 1000.0,
+                text=" ".join(word["text"] for word in run),
+                speaker=speaker,
+            )
+        )
+        run.clear()
+
+    for index, word in enumerate(words):
+        run.append(word)
+        text = str(word.get("text", ""))
+        following = words[index + 1] if index + 1 < len(words) else None
+        gap = (
+            (float(following["start"]) - float(word["end"])) / 1000.0
+            if following is not None
+            else 0.0
+        )
+        if text.endswith((".", "?", "!")) or gap >= _PAUSE_SECONDS:
+            flush()
+    flush()
+    return spans
 
 
 def assemblyai_record_engine(
