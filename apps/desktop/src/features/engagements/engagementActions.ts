@@ -1,4 +1,5 @@
 import { apiUrl } from '../../services/apiClient';
+import { invalidateResource } from '../../services/useResource';
 /**
  * Creating and removing a client engagement.
  *
@@ -101,4 +102,9 @@ export async function deleteEngagement(
     { method: 'DELETE' },
     options,
   );
+  // Every mounted read of the list, not merely the caller's own. The toolbar
+  // holds one too and is a different component: without this it went on
+  // naming the deleted client, and offering its meetings, because as far as
+  // its copy of the list was concerned the client still existed.
+  invalidateResource(apiUrl('/api/engagements'));
 }

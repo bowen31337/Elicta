@@ -62,6 +62,38 @@ export function announceServiceReady(): void {
   for (const listener of [...waiting]) listener();
 }
 
+/**
+ * Every mounted read, by the path it is a read of.
+ *
+ * `useResource` is otherwise per component instance — `useState` and an
+ * effect, no shared cache — which is deliberate and fine while a read is only
+ * a read. It stops being fine at a write: the Engagements screen deleting an
+ * engagement reloaded *its own* list, and the toolbar went on holding the
+ * answer it fetched at mount. The stored choice still matched a row in that
+ * copy, so the fallback for "the choice no longer exists" never ran and the
+ * toolbar kept naming a deleted client, with its meetings still beside it.
+ *
+ * A registry rather than a shared cache: two components asking the same
+ * question still each own their answer, and this only says when an answer has
+ * been overtaken.
+ */
+const mounted = new Map<string, Set<() => void>>();
+
+/**
+ * Tell every mounted read of a path, or of anything beneath it, to ask again.
+ *
+ * Called after a write, by the code that made it. Prefix rather than exact
+ * match because deleting an engagement invalidates its meetings too, and the
+ * caller should not have to enumerate what hangs off what.
+ */
+export function invalidateResource(path: string): void {
+  for (const [held, reloaders] of [...mounted]) {
+    if (held !== path && !held.startsWith(`${path}/`)) continue;
+    // Copied first, as above: a reloader may re-subscribe.
+    for (const reload of [...reloaders]) reload();
+  }
+}
+
 /** A GET that treats 404 as a value rather than a throw. */
 export async function fetchJson<T>(path: string): Promise<T | null> {
   let response: Response;
@@ -139,6 +171,20 @@ export function useResource<T>(path: string | null): Resource<T> {
   }, [path, attempt]);
 
   const reload = useCallback(() => setAttempt((count) => count + 1), []);
+
+  // Registered under the path so a write elsewhere can reach this read. A
+  // `null` path is a screen with nothing to ask for yet and registers
+  // nothing.
+  useEffect(() => {
+    if (path === null) return;
+    const reloaders = mounted.get(path) ?? new Set<() => void>();
+    reloaders.add(reload);
+    mounted.set(path, reloaders);
+    return () => {
+      reloaders.delete(reload);
+      if (reloaders.size === 0) mounted.delete(path);
+    };
+  }, [path, reload]);
 
   // Only while this read has no answer. A screen showing data does not need
   // re-asking because something else finally started, and re-asking every

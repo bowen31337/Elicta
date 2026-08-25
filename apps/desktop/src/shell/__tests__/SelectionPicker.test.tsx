@@ -220,3 +220,111 @@ describe('choosing a meeting', () => {
     await waitFor(() => expect(screen.queryByLabelText('Meeting')).not.toBeInTheDocument());
   });
 });
+
+describe('an engagement that has been deleted', () => {
+  /**
+   * Reported from the running app: delete the engagement you are on, and the
+   * toolbar still names it, with its meetings still in the dropdown beside it.
+   *
+   * `useResource` is per component instance — `useState` and an effect, no
+   * shared cache — so the Engagements screen reloading its own list left the
+   * toolbar holding the answer it fetched at mount. The stored choice still
+   * matched a row in *that* copy, so the fallback for "the choice no longer
+   * exists" never ran: as far as the toolbar could tell, it still existed.
+   */
+  function stubDeletable(): { removed: Set<string> } {
+    const removed = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          removed.add(path.replace('/api/engagements/', ''));
+          return jsonResponse({}, 204);
+        }
+        if (path === '/api/engagements') {
+          return jsonResponse({
+            items: ENGAGEMENTS.items.filter((e) => !removed.has(e.engagement_id)),
+            total: ENGAGEMENTS.items.length - removed.size,
+          });
+        }
+        const meetings = /^\/api\/engagements\/([^/]+)\/meetings$/.exec(path);
+        if (meetings) return jsonResponse(MEETINGS[decodeURIComponent(meetings[1])]);
+        return jsonResponse(null, 404);
+      }),
+    );
+    return { removed };
+  }
+
+  it('stops naming it in the toolbar, and takes its meetings with it', async () => {
+    window.localStorage.setItem('elicta.selection.engagementId', 'eng-1');
+    stubDeletable();
+    const { deleteEngagement } = await import(
+      '../../features/engagements/engagementActions'
+    );
+    render(<SelectionPicker />);
+    await waitFor(() => expect(screen.getByLabelText('Engagement')).toHaveValue('eng-1'));
+    // eng-1's meetings, which must not outlive it either.
+    await waitFor(() =>
+      expect(
+        [...(screen.getByLabelText('Meeting') as HTMLSelectElement).options].length,
+      ).toBeGreaterThan(0),
+    );
+
+    await deleteEngagement('eng-1');
+
+    await waitFor(() =>
+      expect(
+        [...(screen.getByLabelText('Engagement') as HTMLSelectElement).options].map(
+          (option) => option.textContent,
+        ),
+      ).toEqual(['Southbank Utilities']),
+    );
+    expect(screen.getByLabelText('Engagement')).toHaveValue('eng-2');
+    // And its meetings went with it. Southbank has none, so a dropdown still
+    // offering "Discovery 1" would be one client's meeting under another
+    // client's name.
+    await waitFor(() =>
+      expect(screen.queryByText('Discovery 1')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('stops offering a meeting that has been deleted', async () => {
+    /* The same staleness one level down, and the same toolbar. The prep
+       screen deletes a meeting and reloads its own list; the dropdown beside
+       the engagement name is a different component and kept offering it. */
+    window.localStorage.setItem('elicta.selection.engagementId', 'eng-1');
+    const gone = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          gone.add(path.replace('/api/meetings/', ''));
+          return jsonResponse({}, 204);
+        }
+        if (path === '/api/engagements') return jsonResponse(ENGAGEMENTS);
+        const meetings = /^\/api\/engagements\/([^/]+)\/meetings$/.exec(path);
+        if (meetings) {
+          const body = MEETINGS[decodeURIComponent(meetings[1])] as {
+            engagement_id: string;
+            meetings: { meeting_id: string }[];
+          };
+          return jsonResponse({
+            ...body,
+            meetings: body.meetings.filter((m) => !gone.has(m.meeting_id)),
+          });
+        }
+        return jsonResponse(null, 404);
+      }),
+    );
+    const { deleteMeeting } = await import('../../features/prep/prepActions');
+    render(<SelectionPicker />);
+    await screen.findByText('Discovery 1');
+
+    await deleteMeeting('meeting-1');
+
+    await waitFor(() =>
+      expect(screen.queryByText('Discovery 1')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Discovery 2')).toBeInTheDocument();
+  });
+});

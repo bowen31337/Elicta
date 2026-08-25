@@ -1,5 +1,6 @@
 import type { DocumentStatus, VocabularyTermType } from './types';
 import { apiUrl } from '../../services/apiClient';
+import { invalidateResource } from '../../services/useResource';
 
 /**
  * The writes the preparation screen makes (PRD FR-3.1, FR-3.2, FR-3.6, FR-4.8).
@@ -145,6 +146,12 @@ export async function deleteMeeting(
   options: PrepActionOptions = {},
 ): Promise<void> {
   await send(apiUrl(`/api/meetings/${id(meetingId)}`), { method: 'DELETE' }, options);
+  // The toolbar's meeting dropdown is a different component holding its own
+  // copy of the list, so reloading this screen's leaves it offering a meeting
+  // that is gone. Invalidated from the engagements root because the id of the
+  // engagement this meeting belonged to is not in hand here, and a refetch of
+  // a list that did not change costs one request.
+  invalidateResource(apiUrl('/api/engagements'));
 }
 
 export interface DocumentLink {
