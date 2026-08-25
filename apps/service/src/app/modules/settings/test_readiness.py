@@ -68,18 +68,56 @@ class TestWhatIsMissingAndWhatItCosts:
 
         assert inference.ready
 
-    def test_the_live_lane_follows_the_selected_vendor(self):
-        """A Deepgram key does not make an AssemblyAI live lane work."""
+    def test_the_live_lane_needs_deepgram_whatever_the_vendor_setting_says(self):
+        """The live path is Deepgram-only in code, and the setting does not change it.
+
+        This asserted the opposite — that readiness follows `live_vendor` —
+        and passed, because it encoded a belief rather than the code. There is
+        no AssemblyAI live recogniser: `composition.py` builds
+        `deepgram_live_recogniser` and gates the fork on `DEEPGRAM_API_KEY`
+        regardless of the vendor chosen.
+
+        An operator whose vendor reads AssemblyAI, sent here to set an
+        AssemblyAI key, would set it and get the same silence — which is
+        precisely the afternoon this whole report exists to prevent.
+        """
 
         report = readiness_of(
-            configured=_configured(SecretKey.DEEPGRAM_API_KEY),
+            configured=_configured(SecretKey.ASSEMBLYAI_API_KEY),
             auth_mode=AuthMode.API_KEY,
             live_vendor=SpeechVendor.ASSEMBLYAI,
         )
         live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
 
         assert not live.ready
-        assert SecretKey.ASSEMBLYAI_API_KEY in live.missing
+        assert SecretKey.DEEPGRAM_API_KEY in live.missing
+        assert SecretKey.ASSEMBLYAI_API_KEY not in live.missing
+
+    def test_a_deepgram_key_makes_the_live_lane_ready_under_either_vendor(self):
+        for vendor in (SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI):
+            report = readiness_of(
+                configured=_configured(SecretKey.DEEPGRAM_API_KEY),
+                auth_mode=AuthMode.API_KEY,
+                live_vendor=vendor,
+            )
+            live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
+
+            assert live.ready, vendor
+
+    def test_the_key_that_does_nothing_is_not_offered_as_a_remedy(self):
+        """`asr_vendor_api_key` is read by the probe dispatch and nothing else.
+
+        A key typed there is stored, reported configured, and transcribes
+        nothing. Naming it here would send an operator to fill in the field
+        that already failed them.
+        """
+
+        report = readiness_of(
+            configured=set(), auth_mode=AuthMode.API_KEY, live_vendor=SpeechVendor.DEEPGRAM
+        )
+        live = next(e for e in report if e.capability is Capability.LIVE_NUDGES)
+
+        assert SecretKey.ASR_VENDOR_API_KEY not in live.missing
 
     def test_document_links_are_reported_separately_from_uploads(self):
         """Graph credentials are optional in a way a speech key is not.

@@ -32,35 +32,34 @@ from .models import (
 )
 
 
-def _vendor_key(vendor: SpeechVendor) -> SecretKey | None:
-    """The secret a speech vendor authenticates with.
-
-    `CUSTOM` names a vendor this service has no client for, so no key of ours
-    would help — reported as nothing missing rather than as a key to go and
-    find.
-    """
-
-    if vendor is SpeechVendor.DEEPGRAM:
-        return SecretKey.DEEPGRAM_API_KEY
-    if vendor is SpeechVendor.ASSEMBLYAI:
-        return SecretKey.ASSEMBLYAI_API_KEY
-    return None
-
-
 def readiness_of(
     *,
     configured: set[SecretKey],
     auth_mode: AuthMode,
     live_vendor: SpeechVendor,
 ) -> list[CapabilityReadiness]:
-    """Each capability, whether it can run, and what it costs if it cannot."""
+    """Each capability, whether it can run, and what it costs if it cannot.
+
+    `live_vendor` is taken and deliberately not used for the live lane — see
+    the comment there. It stays in the signature because the day a second live
+    recogniser exists, this is the argument that decides, and a caller already
+    passing it is one less thing to remember then.
+    """
 
     inference_key = (
         SecretKey.ANTHROPIC_API_KEY
         if auth_mode is AuthMode.API_KEY
         else SecretKey.ANTHROPIC_OAUTH_TOKEN
     )
-    live_key = _vendor_key(live_vendor)
+    # Deliberately not `live_vendor`'s key. The live path has one
+    # implementation — `composition.py` builds `deepgram_live_recogniser` and
+    # gates the fork on `DEEPGRAM_API_KEY` — and the vendor selector has no
+    # second recogniser behind it. Following the setting here sent an operator
+    # whose vendor read AssemblyAI to set an AssemblyAI key, which is stored,
+    # reported configured, and transcribes nothing: the same silence they came
+    # here to fix. This report is only worth reading if it names the key the
+    # code actually reads.
+    live_key = SecretKey.DEEPGRAM_API_KEY
 
     entries: list[CapabilityReadiness] = []
 
@@ -85,7 +84,8 @@ def readiness_of(
             consequence=(
                 "Meetings still record and the audio is still kept, but nothing "
                 "is transcribed while people are talking, so no nudge ever "
-                "reaches the panel. The panel looks like it has nothing to say."
+                "reaches the panel. The panel looks like it has nothing to say. "
+                "The live path uses Deepgram whichever vendor is selected."
             ),
         )
     )
