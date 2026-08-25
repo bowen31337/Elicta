@@ -814,6 +814,27 @@ def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
     return read
 
 
+def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
+    """Drop every live session for this meeting.
+
+    Module level because the two moments a session ends sit in different
+    scopes — starting the next one, and handing the audio to the record path.
+
+    Dropped rather than flagged: the only reader is the "what is being
+    recorded right now" listing, and nothing else in the service asks
+    `live_sessions` anything. What a finished session leaves behind — its
+    engagement, its audio, its transcripts — is keyed elsewhere and is
+    deliberately untouched here.
+    """
+
+    for session_id in [
+        key
+        for key, session in backend.live_sessions.items()
+        if session.meeting_id == meeting_id
+    ]:
+        del backend.live_sessions[session_id]
+
+
 def _engagement_of_meeting(backend: Backend, meeting_id: str) -> str | None:
     """Which engagement a meeting belongs to, or `None` if nothing knows.
 
@@ -1635,6 +1656,14 @@ def build_app(
         """
 
         backend.retained_audio[session_id] = audio_ref
+        # And it is the end of the meeting. The desktop posts this when the
+        # operator presses Stop, and there is no other end-of-meeting signal
+        # to hang this on — the app has no "end session" call at all, so
+        # without this a meeting that is stopped and not started again stays
+        # listed as live until the process exits. `session_id` here is the id
+        # the chunks were posted under, which the desktop sends as the
+        # meeting's.
+        _end_live_sessions_of(backend, session_id)
 
     app.include_router(
         _asr_router.build_record_path_router(
@@ -2098,6 +2127,12 @@ def _include_operational_routers(
             # second half of the pair so a future caller that skips admission
             # still cannot start a session against nothing.
             return None  # pragma: no cover
+        # A meeting has one live session. Starting a second used to leave the
+        # first listed for the life of the process, because nothing anywhere
+        # removed one — `live_sessions` was written on start and read for the
+        # listing and touched nowhere else. A recorder that stopped and
+        # started again showed up as two meetings being recorded at once.
+        _end_live_sessions_of(backend, meeting_id)
         backend.next_session_id += 1
         started = SessionStart(
             session_id=f"session-{backend.next_session_id}",
