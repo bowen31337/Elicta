@@ -95,9 +95,12 @@ class TestWhichHarnessTheCredentialGets:
         from app.orchestration.agent_sdk_engines import AGENT_SDK
         from app.orchestration.anthropic_engines import engines_from_settings
 
-        _debrief, compiler = engines_from_settings(self._store(AuthMode.OAUTH_TOKEN))
+        debrief, compiler = engines_from_settings(self._store(AuthMode.OAUTH_TOKEN))
 
         assert compiler.name == AGENT_SDK
+        # Both halves, or the credential drafts a bank and then cannot write
+        # up the meeting it was drafted for.
+        assert debrief.name == AGENT_SDK
 
     def test_an_api_key_keeps_the_messages_api_and_its_batch(self):
         from app.modules.settings.models import AuthMode
@@ -179,3 +182,72 @@ class TestTestingTheCredentialTheWayItWillBeUsed:
         )
 
         assert seen and "/v1/messages" in str(seen[0].url)
+
+
+class TestTheDebriefEngineOnTheAgentSdk:
+    """ADR-012 puts the debrief engine on the Agent SDK too.
+
+    It shipped on the Messages API alongside the compiler, which is fine for
+    an API key and refuses an OAuth token — so a credential that drafts a
+    bank could not write up the meeting afterwards.
+    """
+
+    def _engines(self, answer: str):
+        from app.orchestration.agent_sdk_engines import agent_sdk_debrief_engines
+
+        async def run(_system: str, _prompt: str) -> str:
+            return answer
+
+        return agent_sdk_debrief_engines(run=run)
+
+    def test_it_names_the_harness_it_ran_on(self):
+        from app.orchestration.agent_sdk_engines import AGENT_SDK
+
+        assert self._engines("{}").name == AGENT_SDK
+
+    def test_cleaning_reuses_the_messages_api_stage_logic(self):
+        """The gap handling is not reimplemented.
+
+        An utterance the model skips keeps its own words rather than another
+        utterance's, and the same must hold on both harnesses — it is the one
+        failure that corrupts artifacts while still looking well-formed.
+        """
+
+        import asyncio
+        import types
+
+        engines = self._engines(
+            '{"lines": [{"utterance": 1, "cleaned_text": "first, tidied"}]}'
+        )
+        utterances = [
+            types.SimpleNamespace(text="first, um, tidied"),
+            types.SimpleNamespace(text="second, untouched"),
+        ]
+
+        cleaned = asyncio.run(engines.clean("session-1", utterances))
+
+        assert cleaned[0] == "first, tidied"
+        # The skipped one keeps its own words.
+        assert cleaned[1] == "second, untouched"
+
+    def test_conversing_returns_content_blocks_the_way_the_screen_persists_them(self):
+        import asyncio
+
+        engines = self._engines("Here is what I found.")
+
+        blocks = asyncio.run(engines.converse([{"role": "user", "content": "hi"}]))
+
+        assert blocks == [{"type": "text", "text": "Here is what I found."}]
+
+    def test_diarize_is_passed_through_untouched(self):
+        """A speech-vendor seam, not a model call — this module supplies neither."""
+
+        import asyncio
+
+        from app.orchestration.agent_sdk_engines import agent_sdk_debrief_engines
+        from app.orchestration.engines import EngineNotConfiguredError
+
+        engines = agent_sdk_debrief_engines(run=lambda *_a: None)
+
+        with pytest.raises(EngineNotConfiguredError):
+            asyncio.run(engines.diarize("session-1"))

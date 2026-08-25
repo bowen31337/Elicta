@@ -403,10 +403,15 @@ def test_testing_an_oauth_token_probes_it_in_its_own_mode(
     assert response.status_code == 200, response.text
     assert response.json()["reachable"] is False
     assert "oat-not-real" not in response.text
-    # The token's own pairing, whatever mode happens to be selected: a bearer
-    # without the beta flag returns a 401 that reads like a bad credential.
-    assert vendor_refuses[0].headers["authorization"] == "Bearer oat-not-real"
-    assert "oauth-2025-04-20" in vendor_refuses[0].headers["anthropic-beta"]
+    # And probed on the surface this credential is actually used on. An OAuth
+    # token runs the compiler and the debrief engine through the Agent SDK, so
+    # a probe that called `/v1/messages` would report the 429 it is refused
+    # with there — a failing verdict for a credential that drafts a bank.
+    # Nothing may have gone to the Messages API on its behalf.
+    assert vendor_refuses == [], (
+        "the OAuth token was probed on the Messages API, which is not the "
+        "surface it runs on"
+    )
 
 
 def test_testing_a_speech_key_uses_the_probe_for_the_configured_vendor(

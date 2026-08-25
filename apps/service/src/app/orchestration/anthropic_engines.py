@@ -543,16 +543,29 @@ def anthropic_debrief_engines(
     *,
     model: str = DEFAULT_MODEL,
     diarize: Any = None,
+    parse: Any = None,
+    converse_raw: Any = None,
 ) -> DebriefEngines:
     """The four text stages of §7, backed by Claude.
 
     `diarize` is passed through untouched: it is a speech-vendor seam, not a
     model call, so this module neither supplies nor wraps it.
+
+    `parse` and `converse_raw` are the two model calls the stages make, and
+    they are injectable so another harness can supply them without a second
+    copy of the stages. ADR-012 puts the debrief engine on the Agent SDK, and
+    everything that makes these stages worth trusting is *after* the model
+    call — the per-utterance alignment, the gap handling FR-2.19 asks for, the
+    strict zips. Writing those twice is how one harness quietly stops matching
+    the other on the failure that corrupts artifacts while still looking
+    well-formed.
     """
 
-    client = client or AsyncAnthropic()
-
     async def _parse(system: str, prompt: str, schema: type[BaseModel]) -> Any:
+        if parse is not None:
+            return await parse(system, prompt, schema)
+        nonlocal client
+        client = client or AsyncAnthropic()
         response = await client.messages.parse(
             model=model,
             max_tokens=MAX_TOKENS,
@@ -655,6 +668,10 @@ def anthropic_debrief_engines(
         verbatim and replays them back as the next turn's history.
         """
 
+        if converse_raw is not None:
+            return await converse_raw(_DEBRIEF_CONVERSATION_SYSTEM, turns)
+        nonlocal client
+        client = client or AsyncAnthropic()
         response = await client.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
@@ -1099,20 +1116,28 @@ def engines_from_settings(
     # cannot draft a bank at all. The credential decides the harness because
     # only one harness will accept it.
     compiler: CompilerEngines
+    debrief: DebriefEngines
     if settings.inference.auth_mode is AuthMode.OAUTH_TOKEN:
-        from .agent_sdk_engines import agent_sdk_compiler_engines
+        from .agent_sdk_engines import (
+            agent_sdk_compiler_engines,
+            agent_sdk_debrief_engines,
+        )
 
         token = store.get_secret(SecretKey.ANTHROPIC_OAUTH_TOKEN)
-        compiler = agent_sdk_compiler_engines(
-            oauth_token=token.reveal() if token else None, model=model
+        revealed = token.reveal() if token else None
+        compiler = agent_sdk_compiler_engines(oauth_token=revealed, model=model)
+        # Both halves, or the credential drafts a bank and then cannot write
+        # up the meeting the bank was drafted for. ADR-012 puts the debrief
+        # engine on the Agent SDK anyway; with this credential it is the only
+        # harness that will take it.
+        debrief = agent_sdk_debrief_engines(
+            oauth_token=revealed, model=model, diarize=diarize
         )
     else:
         compiler = anthropic_compiler_engines(client, model=model)
+        debrief = anthropic_debrief_engines(client, model=model, diarize=diarize)
 
-    return (
-        anthropic_debrief_engines(client, model=model, diarize=diarize),
-        compiler,
-    )
+    return (debrief, compiler)
 
 
 def configured_engines(

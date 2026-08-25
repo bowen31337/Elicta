@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from app.modules.compiler.agent.models import (
@@ -51,6 +52,7 @@ from app.orchestration.anthropic_engines import (
     _StructuringOut,
     _upstream_aware,
     analyst_prompt,
+    anthropic_debrief_engines,
 )
 from app.orchestration.engines import (
     STAGE_EXTRACT,
@@ -59,6 +61,7 @@ from app.orchestration.engines import (
     STAGE_STRUCTURE,
     STAGE_SUBMIT_BATCH,
     CompilerEngines,
+    DebriefEngines,
     UpstreamFailure,
     UpstreamUnavailableError,
 )
@@ -309,3 +312,71 @@ async def probe_agent_sdk_credential(
         raise AgentSdkUnavailableError(
             "the agent loop ended without an assistant turn"
         )
+
+
+def agent_sdk_debrief_engines(
+    *,
+    oauth_token: str | None = None,
+    model: str = DEFAULT_MODEL,
+    diarize: Any = None,
+    run: Callable[[str, str], Awaitable[str]] | None = None,
+) -> DebriefEngines:
+    """The §7 debrief pipeline, run through the Claude Agent SDK (ADR-012).
+
+    Built by handing the Messages API factory its two model calls rather than
+    by writing the stages again. Everything that makes those stages worth
+    trusting happens *after* the model answers — the per-utterance alignment,
+    the FR-2.19 gap handling that keeps a skipped utterance's own words rather
+    than its neighbour's, the strict zips — and a second copy is how one
+    harness quietly stops matching the other on precisely the failure that
+    corrupts artifacts while still looking well-formed.
+    """
+
+    call = run or _default_run(oauth_token=oauth_token, model=model)
+
+    async def parse(system: str, prompt: str, schema: Any) -> Any:
+        answer = await call(_schema_instructed(system, schema), prompt)
+        return schema.model_validate(json_payload(answer))
+
+    async def converse_raw(system: str, turns: list[Any]) -> list[dict[str, Any]]:
+        """One turn of the FR-7.3 conversation.
+
+        The caller persists these blocks verbatim and replays them as the next
+        turn's history, so the shape has to match what the Messages API
+        returns. The agent loop yields text, which is one text block — said
+        here rather than left for the caller to discover from a `KeyError` two
+        screens away.
+        """
+
+        prompt = _conversation_prompt(turns)
+        answer = await call(system, prompt)
+        return [{"type": "text", "text": answer}]
+
+    engines = anthropic_debrief_engines(
+        model=model, diarize=diarize, parse=parse, converse_raw=converse_raw
+    )
+    return replace(engines, name=AGENT_SDK)
+
+
+def _conversation_prompt(turns: list[Any]) -> str:
+    """The conversation so far, flattened for a single-turn agent call.
+
+    The Messages API takes the turns as history; one turn through the agent
+    loop takes a prompt. Roles are labelled rather than dropped, because who
+    said what is most of what the answer depends on.
+    """
+
+    lines: list[str] = []
+    for turn in turns:
+        role = turn.get("role", "user") if isinstance(turn, dict) else "user"
+        content = turn.get("content", "") if isinstance(turn, dict) else ""
+        if isinstance(content, list):
+            text = "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        else:
+            text = str(content)
+        lines.append(f"{role}: {text}")
+    return "\n\n".join(lines)
