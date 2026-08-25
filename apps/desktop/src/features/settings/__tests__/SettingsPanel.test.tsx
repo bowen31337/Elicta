@@ -17,7 +17,6 @@ const CONFIGURED: ServiceSettings = {
   },
   vendors: { asr_base_url: null, capture_base_url: null },
   connectors: {
-    live_vendor: 'assemblyai',
     record_vendors: ['deepgram', 'assemblyai'],
     keyterm_prompting: true,
     disable_vendor_retention: true,
@@ -27,8 +26,8 @@ const CONFIGURED: ServiceSettings = {
   secrets: [
     { key: 'anthropic_api_key', configured: true, hint: 'abcd' },
     { key: 'anthropic_oauth_token', configured: false, hint: null },
-    { key: 'asr_vendor_api_key', configured: false, hint: null },
   ],
+  speech: { credentials: [], policy: 'single', active_id: null },
   durable: true,
 };
 
@@ -40,6 +39,11 @@ function controller(overrides: Partial<UseSettingsResult> = {}): UseSettingsResu
     error: null,
     save: vi.fn().mockResolvedValue(true),
     test: vi.fn().mockResolvedValue('Verified (…abcd).'),
+    addSpeechKey: vi.fn().mockResolvedValue(null),
+    setSpeechKeyEnabled: vi.fn().mockResolvedValue(null),
+    removeSpeechKey: vi.fn().mockResolvedValue(null),
+    testSpeechKey: vi.fn().mockResolvedValue('Verified (…8285).'),
+    setSpeechPolicy: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -53,6 +57,19 @@ function controller(overrides: Partial<UseSettingsResult> = {}): UseSettingsResu
 async function openTab(label: string) {
   await userEvent.click(screen.getByRole('tab', { name: new RegExp(`^${label}\\b`) }));
 }
+
+/** Two providers, so the list has to tell them apart. */
+const WITH_SPEECH_KEYS: ServiceSettings = {
+  ...CONFIGURED,
+  speech: {
+    policy: 'single',
+    active_id: 'a',
+    credentials: [
+      { id: 'a', vendor: 'deepgram', label: 'Northwind', enabled: true },
+      { id: 'b', vendor: 'assemblyai', label: 'spare', enabled: true },
+    ],
+  },
+};
 
 describe('SettingsPanel', () => {
   it('never prefills a secret input, because the service never returns one', () => {
@@ -79,7 +96,7 @@ describe('SettingsPanel', () => {
 
     await openTab('Speech');
 
-    expect(screen.getByText('No key is stored yet.')).toBeInTheDocument();
+    expect(screen.getByText(/No key yet/)).toBeInTheDocument();
   });
 
   it('does not send a secret the operator did not type', async () => {
@@ -132,7 +149,10 @@ describe('SettingsPanel', () => {
 
     await openTab('Speech');
 
-    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
+    // Not a disabled button: with an empty pool there is no key for one to
+    // belong to. A Test button with nothing to test is a control that can
+    // only ever disappoint.
+    expect(screen.queryByRole('button', { name: 'Test' })).not.toBeInTheDocument();
   });
 
   it('reports the outcome of a credential test next to the field', async () => {
@@ -261,29 +281,25 @@ describe('SettingsPanel', () => {
     expect(screen.getByText(/Anthropic API key is also stored/)).toBeInTheDocument();
   });
 
-  it('lets the operator choose the live transcription vendor', async () => {
-    const save = vi.fn().mockResolvedValue(true);
-    render(<SettingsPanel controller={controller({ save })} />);
-
-    await openTab('Speech');
-    await userEvent.selectOptions(
-      screen.getByLabelText('Live transcription'),
-      'deepgram',
+  it('chooses how the pool serves, rather than which vendor does', async () => {
+    // There is no live-vendor setting any more, and its absence is the point:
+    // adding a credential *is* choosing a provider, so a separate dropdown
+    // could only ever disagree with the pool. It did — a key labelled for one
+    // vendor was probed against another.
+    const setSpeechPolicy = vi.fn().mockResolvedValue(null);
+    render(
+      <SettingsPanel controller={controller({ settings: WITH_SPEECH_KEYS, setSpeechPolicy })} />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(save.mock.calls[0][0].connectors.live_vendor).toBe('deepgram');
-  });
-
-  it('explains the live vendor choice in the operator\'s terms', async () => {
-    render(<SettingsPanel controller={controller()} />);
 
     await openTab('Speech');
+    expect(screen.queryByLabelText('Live transcription')).not.toBeInTheDocument();
 
-    expect(
-      screen.getByText(/Ends a turn when the sentence sounds finished/),
-    ).toBeInTheDocument();
+    await userEvent.selectOptions(
+      screen.getByLabelText('When there is more than one'),
+      'rotate',
+    );
+
+    await waitFor(() => expect(setSpeechPolicy).toHaveBeenCalledWith('rotate'));
   });
 
   it('shows the two recording engines that cross-check each other', async () => {
@@ -404,14 +420,28 @@ describe('SettingsPanel', () => {
   });
 
   it('lets the operator bring a speech service we do not ship support for', async () => {
-    render(<SettingsPanel controller={controller()} />);
+    render(
+      <SettingsPanel
+        controller={controller({
+          settings: {
+            ...CONFIGURED,
+            speech: {
+              policy: 'single',
+              active_id: null,
+              credentials: [
+                { id: 'x', vendor: 'custom', label: 'in-house', enabled: true },
+              ],
+            },
+          },
+        })}
+      />,
+    );
 
     await openTab('Speech');
-    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'custom');
 
-    expect(
-      screen.getByLabelText('Custom speech service endpoint'),
-    ).toBeInTheDocument();
+    // The endpoint field follows the pool: holding a key for a service we do
+    // not ship support for is what makes "where do we reach it?" a question.
+    expect(screen.getByLabelText('Custom speech service endpoint')).toBeInTheDocument();
   });
 });
 
@@ -449,79 +479,61 @@ describe('reading the screen at a glance', () => {
     await openTab('Speech');
 
     const speech = screen.getByRole('region', { name: 'Speech to text' });
-    expect(within(speech).getByLabelText('AssemblyAI key')).toBeInTheDocument();
+    expect(within(speech).getByLabelText('Add a speech key')).toBeInTheDocument();
     expect(screen.queryByLabelText('Anthropic API key')).not.toBeInTheDocument();
   });
 
-  it('names the speech key after the vendor that issues it', async () => {
+  it('names each key by the provider that issued it', async () => {
     // "Speech-to-text vendor key" named a category. An operator has a tab open
-    // on a vendor's console, and that is the name they are looking for.
-    render(<SettingsPanel controller={controller()} />);
+    // on a provider's console, and that is the name they are looking for.
+    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEYS })} />);
 
     await openTab('Speech');
 
-    expect(screen.getByLabelText('AssemblyAI key')).toBeInTheDocument();
-
-    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
-
-    expect(screen.getByLabelText('Deepgram key')).toBeInTheDocument();
+    const rows = screen.getAllByRole('listitem');
+    expect(within(rows[0]).getByText('Deepgram')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('AssemblyAI')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Northwind')).toBeInTheDocument();
   });
 
-  /**
-   * A speech key that the service already holds, so the Test button is live.
-   * The bug this guards needs both halves: a testable key, and a vendor the
-   * operator can change out from under it.
-   */
-  const WITH_SPEECH_KEY: ServiceSettings = {
-    ...CONFIGURED,
-    secrets: CONFIGURED.secrets.map((secret) =>
-      secret.key === 'asr_vendor_api_key'
-        ? { ...secret, configured: true, hint: '8285' }
-        : secret,
-    ),
-  };
-
-  it('will not test a speech key against a vendor the service has not been told about', async () => {
-    // The field is renamed the moment the dropdown changes, but the service
-    // probes whichever vendor it has *saved*. Testing across that gap answered
+  it('tests the key that was asked about, and no other', async () => {
+    // The single field this replaced was probed against whichever vendor the
+    // service had *saved*, so changing the dropdown above it produced
     // "Deepgram rejected the credential (401)" underneath a field labelled
-    // "AssemblyAI key" -- an answer about a question the operator never asked.
-    const test = vi.fn().mockResolvedValue('Deepgram rejected the credential (401)');
-    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY, test })} />);
+    // "AssemblyAI key" -- an answer to a question nobody asked. A pooled key
+    // carries its own provider, so the only thing left to get wrong is which
+    // row the verdict lands in.
+    const testSpeechKey = vi.fn().mockResolvedValue('AssemblyAI rejected the key (401)');
+    render(
+      <SettingsPanel controller={controller({ settings: WITH_SPEECH_KEYS, testSpeechKey })} />,
+    );
 
     await openTab('Speech');
-    expect(screen.getByRole('button', { name: 'Test' })).toBeEnabled();
+    const rows = screen.getAllByRole('listitem');
+    await userEvent.click(within(rows[1]).getByRole('button', { name: 'Test' }));
 
-    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
-
-    expect(screen.getByLabelText('Deepgram key')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
-    expect(test).not.toHaveBeenCalled();
-  });
-
-  it('says why a speech key cannot be tested yet, rather than greying out silently', async () => {
-    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY })} />);
-
-    await openTab('Speech');
-    await userEvent.selectOptions(screen.getByLabelText('Live transcription'), 'deepgram');
-
+    expect(testSpeechKey).toHaveBeenCalledWith('b');
+    expect(within(rows[1]).getByText('AssemblyAI rejected the key (401)')).toBeInTheDocument();
     expect(
-      screen.getByText(/Save first .* still set up for AssemblyAI/),
-    ).toBeInTheDocument();
+      within(rows[0]).queryByText('AssemblyAI rejected the key (401)'),
+    ).not.toBeInTheDocument();
   });
 
-  it('will not test a stored key while an unsaved one is in the box', async () => {
-    // A test checks the key the service holds. With a new key typed in and not
-    // saved, a verdict about the old one reads as a verdict about the new one.
-    const test = vi.fn();
-    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEY, test })} />);
+  it('has no unsaved speech key for a test to answer about', async () => {
+    // Two guards used to live here, both about the same gap: a test asks the
+    // service about the key it has *stored*, and the single field could be
+    // renamed to another vendor or refilled with another key without the
+    // service being told. A pooled key is stored the moment it is added and
+    // carries its own provider, so neither half of that gap is reachable —
+    // and the "Save first" warnings that papered over it are gone with it.
+    render(<SettingsPanel controller={controller({ settings: WITH_SPEECH_KEYS })} />);
 
     await openTab('Speech');
-    await userEvent.type(screen.getByLabelText('AssemblyAI key'), 'a-new-key');
 
-    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
-    expect(screen.getByText(/Save first .* the key it has stored/)).toBeInTheDocument();
-    expect(test).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Save first/)).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: 'Test' })) {
+      expect(button).toBeEnabled();
+    }
   });
 
   it('calls meeting capture optional, because it is', async () => {
@@ -592,11 +604,13 @@ describe('the tab bar', () => {
         controller={controller({
           settings: {
             ...CONFIGURED,
-            secrets: CONFIGURED.secrets.map((secret) =>
-              secret.key === 'asr_vendor_api_key'
-                ? { ...secret, configured: true, hint: 'wxyz' }
-                : secret,
-            ),
+            speech: {
+              policy: 'single',
+              active_id: null,
+              credentials: [
+                { id: 'a', vendor: 'deepgram', label: 'Northwind', enabled: true },
+              ],
+            },
           },
         })}
       />,

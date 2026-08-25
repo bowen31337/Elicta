@@ -54,6 +54,23 @@ class SpeechPolicyUpdate(BaseModel):
     active_id: str | None = None
 
 
+class SpeechCredentialCheck(BaseModel):
+    """The verdict on one pooled key.
+
+    Identified by credential id rather than by `SecretKey`, which is the
+    whole improvement: the single field this replaced was tested against
+    whichever vendor the service had *saved*, so changing the dropdown above
+    it produced "Deepgram rejected the credential (401)" underneath a field
+    labelled "AssemblyAI key". A credential carries its own vendor, so there
+    is no gap left to answer across.
+    """
+
+    id: str
+    vendor: SpeechVendor
+    reachable: bool
+    detail: str
+
+
 class SpeechCredentialView(BaseModel):
     """One credential as the screen sees it — never the value."""
 
@@ -153,3 +170,35 @@ def set_policy(store: Any, payload: SpeechPolicyUpdate) -> SpeechCredentialPool:
     )
     store.write_speech(updated)
     return updated
+
+
+async def check_credential(
+    store: Any,
+    credential_id: str,
+    probe_for: Any,
+) -> SpeechCredentialCheck:
+    """Test one pooled key against the provider it actually belongs to.
+
+    `probe_for` maps a vendor to its probe, or to `None` where this build has
+    none — a custom service has no probe by definition, and the answer there
+    must stay "configured, not verified" rather than inventing a reachability
+    signal.
+    """
+
+    from .service import verdict_on
+
+    credential = next(
+        (c for c in _pool_of(store).credentials if c.id == credential_id), None
+    )
+    if credential is None:
+        raise KeyError(f"no speech credential {credential_id!r}")
+
+    reachable, detail = await verdict_on(
+        store.get_secret(secret_key_for(credential_id)), probe_for(credential.vendor)
+    )
+    return SpeechCredentialCheck(
+        id=credential_id,
+        vendor=credential.vendor,
+        reachable=reachable,
+        detail=detail,
+    )

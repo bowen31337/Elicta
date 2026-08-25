@@ -618,6 +618,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/settings/speech/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Credential
+         * @description Add a speech key to the pool.
+         *
+         *     A separate route from `PUT /api/admin/settings` because these are not
+         *     one named field each: the pool holds as many keys per vendor as an
+         *     operator has, and the settings body has no way to say "another one"
+         *     rather than "this one, replacing what was there". A single field is
+         *     exactly what silently overwrote the first key with the second.
+         */
+        post: operations["add_credential_api_admin_settings_speech_credentials_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/speech/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Credential */
+        delete: operations["delete_credential_api_admin_settings_speech_credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Credential
+         * @description Rename a key or take it out of service, keeping its value.
+         */
+        patch: operations["patch_credential_api_admin_settings_speech_credentials__credential_id__patch"];
+        trace?: never;
+    };
+    "/api/admin/settings/speech/credentials/{credential_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Credential
+         * @description A 200 with `reachable: false` rather than an error status.
+         *
+         *     The request itself succeeded; the operator needs the reason rendered
+         *     beside the key in the list, not an exception page.
+         */
+        post: operations["test_credential_api_admin_settings_speech_credentials__credential_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/settings/speech/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Policy
+         * @description Choose whether one named key serves, or the pool rotates.
+         */
+        put: operations["put_policy_api_admin_settings_speech_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition": {
         parameters: {
             query?: never;
@@ -1591,11 +1681,6 @@ export interface components {
          *     (FR-2.6, T3). Forcing one vendor to serve both would optimise neither.
          */
         ConnectorSettings: {
-            /**
-             * @description Streaming engine for the live trigger path. AssemblyAI's confidence-based turn model reaches a lower latency floor than a silence timer (§14.2) and is the cheaper of the two per hour.
-             * @default assemblyai
-             */
-            live_vendor: components["schemas"]["SpeechVendor"];
             /**
              * Record Vendors
              * @description Batch engines for the record path. FR-2.6 requires two, and T3 requires that they diverge independently.
@@ -2935,6 +3020,16 @@ export interface components {
             value: string;
         };
         /**
+         * SelectionPolicy
+         * @description How the pool chooses between the credentials a vendor has.
+         *
+         *     Two, deliberately. A third — weighted, or health-ranked — is a guess about
+         *     a deployment nobody is running yet, and each additional policy is another
+         *     branch that has to be right when a meeting is in progress.
+         * @enum {string}
+         */
+        SelectionPolicy: "single" | "rotate";
+        /**
          * ServiceSettings
          * @description Everything an operator can administer, with no secret values in it.
          */
@@ -2945,6 +3040,11 @@ export interface components {
             documents?: components["schemas"]["DocumentSourceSettings"];
             storage?: components["schemas"]["StorageSettings"];
             consent?: components["schemas"]["ConsentSettings"];
+            /**
+             * Speech
+             * @description The pool of speech credentials and how one is chosen. Typed loosely here because `speech_credentials` imports this module; the store supplies a `SpeechCredentialPool`.
+             */
+            speech?: unknown;
             /** Secrets */
             secrets?: components["schemas"]["SecretStatus"][];
             /**
@@ -3059,6 +3159,123 @@ export interface components {
             ticked_at: string;
         };
         /**
+         * SpeechCredential
+         * @description One key an operator has, and what it is for.
+         *
+         *     The value is not here. It lives in the secrets table under
+         *     `secret_key_for(id)`, write-only like every other secret: a read reports
+         *     that it is configured and its last four characters, never the key.
+         */
+        SpeechCredential: {
+            /**
+             * Id
+             * @description Stable address for this credential's secret.
+             */
+            id: string;
+            vendor: components["schemas"]["SpeechVendor"];
+            /**
+             * Label
+             * @description What the operator calls it — 'Deepgram, Northwind account'. The point of a pool is telling them apart, and a four-character hint cannot do that.
+             * @default
+             */
+            label: string;
+            /**
+             * Enabled
+             * @description Whether it is in service. Disabling rather than deleting is how a key is taken out without losing it: deleting means re-entering the secret to resume, which nobody will do mid-meeting.
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
+         * SpeechCredentialCheck
+         * @description The verdict on one pooled key.
+         *
+         *     Identified by credential id rather than by `SecretKey`, which is the
+         *     whole improvement: the single field this replaced was tested against
+         *     whichever vendor the service had *saved*, so changing the dropdown above
+         *     it produced "Deepgram rejected the credential (401)" underneath a field
+         *     labelled "AssemblyAI key". A credential carries its own vendor, so there
+         *     is no gap left to answer across.
+         */
+        SpeechCredentialCheck: {
+            /** Id */
+            id: string;
+            vendor: components["schemas"]["SpeechVendor"];
+            /** Reachable */
+            reachable: boolean;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * SpeechCredentialCreate
+         * @description A key an operator is adding, with the value they typed.
+         */
+        SpeechCredentialCreate: {
+            vendor: components["schemas"]["SpeechVendor"];
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * SpeechCredentialPool
+         * @description Every speech credential, and the rule for choosing between them.
+         */
+        SpeechCredentialPool: {
+            /**
+             * Credentials
+             * @default []
+             */
+            credentials: components["schemas"]["SpeechCredential"][];
+            /** @default single */
+            policy: components["schemas"]["SelectionPolicy"];
+            /**
+             * Active Id
+             * @description Under `single`, the one that serves. Ignored under `rotate`.
+             */
+            active_id?: string | null;
+        };
+        /**
+         * SpeechCredentialUpdate
+         * @description What may be changed after the fact. Not the value: replace it instead.
+         *
+         *     Editing a stored secret in place would need the old one to be readable to
+         *     show what is being edited, and it is deliberately not.
+         */
+        SpeechCredentialUpdate: {
+            /** Label */
+            label?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * SpeechCredentialView
+         * @description One credential as the screen sees it — never the value.
+         */
+        SpeechCredentialView: {
+            /** Id */
+            id: string;
+            vendor: components["schemas"]["SpeechVendor"];
+            /** Label */
+            label: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Hint
+             * @description Last four characters of the stored value, or null if it is gone.
+             */
+            hint?: string | null;
+        };
+        /** SpeechPolicyUpdate */
+        SpeechPolicyUpdate: {
+            policy: components["schemas"]["SelectionPolicy"];
+            /** Active Id */
+            active_id?: string | null;
+        };
+        /**
          * SpeechVendor
          * @description Speech vendors the service can connect to.
          *
@@ -3071,7 +3288,7 @@ export interface components {
          *     what makes them a usable pair.
          * @enum {string}
          */
-        SpeechVendor: "deepgram" | "assemblyai" | "custom";
+        SpeechVendor: "deepgram" | "assemblyai" | "gemini" | "custom";
         /**
          * StartReplayRunRequest
          * @description A request to start a replay run against an already-uploaded recording.
@@ -4640,6 +4857,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionCheck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_credential_api_admin_settings_speech_credentials_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeechCredentialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_credential_api_admin_settings_speech_credentials__credential_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_credential_api_admin_settings_speech_credentials__credential_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeechCredentialUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_credential_api_admin_settings_speech_credentials__credential_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechCredentialCheck"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_policy_api_admin_settings_speech_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeechPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechCredentialPool"];
                 };
             };
             /** @description Validation Error */

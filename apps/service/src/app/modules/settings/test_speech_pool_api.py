@@ -117,3 +117,44 @@ class TestChangingAndRemoving:
 
 def _live(body: dict) -> dict:
     return next(e for e in body["readiness"] if e["capability"] == "live_nudges")
+
+
+class TestTestingOne:
+    """Per credential, which is what makes the answer unambiguous.
+
+    The single field this replaced could be tested against the wrong vendor:
+    renaming it from the dropdown above changed what it claimed to be while
+    the service still probed what it had saved, and the operator was told
+    "Deepgram rejected the credential (401)" under a field labelled
+    "AssemblyAI key". A pooled credential carries its own vendor, so there is
+    no gap left to test across.
+    """
+
+    def test_the_verdict_comes_back_as_a_200_not_an_error(self):
+        client, _ = _client()
+        made = client.post(
+            "/api/admin/settings/speech/credentials",
+            json={"vendor": "custom", "label": "in-house", "value": "x-secret"},
+        ).json()
+
+        response = client.post(
+            f"/api/admin/settings/speech/credentials/{made['id']}/test"
+        )
+
+        # A failed check is not a failed request: the operator needs the
+        # reason rendered beside the key, not an exception page.
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["reachable"] is False
+        # A custom service has no probe by definition, so this must not claim
+        # a reachability it never tested.
+        assert "not verified" in body["detail"]
+        assert "cret" in body["detail"]
+
+    def test_testing_one_nobody_has_is_a_404(self):
+        client, _ = _client()
+
+        assert (
+            client.post("/api/admin/settings/speech/credentials/nope/test").status_code
+            == 404
+        )

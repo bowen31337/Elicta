@@ -38,6 +38,15 @@ from .speech_credentials import SpeechCredentialPool
 #: holding a Gemini key that they have no key at all.
 LIVE_DRIVABLE: frozenset[SpeechVendor] = frozenset({SpeechVendor.DEEPGRAM})
 
+#: The record path's two engines, each with the fixed secret a deployment
+#: predating the pool still holds it under. A vendor counts as available if
+#: either the pool has an enabled key for it or that secret is set, so a
+#: part-migrated deployment is not reported as half-broken.
+_RECORD_KEYS: dict[SpeechVendor, SecretKey] = {
+    SpeechVendor.DEEPGRAM: SecretKey.DEEPGRAM_API_KEY,
+    SpeechVendor.ASSEMBLYAI: SecretKey.ASSEMBLYAI_API_KEY,
+}
+
 
 def readiness_of(
     *,
@@ -111,12 +120,25 @@ def readiness_of(
     # path and T3 warns the pair is only worth running if they fail
     # differently. One key gives a transcript and no reconciliation signal,
     # which is a quieter failure than none at all.
-    record_keys = (SecretKey.DEEPGRAM_API_KEY, SecretKey.ASSEMBLYAI_API_KEY)
-    record_missing = tuple(key for key in record_keys if key not in configured)
+    #
+    # Counted as *distinct vendors*, from the pool and the legacy fixed keys
+    # together, rather than as two named secrets. Asking only about the two
+    # secrets is what kept this warning up for an operator who had added a key
+    # for each vendor to the pool: two keys on screen, and the screen said
+    # none. Two keys for the same vendor still do not count — that pair agrees
+    # with itself and reports no divergence at all.
+    record_vendors = {
+        vendor
+        for vendor, key in _RECORD_KEYS.items()
+        if key in configured or pool.has_any_for({vendor})
+    }
+    record_missing = tuple(
+        key for vendor, key in _RECORD_KEYS.items() if vendor not in record_vendors
+    )
     entries.append(
         CapabilityReadiness(
             capability=Capability.RECORD_TRANSCRIPTION,
-            ready=not record_missing,
+            ready=len(record_vendors) >= 2,
             missing=record_missing,
             consequence=(
                 "A finished meeting cannot be transcribed, so there is no "

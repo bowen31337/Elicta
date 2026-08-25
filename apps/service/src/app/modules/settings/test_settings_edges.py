@@ -27,11 +27,12 @@ from .models import (
     SpeechVendor,
     VendorSettings,
 )
-from .probes import ProbeFailed, probe_deepgram
+from .probes import ProbeFailed, probe_deepgram, probe_for_vendor
 from .router import build_settings_router
 from .service import apply_settings_update
 from .speech_admin import (
     add_credential,
+    check_credential,
     remove_credential,
     set_policy,
     update_credential,
@@ -182,6 +183,11 @@ def _client(check_connection) -> TestClient:
     async def remove_speech(credential_id):
         remove_credential(store, credential_id)
 
+    async def check_speech(credential_id):
+        return await check_credential(
+            store, credential_id, lambda vendor: probe_for_vendor(vendor.value)
+        )
+
     async def speech_policy(payload):
         return set_policy(store, payload)
 
@@ -194,6 +200,7 @@ def _client(check_connection) -> TestClient:
             add_speech,
             update_speech,
             remove_speech,
+            check_speech,
             speech_policy,
         )
     )

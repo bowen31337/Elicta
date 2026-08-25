@@ -207,11 +207,13 @@ from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
 from app.modules.settings.speech_admin import (
+    SpeechCredentialCheck,
     SpeechCredentialCreate,
     SpeechCredentialUpdate,
     SpeechCredentialView,
     SpeechPolicyUpdate,
     add_credential,
+    check_credential,
     remove_credential,
     set_policy,
     update_credential,
@@ -1990,6 +1992,14 @@ def build_app(
     async def remove_speech_credential(credential_id: str) -> None:
         remove_credential(settings_store, credential_id)
 
+    async def check_speech_credential(credential_id: str) -> SpeechCredentialCheck:
+        # The probe follows the credential's own vendor, and `probe_for_vendor`
+        # answers None where this build has no client — which the verdict
+        # reports as "configured, not verified" rather than as a failure.
+        return await check_credential(
+            settings_store, credential_id, lambda vendor: probe_for_vendor(vendor.value)
+        )
+
     async def set_speech_policy(payload: SpeechPolicyUpdate) -> SpeechCredentialPool:
         return set_policy(settings_store, payload)
 
@@ -2001,6 +2011,7 @@ def build_app(
             add_speech_credential,
             update_speech_credential,
             remove_speech_credential,
+            check_speech_credential,
             set_speech_policy,
         )
     )

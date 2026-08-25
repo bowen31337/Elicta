@@ -12,6 +12,7 @@ from __future__ import annotations
 from .models import (
     ConnectionCheck,
     SecretKey,
+    SecretValue,
     ServiceSettings,
     SettingsUpdateRequest,
 )
@@ -54,17 +55,28 @@ async def check_secret_connection(
     tested.
     """
 
-    secret = store.get_secret(key)
+    reachable, detail = await verdict_on(store.get_secret(key), probe)
+    return ConnectionCheck(key=key, reachable=reachable, detail=detail)
+
+
+async def verdict_on(
+    secret: SecretValue | None, probe: object | None
+) -> tuple[bool, str]:
+    """Whether a credential works, and the sentence to show the operator.
+
+    Extracted so the pooled speech keys answer in exactly the same words as
+    the fixed ones. They are reached through different routes and carry
+    different identifiers, but "the vendor rejected this" is one fact and had
+    no business being phrased twice.
+    """
+
     if secret is None:
-        return ConnectionCheck(
-            key=key, reachable=False, detail="No credential is configured."
-        )
+        return False, "No credential is configured."
 
     if probe is None:
-        return ConnectionCheck(
-            key=key,
-            reachable=False,
-            detail=f"Configured (…{secret.hint()}), but not verified: no probe is wired for this vendor.",
+        return (
+            False,
+            f"Configured (…{secret.hint()}), but not verified: no probe is wired for this vendor.",
         )
 
     try:
@@ -75,16 +87,12 @@ async def check_secret_connection(
         # said -- so it is passed through as-is. Prefixing the exception class
         # put `ProbeFailed:` into a form field, which reads as a crash rather
         # than an answer and tells the operator nothing they can act on.
-        return ConnectionCheck(key=key, reachable=False, detail=str(exc))
+        return False, str(exc)
     except Exception as exc:
         # Anything else is the probe itself misbehaving rather than the vendor
         # answering, and there the type is the only clue worth keeping. The
         # vendor's error, never the credential: `exc` is formatted by type and
         # message, and a credential is not part of either.
-        return ConnectionCheck(
-            key=key, reachable=False, detail=f"{type(exc).__name__}: {exc}"
-        )
+        return False, f"{type(exc).__name__}: {exc}"
 
-    return ConnectionCheck(
-        key=key, reachable=True, detail=f"Verified (…{secret.hint()})."
-    )
+    return True, f"Verified (…{secret.hint()})."

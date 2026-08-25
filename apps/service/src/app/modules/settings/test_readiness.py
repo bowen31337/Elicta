@@ -215,3 +215,72 @@ class TestSettingAKeyClearsItsWarning:
         live = next(e for e in body["readiness"] if e["capability"] == "live_nudges")
 
         assert live["ready"] is True
+
+
+class TestTheRecordPathReadsThePoolToo:
+    """The complaint this was reported as.
+
+    An operator added a Deepgram key and an AssemblyAI key, the screen said
+    "A key is stored" beside both, and the record-path warning stayed up —
+    because this rule still asked about the two fixed secrets the pool
+    replaced. Two keys, and the screen said none.
+    """
+
+    def test_two_vendors_in_the_pool_satisfy_the_pair(self):
+        pool = _pool(("deepgram", "assemblyai"))
+
+        entry = _entry(readiness_of(configured=set(), auth_mode=AuthMode.API_KEY, pool=pool))
+
+        assert entry.ready
+        assert entry.missing == ()
+
+    def test_two_keys_for_one_vendor_do_not(self):
+        """FR-2.6 wants two engines that fail differently.
+
+        The same engine twice always agrees with itself, so the pair reports
+        no divergence at all — a quieter failure than having no transcript.
+        """
+
+        pool = _pool(("deepgram", "deepgram"))
+
+        assert not _entry(
+            readiness_of(configured=set(), auth_mode=AuthMode.API_KEY, pool=pool)
+        ).ready
+
+    def test_a_disabled_key_does_not_count(self):
+        pool = _pool(("deepgram", "assemblyai"), disabled={"assemblyai"})
+
+        assert not _entry(
+            readiness_of(configured=set(), auth_mode=AuthMode.API_KEY, pool=pool)
+        ).ready
+
+    def test_the_pool_and_a_legacy_key_can_make_the_pair_between_them(self):
+        """A deployment part-migrated to the pool is not half-broken."""
+
+        pool = _pool(("deepgram",))
+
+        assert _entry(
+            readiness_of(
+                configured={SecretKey.ASSEMBLYAI_API_KEY},
+                auth_mode=AuthMode.API_KEY,
+                pool=pool,
+            )
+        ).ready
+
+
+def _pool(vendors, disabled=frozenset()):
+    return SpeechCredentialPool(
+        credentials=tuple(
+            SpeechCredential(
+                id=f"c{index}",
+                vendor=SpeechVendor(vendor),
+                label=vendor,
+                enabled=vendor not in disabled,
+            )
+            for index, vendor in enumerate(vendors)
+        )
+    )
+
+
+def _entry(entries):
+    return next(e for e in entries if e.capability is Capability.RECORD_TRANSCRIPTION)

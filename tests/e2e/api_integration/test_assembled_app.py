@@ -21,6 +21,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/admin/settings/speech/credentials", "post"),
     ("/api/admin/settings/speech/credentials/{credential_id}", "patch"),
     ("/api/admin/settings/speech/credentials/{credential_id}", "delete"),
+    ("/api/admin/settings/speech/credentials/{credential_id}/test", "post"),
     ("/api/admin/settings/speech/policy", "put"),
     ("/api/artifacts/{artifact_id}", "get"),
     ("/api/audit/egress", "get"),

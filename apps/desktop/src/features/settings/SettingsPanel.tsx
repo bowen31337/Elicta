@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 
 import './SettingsPanel.css';
 import { ReadinessWarnings } from './ReadinessWarnings';
+import { SpeechPool } from './SpeechPool';
 import { ScreenEyebrow } from '../../ui/Mark';
 import {
   AUTH_MODE_SECRET,
@@ -14,6 +15,7 @@ import {
   type StorageSettings,
   type InferenceSettings,
   type LlmProvider,
+  type SpeechCredentialPool,
   type SpeechVendor,
   type SecretKey,
   type SecretStatus,
@@ -60,13 +62,8 @@ const PROVIDER_TAKES_KEY: Record<LlmProvider, boolean> = {
 const VENDOR_LABELS: Record<SpeechVendor, string> = {
   assemblyai: 'AssemblyAI',
   deepgram: 'Deepgram',
+  gemini: 'Google Gemini',
   custom: 'Other service',
-};
-
-const LIVE_VENDOR_NOTE: Record<SpeechVendor, string> = {
-  assemblyai: 'Ends a turn when the sentence sounds finished, which cuts the wait before a nudge.',
-  deepgram: 'Ends a turn after a fixed silence. Predictable, but slower to react.',
-  custom: 'Your own service. Confirm it supports vocabulary prompting and retention opt-out.',
 };
 
 const ANTHROPIC_SECRET_LABEL: Record<AuthMode, string> = {
@@ -78,26 +75,6 @@ const ANTHROPIC_SECRET_HELP: Record<AuthMode, string> = {
   api_key: 'A key issued from the Anthropic console (starts sk-ant-).',
   oauth_token: 'A token from `claude setup-token`, if your organisation issues those instead of keys.',
 };
-
-/**
- * The speech key is named after the vendor it belongs to.
- *
- * "Speech-to-text vendor key" sitting in a list next to two Anthropic
- * credentials is the sentence that made this screen confusing: it named a
- * category, not a thing an operator has in a browser tab. The label changes
- * with the vendor above it — a deliberate exception to the rule that a
- * field's accessible name should be stable, because here the field genuinely
- * becomes a different vendor's credential and only ever does so as the direct
- * result of the operator changing that vendor themselves.
- */
-function speechVendorName(vendor: SpeechVendor, customName: string | null | undefined): string {
-  if (vendor === 'custom') return customName?.trim() || 'Speech service';
-  return VENDOR_LABELS[vendor];
-}
-
-function speechKeyLabel(vendor: SpeechVendor, customName: string | null | undefined): string {
-  return `${speechVendorName(vendor, customName)} key`;
-}
 
 type Tone = 'ok' | 'warn' | 'idle';
 
@@ -399,7 +376,19 @@ function TabPanel({
  */
 export function SettingsPanel({ controller }: { controller?: UseSettingsResult } = {}) {
   const fallback = useSettings();
-  const { settings, loading, saving, error, save, test } = controller ?? fallback;
+  const {
+    settings,
+    loading,
+    saving,
+    error,
+    save,
+    test,
+    addSpeechKey,
+    setSpeechKeyEnabled,
+    removeSpeechKey,
+    testSpeechKey,
+    setSpeechPolicy,
+  } = controller ?? fallback;
 
   const [secretDrafts, setSecretDrafts] = useState<Partial<Record<SecretKey, string>>>({});
   const [model, setModel] = useState<string | null>(null);
@@ -459,7 +448,6 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
   const takesKey = PROVIDER_TAKES_KEY[currentInference.provider];
   const activeStatus = secretOf(activeSecret);
   const idleStatus = secretOf(idleSecret);
-  const speechStatus = secretOf('asr_vendor_api_key');
   const captureStatus = secretOf('capture_vendor_api_key');
 
   const claudeReadiness: Readiness = !takesKey
@@ -468,9 +456,17 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
       ? { tone: 'ok', text: 'Ready' }
       : { tone: 'warn', text: 'Needs a credential' };
 
-  const speechReadiness: Readiness = speechStatus?.configured
-    ? { tone: 'ok', text: 'Ready' }
-    : { tone: 'warn', text: 'Needs a key' };
+  const speechPool: SpeechCredentialPool =
+    settings.speech ?? { credentials: [], policy: 'single', active_id: null };
+  const inService = speechPool.credentials.filter((credential) => credential.enabled);
+  // The badge counts keys the pool can actually serve from. A key that is
+  // stored but switched off is not a key the meeting has, and a badge saying
+  // "Ready" beside a pool of disabled keys is the failure this screen exists
+  // to prevent.
+  const speechReadiness: Readiness =
+    inService.length === 0
+      ? { tone: 'warn', text: 'Needs a key' }
+      : { tone: 'ok', text: inService.length === 1 ? '1 key' : `${inService.length} keys` };
 
   const captureReadiness: Readiness = captureStatus?.configured
     ? { tone: 'ok', text: 'Ready' }
@@ -579,14 +575,6 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
    */
   const UNSAVED_KEY =
     'Save first — a test checks the key it has stored, not the one you have just typed.';
-
-  const pendingSpeechVendor =
-    currentConnectors.live_vendor === settings.connectors.live_vendor
-      ? null
-      : `Save first — the service is still set up for ${speechVendorName(
-          settings.connectors.live_vendor,
-          settings.connectors.custom_vendor_name,
-        )}, so a test now would check this key against that vendor.`;
 
   const pendingClaudeEndpoint =
     currentInference.base_url === settings.inference.base_url
@@ -818,28 +806,14 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
           summary="Turns the meeting into the transcript everything else reads. This is the credential the meeting itself depends on."
           status={speechReadiness}
         >
-          <div className="settings-field">
-            <label htmlFor="live-vendor">Live transcription</label>
-            <p className="settings-help">
-              Drives the in-meeting nudges. {LIVE_VENDOR_NOTE[currentConnectors.live_vendor]}
-            </p>
-            <select
-              id="live-vendor"
-              value={currentConnectors.live_vendor}
-              onChange={(event) =>
-                setConnectors({
-                  ...currentConnectors,
-                  live_vendor: event.target.value as SpeechVendor,
-                })
-              }
-            >
-              {(['assemblyai', 'deepgram', 'custom'] as const).map((vendor) => (
-                <option key={vendor} value={vendor}>
-                  {VENDOR_LABELS[vendor]}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SpeechPool
+            pool={speechPool}
+            onAdd={addSpeechKey}
+            onSetEnabled={setSpeechKeyEnabled}
+            onRemove={removeSpeechKey}
+            onTest={testSpeechKey}
+            onSetPolicy={setSpeechPolicy}
+          />
 
           <div className="settings-field">
             <span className="settings-pseudo-label">Recording transcription</span>
@@ -856,18 +830,7 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
             </p>
           </div>
 
-          {speechStatus ? (
-            <SecretField
-              {...secretProps(speechStatus, pendingSpeechVendor)}
-              label={speechKeyLabel(
-                currentConnectors.live_vendor,
-                currentConnectors.custom_vendor_name,
-              )}
-              help="Transcribes the meeting on both the live and the record paths. One key covers both."
-            />
-          ) : null}
-
-          {currentConnectors.live_vendor === 'custom' ||
+          {speechPool.credentials.some((credential) => credential.vendor === 'custom') ||
           currentConnectors.record_vendors.includes('custom') ? (
             <div className="settings-field">
               <label htmlFor="custom-stt">Custom speech service endpoint</label>

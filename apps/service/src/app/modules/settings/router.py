@@ -23,6 +23,7 @@ from .models import (
     SettingsUpdateRequest,
 )
 from .speech_admin import (
+    SpeechCredentialCheck,
     SpeechCredentialCreate,
     SpeechCredentialUpdate,
     SpeechCredentialView,
@@ -35,6 +36,7 @@ UpdateSpeechCredential = Callable[
     [str, SpeechCredentialUpdate], Awaitable[SpeechCredentialView]
 ]
 RemoveSpeechCredential = Callable[[str], Awaitable[None]]
+CheckSpeechCredential = Callable[[str], Awaitable[SpeechCredentialCheck]]
 SetSpeechPolicy = Callable[[SpeechPolicyUpdate], Awaitable[SpeechCredentialPool]]
 ReadSettings = Callable[[], Awaitable[ServiceSettings]]
 ApplySettings = Callable[[SettingsUpdateRequest], Awaitable[ServiceSettings]]
@@ -48,6 +50,7 @@ def build_settings_router(
     add_speech_credential: AddSpeechCredential,
     update_speech_credential: UpdateSpeechCredential,
     remove_speech_credential: RemoveSpeechCredential,
+    check_speech_credential: CheckSpeechCredential,
     set_speech_policy: SetSpeechPolicy,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/admin/settings", tags=["admin-settings"])
@@ -123,6 +126,23 @@ def build_settings_router(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(status_code=204)
+
+    @router.post(
+        "/speech/credentials/{credential_id}/test",
+        response_model=SpeechCredentialCheck,
+        status_code=200,
+    )
+    async def test_credential(credential_id: str) -> SpeechCredentialCheck:
+        """A 200 with `reachable: false` rather than an error status.
+
+        The request itself succeeded; the operator needs the reason rendered
+        beside the key in the list, not an exception page.
+        """
+
+        try:
+            return await check_speech_credential(credential_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.put(
         "/speech/policy", response_model=SpeechCredentialPool, status_code=200
