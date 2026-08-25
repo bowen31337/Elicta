@@ -31,6 +31,7 @@ surfaced. `DIVERGENCE_THRESHOLD` still marks the spans worth reading first.
 from __future__ import annotations
 
 import difflib
+import math
 import re
 from datetime import UTC, datetime
 
@@ -64,13 +65,65 @@ def _agreement_score(reference_text: str, other_text: str) -> float:
     return difflib.SequenceMatcher(a=reference_words, b=other_words).ratio()
 
 
+def _clipped_words(segment: TranscriptSegment, start_seconds: float, end_seconds: float) -> list[str]:
+    """The part of one segment that falls inside [start, end].
+
+    Whole segments were taken before, and that made *how an engine cuts spans*
+    into disagreement. Two engines never cut them the same way — Deepgram
+    splits on silence, so four words is a typical span, and AssemblyAI on
+    sentences — so a four-word reference span was scored against a whole
+    paragraph, and two transcripts matching word for word were reported as
+    near-total disagreement.
+
+    Words are taken pro rata across the segment's duration, which assumes an
+    even speaking rate inside it. That is an approximation and a mild one: it
+    is applied only where one engine's span straddles another's, it errs by a
+    word at the boundary rather than by a paragraph, and where both engines
+    already agree on a boundary it does nothing at all.
+    """
+
+    words = segment.text.split()
+    span = segment.end_seconds - segment.start_seconds
+    if not words or span <= 0:
+        return words
+    first = max(0.0, (start_seconds - segment.start_seconds) / span)
+    last = min(1.0, (end_seconds - segment.start_seconds) / span)
+    clipped = words[int(first * len(words)) : math.ceil(last * len(words))]
+    # A span narrower than one word's share rounds to nothing. Something was
+    # said there, and an empty column would read as the engine having missed
+    # it rather than as the boundary falling mid-word.
+    return clipped or words[min(int(first * len(words)), len(words) - 1) :][:1]
+
+
 def _overlapping_text(segments: list[TranscriptSegment], start_seconds: float, end_seconds: float) -> str:
-    overlapping = [
-        segment
+    return " ".join(
+        word
         for segment in segments
         if segment.start_seconds < end_seconds and segment.end_seconds > start_seconds
-    ]
-    return " ".join(segment.text for segment in overlapping)
+        for word in _clipped_words(segment, start_seconds, end_seconds)
+    )
+
+
+def _says_the_same(reference_text: str, other_text: str, full_other_text: str) -> bool:
+    """Whether the other engine said these words here.
+
+    The clip lands within a word of the boundary, so a run that agrees can
+    still come back with one word too many or too few. Asking whether the
+    reference's words appear as a run inside the *unclipped* overlap catches
+    that, and it cannot mask a real substitution: a misheard word is not
+    present to be found.
+    """
+
+    reference = _normalize_words(reference_text)
+    if reference == _normalize_words(other_text):
+        return True
+    if not reference:
+        return False
+    whole = _normalize_words(full_other_text)
+    return any(
+        whole[index : index + len(reference)] == reference
+        for index in range(0, max(0, len(whole) - len(reference) + 1))
+    )
 
 
 def align_transcripts(
@@ -101,10 +154,18 @@ def align_transcripts(
             other_engine=other.engine,
             other_text=other_text,
             agreement_score=score,
-            is_divergent=_normalize_words(segment.text) != _normalize_words(other_text),
+            is_divergent=not _says_the_same(segment.text, other_text, full_other_text),
         )
         for segment in reference.segments
         for other_text in [_overlapping_text(other.segments, segment.start_seconds, segment.end_seconds)]
+        for full_other_text in [
+            " ".join(
+                other_segment.text
+                for other_segment in other.segments
+                if other_segment.start_seconds < segment.end_seconds
+                and other_segment.end_seconds > segment.start_seconds
+            )
+        ]
         for score in [_agreement_score(segment.text, other_text)]
     ]
 
