@@ -443,6 +443,10 @@ class Backend:
     #: runs outside its request, and an `asyncio` task nobody holds a reference
     #: to can be collected mid-flight — so these are held until they end.
     compile_tasks: dict[str, Any] = field(default_factory=dict)
+    #: Stages a compile has finished, while it is still running. The run
+    #: itself keeps the same list and is the record afterwards; this is the
+    #: only way to see inside one that has not returned yet.
+    compile_stages: dict[str, list[str]] = field(default_factory=dict)
     extraction_passes: dict[str, Any] = field(default_factory=dict)
     structuring_passes: dict[str, Any] = field(default_factory=dict)
     batch_submissions: dict[str, Any] = field(default_factory=dict)
@@ -2601,7 +2605,12 @@ def _include_operational_routers(
         async def chain() -> None:
             try:
                 run = await _run_engagement_compile(
-                    backend, engagement_id, compiler_engines
+                    backend,
+                    engagement_id,
+                    compiler_engines,
+                    lambda stage: backend.compile_stages.setdefault(
+                        compile_id, []
+                    ).append(stage),
                 )
                 backend.compile_runs[compile_id] = run
                 log_compile_outcome(compile_id, run)
@@ -2658,7 +2667,14 @@ def _include_operational_routers(
                 compile_id=latest,
                 state="running",
                 complete=False,
-                stages_completed=[],
+                # What it has actually finished, not a hardcoded nothing. The
+                # run records its own stages and only becomes reachable when
+                # the whole chain returns, so for the several minutes a real
+                # compile takes this said `[]` — and a compile working
+                # steadily read exactly like one hung on its first model
+                # call. That is the question worth being able to answer about
+                # a long job, and it was the one thing this could not say.
+                stages_completed=list(backend.compile_stages.get(latest, [])),
             )
 
         run = backend.compile_runs.get(latest)
@@ -3528,7 +3544,10 @@ def _record_debrief_artifacts(backend: Backend, session_id: str, run: Any) -> No
 
 
 async def _run_engagement_compile(
-    backend: Backend, engagement_id: str, engines: CompilerEngines
+    backend: Backend,
+    engagement_id: str,
+    engines: CompilerEngines,
+    on_stage: Any = None,
 ) -> Any:
     """Run the §3.10 compiler chain for one engagement."""
 
@@ -3586,6 +3605,7 @@ async def _run_engagement_compile(
         context_pack=context_pack,
         engines=engines,
         sinks=sinks,
+        on_stage=on_stage,
     )
     if run.complete:
         run = await collect_engagement_compile(run, engines=engines, sinks=sinks)

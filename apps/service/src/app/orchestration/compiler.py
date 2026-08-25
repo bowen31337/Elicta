@@ -107,15 +107,28 @@ async def submit_engagement_compile(
     context_pack: Any,
     engines: CompilerEngines,
     sinks: CompilerSinks,
+    on_stage: Callable[[str], None] | None = None,
 ) -> CompileRun:
     """Run §3.10 up to and including batch submission.
 
     Returns as soon as the analyst batch is submitted; the results are
     collected later by `collect_engagement_compile`, since the pass runs in
     minutes rather than seconds.
+
+    `on_stage` is told each stage's name as that stage finishes, for whoever
+    is waiting. The run records the same list, but only becomes reachable
+    when this returns — so a compile in flight could say nothing at all about
+    itself, and "still working" and "hung on the first call" looked identical
+    for the several minutes a real one takes. Called synchronously and given
+    nothing to fail on: it is a notification, not a step.
     """
 
     run = CompileRun(engagement_id=engagement_id)
+
+    def completed(stage: str) -> None:
+        run.stages_completed.append(stage)
+        if on_stage is not None:
+            on_stage(stage)
     scope = engagement_filesystem_scope(engagement_id)
 
     # §3.11: every document this engagement's agent reads is checked against
@@ -133,7 +146,7 @@ async def submit_engagement_compile(
     if not _completed(run.extraction) or run.extraction.claims is None:
         run.stopped_at = "extraction"
         return run
-    run.stages_completed.append("extraction")
+    completed("extraction")
 
     run.structuring = await run_claim_structuring_pass(
         engagement_id, run.extraction.claims, engines.structure, sinks.save_structuring
@@ -141,7 +154,7 @@ async def submit_engagement_compile(
     if not _completed(run.structuring):
         run.stopped_at = "structuring"
         return run
-    run.stages_completed.append("structuring")
+    completed("structuring")
 
     run.submission = await submit_bmad_analyst_batch(
         engagement_id,
@@ -151,8 +164,10 @@ async def submit_engagement_compile(
         sinks.save_batch_submission,
     )
     if not _submitted(run.submission):
-        return await _analyst_without_a_batch(run, context_pack, engines, sinks)
-    run.stages_completed.append("batch-submission")
+        return await _analyst_without_a_batch(
+            run, context_pack, engines, sinks, on_stage=on_stage
+        )
+    completed("batch-submission")
 
     return run
 
@@ -173,6 +188,8 @@ async def _analyst_without_a_batch(
     context_pack: Any,
     engines: CompilerEngines,
     sinks: CompilerSinks,
+    *,
+    on_stage: Callable[[str], None] | None = None,
 ) -> CompileRun:
     """Run the Analyst pass directly when the batch was refused as not permitted.
 
@@ -241,6 +258,8 @@ async def _analyst_without_a_batch(
 
     run.stopped_at = None
     run.stages_completed.append(DIRECT_ANALYST_STAGE)
+    if on_stage is not None:
+        on_stage(DIRECT_ANALYST_STAGE)
     return run
 
 
