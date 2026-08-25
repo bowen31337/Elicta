@@ -247,17 +247,24 @@ export function SpeechPool({
 /**
  * What this key is actually doing, in the operator's terms.
  *
- * A key for a provider with no client yet is the case worth naming: it is
- * stored and valid and still transcribes nothing, and saying only "in
- * service" would leave the operator hunting a problem in the key.
+ * There are two lanes and they do not want the same providers, so a row that
+ * said only "in service" would be true and useless. The case that made this
+ * worth writing out: an AssemblyAI key transcribes every recording and
+ * drives no nudge at all, and a note reporting only what it cannot do reads
+ * as a broken key rather than a correctly configured one.
  */
 function statusOf(credential: SpeechCredential, pool: SpeechCredentialPool): string {
   if (!credential.enabled) return 'Out of service. Its key is kept.';
-  if (!LIVE_DRIVABLE.includes(credential.vendor)) {
-    return 'Stored, but this build has no live recogniser for this provider yet, so it cannot drive the in-meeting nudges.';
+
+  const live = LIVE_DRIVABLE.includes(credential.vendor);
+  const turn =
+    pool.policy === 'rotate' || pool.active_id === null || pool.active_id === credential.id;
+
+  if (!live) {
+    return 'Transcribes the recording after the meeting. This build has no live recogniser for this provider, so it does not drive the in-meeting nudges.';
   }
-  if (pool.policy === 'rotate') return 'In service, in the rotation.';
-  return pool.active_id === null || pool.active_id === credential.id
-    ? 'In service.'
-    : 'In service, as a spare.';
+  if (!turn) return 'A spare. Another key is serving.';
+  return pool.policy === 'rotate'
+    ? 'In the rotation, for the nudges and the recording both.'
+    : 'Serving the nudges and the recording both.';
 }
