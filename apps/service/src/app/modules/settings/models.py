@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
@@ -254,6 +255,10 @@ class SpeechVendor(str, Enum):
 
     DEEPGRAM = "deepgram"
     ASSEMBLYAI = "assemblyai"
+    #: Held so a key can be stored and labelled before there is a client for
+    #: it. Selection is filtered by what the service can actually drive, so a
+    #: credential here is reported as unusable rather than chosen and failed.
+    GEMINI = "gemini"
     CUSTOM = "custom"
 
 
@@ -505,6 +510,14 @@ class ServiceSettings(BaseModel):
     documents: DocumentSourceSettings = Field(default_factory=DocumentSourceSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     consent: ConsentSettings = Field(default_factory=ConsentSettings)
+    speech: Any = Field(
+        default=None,
+        description=(
+            "The pool of speech credentials and how one is chosen. Typed loosely "
+            "here because `speech_credentials` imports this module; the store "
+            "supplies a `SpeechCredentialPool`."
+        ),
+    )
     secrets: list[SecretStatus] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
