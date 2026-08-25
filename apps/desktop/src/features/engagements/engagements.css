@@ -1,0 +1,140 @@
+/* The engagement list.
+ *
+ * Two rules from the design layer do the work here. Which client is in force
+ * is said by the *material* rather than by a word — a label reading "Current"
+ * beside a button reading "Open" was two pieces of text competing to describe
+ * one row. And the row is the target, so the thing you press is the thing you
+ * mean, at the full width of the list rather than at a button on the end of
+ * it.
+ */
+
+.engagement-row {
+  /* The row owns no padding: the button inside it does, so the whole of the
+     press target is the row rather than a rectangle inset from it. */
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+}
+
+.engagement-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* The 8pt grid, matching `.row`'s own padding so a list of these lines up
+     with a list of plain rows above or below it. */
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: none;
+  border: 0;
+  /* Inset and fully rounded, which is what makes the selected state read as
+     one object. Painted flush to the row it ended in a hard vertical cut
+     where the press target stopped, and a highlight with a straight edge
+     down the middle of a row reads as clipped rather than as chosen — the
+     macOS sidebar inset-capsule idiom exists for exactly this. */
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  /* Feedback on pointer-down, and only on transform — never on layout.
+     `--ease-spring` overshoots slightly and settles, which is what makes the
+     release read as an object springing back rather than a value snapping. */
+  transition: transform var(--duration-instant, 120ms) var(--ease-out),
+    background-color var(--duration-instant, 120ms) var(--ease-out);
+}
+.engagement-open:active {
+  transform: scale(0.985);
+  background: var(--fill-4);
+  transition-timing-function: var(--ease-spring);
+}
+.engagement-open:disabled {
+  cursor: default;
+}
+.engagement-open:disabled:active {
+  transform: none;
+  background: none;
+}
+.engagement-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.engagement-row.is-current .engagement-open {
+  /* The tint belongs to the pressable area, not to the whole row. Painted on
+     the row it ran on behind the Remove button, which says the tinted region
+     is one target when part of it is a different one — and a selection that
+     claims ground it does not own is exactly the sort of small lie this
+     layer exists to avoid.
+     Selection is a state of the row, so it survives the press: `:active`
+     darkens from here rather than replacing it. */
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.engagement-row.is-current .engagement-open:active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.engagement-row.is-current .engagement-name {
+  font-weight: var(--weight-semibold);
+}
+
+/* Quiet until wanted.
+ *
+ * `.btn` is a filled capsule, which is right for an action a row is *for* and
+ * wrong for this one: rendered that way, the heaviest thing on a row about a
+ * client was the button that deletes it, and it outweighed the client's own
+ * name. A destructive secondary action carries no fill until the pointer is
+ * on it, takes its colour only then, and becomes loud only once armed — at
+ * which point the pair beside it says in full what it is about to do.
+ */
+.engagement-remove {
+  background: none;
+  /* Coloured, not grey. A button carrying no fill *and* no colour reads as a
+     label, and an action nobody can tell is an action is worse than a loud
+     one. Red says which action it is; the confirm step beside it is what
+     stops the colour having to do that job. */
+  color: var(--red-ink);
+  font-weight: var(--weight-regular);
+}
+.engagement-remove:hover,
+.engagement-remove:focus-visible {
+  background: var(--fill-4);
+}
+.engagement-remove:active {
+  background: var(--fill-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Gentler, not gone: the press still answers instantly, it just stops
+     moving. Feedback on pointer-down is the one thing that must survive. */
+  .engagement-open {
+    transition: none;
+  }
+  .engagement-open:active {
+    transform: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .engagement-row.is-current .engagement-open {
+    outline: 1px solid var(--accent);
+    outline-offset: -2px;
+  }
+  /* A quiet button with no fill needs an edge to be a button at all. */
+  .engagement-remove {
+    outline: 1px solid var(--separator-opaque);
+    outline-offset: -1px;
+  }
+}
+
+/* The one action this section is for, standing on its own.
+ *
+ * It was a list row carrying the sentence "Ready when all three are filled
+ * in" beside a greyed button — a status dressed as a row, in a group of rows
+ * that were fields. The reason it is disabled belongs with the fields it is
+ * about, and now sits in the hint above; what is left is the action.
+ */
+.engagement-create {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-5);
+}

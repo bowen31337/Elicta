@@ -17,9 +17,16 @@ the room, so that nobody has to be asked to choose one before a meeting starts.
 
 ![Your clients, and the form for adding one](../../docs/journeys/screenshots/engagements-list.png)
 
-Opening a client is what makes it the one every other screen is about. It is
-also where you remove one you no longer want on the list — which takes its
-meetings, documents and vocabulary out of view with it, and erases nothing.
+Opening a client is what makes it the one every other screen is about, and the
+row itself is what opens it — press anywhere along it. The one in force is
+tinted rather than labelled, the way a chosen row looks anywhere else on this
+machine.
+
+It is also where you remove a client you no longer want on the list, which
+takes its meetings, documents and vocabulary out of view with it and erases
+nothing. Removing asks first: the button arms, and a second press beside it
+confirms. One press taking a whole client off every screen at once was more
+than a single button's worth of consequence.
 
 Everything else on this page happens on the Preparation screen, about the one
 client you opened.

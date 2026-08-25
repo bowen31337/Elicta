@@ -1,4 +1,5 @@
 import '../prep/screens.css';
+import './engagements.css';
 
 import { useState } from 'react';
 
@@ -73,6 +74,13 @@ export function EngagementsScreen({
   const [clientOrganisation, setClientOrganisation] = useState('');
   const [sector, setSector] = useState('');
   const [commercialContext, setCommercialContext] = useState('');
+  /**
+   * The one client whose removal is a press away, or none.
+   *
+   * One at a time, and held here rather than per row: two rows both offering
+   * "Remove for good" is a screen inviting the wrong one to be pressed.
+   */
+  const [arming, setArming] = useState<string | null>(null);
 
   const complete =
     clientOrganisation.trim() !== '' && sector.trim() !== '' && commercialContext.trim() !== '';
@@ -123,38 +131,20 @@ export function EngagementsScreen({
             </div>
           ) : (
             engagements.map((engagement) => (
-              <div className="row" key={engagement.id}>
-                <div className="row-main">
-                  <span className="t-body">{engagement.clientOrganisation}</span>
-                  <span className="t-footnote">
-                    {engagement.sector} · {engagement.commercialContext}
-                  </span>
-                </div>
-                {engagement.id === currentId ? (
-                  // Not "Open": the button beside it says that, and a status
-                  // sharing a word with the action next to it reads as two
-                  // buttons, one of which appears broken.
-                  <span className="pill pill--ok">Current</span>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={write.busy}
-                  aria-label={`Open ${engagement.clientOrganisation}`}
-                  onClick={() => actions.open(engagement.id)}
-                >
-                  Open
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--danger"
-                  disabled={write.busy}
-                  aria-label={`Remove ${engagement.clientOrganisation}`}
-                  onClick={() => void write.run(() => actions.remove(engagement.id))}
-                >
-                  Remove
-                </button>
-              </div>
+              <EngagementRow
+                key={engagement.id}
+                engagement={engagement}
+                current={engagement.id === currentId}
+                busy={write.busy}
+                armed={arming === engagement.id}
+                onArm={() => setArming(engagement.id)}
+                onDisarm={() => setArming(null)}
+                onOpen={() => actions.open(engagement.id)}
+                onRemove={() => {
+                  setArming(null);
+                  void write.run(() => actions.remove(engagement.id));
+                }}
+              />
             ))
           )}
         </div>
@@ -194,26 +184,109 @@ export function EngagementsScreen({
         </div>
         <p className="t-footnote hint">
           The sector and the commercial shape are not filing. They are what lets
-          Elicta work out which languages to expect in the room.
+          Elicta work out which languages to expect in the room. All three are
+          needed before an engagement can be created.
         </p>
 
-        <div className="group">
-          <div className="row">
-            <div className="row-main">
-              <span className="t-body">Ready when all three are filled in</span>
-            </div>
-            <button
-              type="button"
-              className="btn btn--filled"
-              disabled={write.busy || !complete}
-              onClick={create}
-            >
-              Create engagement
-            </button>
-          </div>
+        <div className="engagement-create">
+          <button
+            type="button"
+            className="btn btn--filled"
+            disabled={write.busy || !complete}
+            onClick={create}
+          >
+            Create engagement
+          </button>
         </div>
       </section>
     </main>
+  );
+}
+
+/**
+ * One client, as a thing you can pick up.
+ *
+ * The row itself opens it, rather than a button on the end of it doing so.
+ * Fitts's law is most of the argument — the target goes from a 60px button to
+ * the full width of the list — but the honest one is that a row about a
+ * client, with a button beside it labelled with a verb, reads as two
+ * different things to press when it is one.
+ *
+ * Which client is in force is said by the material, not by a word. A label
+ * reading "Current" beside a button reading "Open" was two pieces of text
+ * competing to describe the same row; the selected row is an inset tinted
+ * capsule instead, which is what a chosen row looks like in a macOS sidebar,
+ * and `aria-current` says the same thing to anything not looking at it.
+ */
+function EngagementRow({
+  engagement,
+  current,
+  busy,
+  armed,
+  onArm,
+  onDisarm,
+  onOpen,
+  onRemove,
+}: {
+  readonly engagement: EngagementSummaryRow;
+  readonly current: boolean;
+  readonly busy: boolean;
+  readonly armed: boolean;
+  readonly onArm: () => void;
+  readonly onDisarm: () => void;
+  readonly onOpen: () => void;
+  readonly onRemove: () => void;
+}) {
+  return (
+    <div className={current ? 'row engagement-row is-current' : 'row engagement-row'}>
+      <button
+        type="button"
+        className="engagement-open"
+        disabled={busy}
+        aria-current={current ? 'true' : undefined}
+        aria-label={`Open ${engagement.clientOrganisation}`}
+        onClick={onOpen}
+      >
+        <span className="row-main">
+          <span className="t-body engagement-name">{engagement.clientOrganisation}</span>
+          <span className="t-footnote">
+            {engagement.sector} · {engagement.commercialContext}
+          </span>
+        </span>
+      </button>
+
+      {armed ? (
+        <>
+          <button
+            type="button"
+            className="btn btn--danger"
+            disabled={busy}
+            aria-label={`Remove ${engagement.clientOrganisation} for good`}
+            onClick={onRemove}
+          >
+            Remove for good
+          </button>
+          <button
+            type="button"
+            className="btn"
+            aria-label={`Keep ${engagement.clientOrganisation}`}
+            onClick={onDisarm}
+          >
+            Keep
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="btn engagement-remove"
+          disabled={busy}
+          aria-label={`Remove ${engagement.clientOrganisation}`}
+          onClick={onArm}
+        >
+          Remove
+        </button>
+      )}
+    </div>
   );
 }
 
