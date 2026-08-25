@@ -512,4 +512,42 @@ describe('in the desktop shell', () => {
     expect(store.getSnapshot().uploadNote).toBeNull();
   });
 
+
+  it('says so when the audio channel could not be opened at all', async () => {
+    // The swallow above is right that a dead channel must not stop the
+    // meeting from being recorded. It was also silent, and `capture://pcm` is
+    // not the meter -- it is the only path a desktop recording reaches the
+    // service by. Failing to register it means nothing is uploaded, and the
+    // screen otherwise shows a healthy recording throughout.
+    const store = createCaptureStore({
+      ...shellDeps(async (command: string) =>
+        command === 'start_capture'
+          ? { state: 'capturing', source: null, frames: 0 }
+          : command === 'list_audio_sources'
+            ? []
+            : null,
+      ),
+      listen: async () => {
+        throw new Error('event channel refused');
+      },
+      createBridge: () => ({
+        start: async () => undefined,
+        push: () => undefined,
+        stop: async () => undefined,
+        reportFailure: () => undefined,
+        get note() {
+          return null;
+        },
+      }),
+    });
+
+    await store.refresh();
+    await store.beginRecording();
+
+    // Still recording -- the meeting is not lost.
+    expect(store.getSnapshot().status.state).toBe('capturing');
+    // But not silently: the operator is told it will not be uploaded.
+    expect(store.getSnapshot().uploadNote).toMatch(/not being uploaded|will not be transcribed/i);
+  });
+
 });
