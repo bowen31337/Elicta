@@ -30,6 +30,15 @@ def main() -> int:
     # running this file, and an import error at module scope is reported
     # without the log configuration below ever being applied.
     from app.main import app
+    from app.parent_watchdog import exit_with_parent
+
+    # The shell stops this service when it quits cleanly, and cannot when it
+    # does not: a SIGTERM or a crash never runs its exit handler, and this
+    # process is left holding the port under launchd. That matters more than
+    # an ordinary leak because the shell starts its own service only when
+    # nothing already answers, so the next launch adopts the orphan — serving
+    # a stale backend from a binary that has since been replaced on disk.
+    exit_with_parent()
 
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0

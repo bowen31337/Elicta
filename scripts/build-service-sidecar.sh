@@ -26,6 +26,27 @@ trap 'rm -rf "$WORK"' EXIT
 # or one without `venv` at all.
 PYTHON="${PYTHON:-python3}"
 
+# The frozen environment is resolved from `uv.lock`, not from the dependency
+# ranges in `pyproject.toml` -- see `freeze` below for why -- so `uv` is needed
+# to render the lock as something `pip` can install.
+command -v uv >/dev/null || {
+  echo "error: uv not found. The bundled service is frozen from apps/service/uv.lock," >&2
+  echo "       which is what everything else runs. Install from https://docs.astral.sh/uv/" >&2
+  exit 1
+}
+
+# Rendered once, outside `freeze`, because both architectures of a universal
+# build must be frozen from the same resolution -- two exports could straddle a
+# lockfile change and produce halves that disagree.
+LOCKED="$WORK/requirements-locked.txt"
+uv export \
+  --project "$ROOT/apps/service" \
+  --frozen \
+  --no-hashes \
+  --no-emit-project \
+  --format requirements-txt \
+  >"$LOCKED"
+
 # macOS wants one binary covering both architectures, and it cannot be got by
 # asking PyInstaller for `universal2`: the packages this service is built on —
 # pydantic-core, cryptography, asyncpg, jiter, rpds-py, cffi — publish no
@@ -49,9 +70,21 @@ freeze() {
 
   "$@" "$PYTHON" -m venv "$venv"
   "$@" "$venv/bin/pip" install --quiet --upgrade pip
-  # Installed from the service's own metadata rather than a second list, so the
-  # frozen binary carries what the service declares and not a copy that drifts.
-  "$@" "$venv/bin/pip" install --quiet "$ROOT/apps/service"
+  # Installed from `uv.lock` -- the same resolution `uv sync --locked` gives a
+  # developer and CI -- and then the service itself with `--no-deps`, so pip
+  # never resolves anything.
+  #
+  # This used to `pip install "$ROOT/apps/service"`, on the reasoning that the
+  # service's own metadata is the honest source and a second list would drift.
+  # The metadata is ranges, not versions: `anthropic>=0.40`, `httpx>=0.27`. So
+  # the bundle got whatever pip resolved on the day it was built, and the
+  # thing that drifted was the bundle. It shipped `httpx2` where every other
+  # way of running this service has `httpx`, and every bank compile failed in
+  # the packaged app -- `Error -3 while decompressing data` out of the model
+  # call -- while the same compile succeeded from a terminal. The lockfile is
+  # the service's own list too, and it pins.
+  "$@" "$venv/bin/pip" install --quiet --require-virtualenv -r "$LOCKED"
+  "$@" "$venv/bin/pip" install --quiet --no-deps "$ROOT/apps/service"
   "$@" "$venv/bin/pip" install --quiet pyinstaller
 
   # `uvicorn[standard]` brings native extras a frozen service has no use for,
@@ -63,6 +96,42 @@ freeze() {
   # the service's own and the reload extra is wanted by everybody running it
   # from a terminal.
   "$@" "$venv/bin/pip" uninstall --quiet --yes watchfiles uvloop httptools || true
+
+  # Fails the build if the environment about to be frozen is not the one the
+  # lockfile describes. The bug this exists for shipped happily: pip resolved a
+  # different set, PyInstaller froze it without complaint, the bundle started,
+  # and the divergence only showed as a stage failing inside the packaged app.
+  # Checked per locked package rather than as a whole set, because PyInstaller
+  # brings dependencies of its own that are correctly absent from the lock.
+  "$@" "$venv/bin/python" - "$LOCKED" <<'PYCHECK'
+import re, sys
+from importlib.metadata import PackageNotFoundError, version
+
+# Compares only what is installed. A locked package can be legitimately
+# absent -- the lock covers every platform, so `colorama` and `pywin32` are
+# in it and are not installed here, and the three removed above are meant to
+# be gone. What must never differ is the *version* of something that is
+# present, which is exactly what an unpinned resolution changes.
+wrong = []
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.split("#", 1)[0].strip()
+    match = re.match(r"^([A-Za-z0-9._-]+)==([^\s;]+)", line)
+    if not match:
+        continue
+    name, pinned = match.group(1), match.group(2)
+    try:
+        found = version(name)
+    except PackageNotFoundError:
+        continue
+    if found != pinned:
+        wrong.append(f"{name}: locked {pinned}, installed {found}")
+
+if wrong:
+    print("error: the environment to be frozen does not match apps/service/uv.lock:", file=sys.stderr)
+    for line in wrong:
+        print(f"    {line}", file=sys.stderr)
+    raise SystemExit(1)
+PYCHECK
 
   "$@" "$venv/bin/pyinstaller" \
     --onefile \

@@ -349,3 +349,79 @@ def test_wording_that_differs_only_in_punctuation_or_case_still_agrees():
     alignment = align_transcripts(reference, other, computed_at=FIXED)
 
     assert alignment.spans[0].is_divergent is False
+
+
+class TestTwoEnginesThatAgreeAreNotReportedAsDisagreeing:
+    """Reported from the recording screen: "the two columns are so different".
+
+    One column held four words and the other held a paragraph, on a pair of
+    transcripts that said the same thing. The cause is here rather than in
+    either engine: a reference span was scored against every *whole* segment
+    it overlapped, so cutting spans differently was itself read as
+    disagreement.
+
+    Two engines never cut spans the same way — Deepgram splits on silence
+    (four words is a typical span) and AssemblyAI on sentences. So this did
+    not merely add noise, it made the comparison report near-total
+    disagreement between transcripts that matched word for word, which is the
+    one number an operator is meant to act on.
+    """
+
+    #: The same eight words, cut in two and in one.
+    FINE = [
+        TranscriptSegment(
+            start_seconds=0, end_seconds=2, text="be familiar with evacuation", speaker=None
+        ),
+        TranscriptSegment(
+            start_seconds=2, end_seconds=4, text="procedures and fire exits", speaker=None
+        ),
+    ]
+    COARSE = [
+        TranscriptSegment(
+            start_seconds=0,
+            end_seconds=4,
+            text="be familiar with evacuation procedures and fire exits",
+            speaker=None,
+        )
+    ]
+
+    def test_the_same_words_cut_differently_agree(self):
+        alignment = align_transcripts(
+            make_transcript("deepgram", self.FINE),
+            make_transcript("assemblyai", self.COARSE),
+        )
+
+        assert [s.agreement_score for s in alignment.spans] == [1.0, 1.0]
+        assert not any(s.is_divergent for s in alignment.spans)
+
+    def test_the_other_column_holds_what_was_said_in_that_span(self):
+        """Not the whole paragraph the span happened to fall inside."""
+
+        alignment = align_transcripts(
+            make_transcript("deepgram", self.FINE),
+            make_transcript("assemblyai", self.COARSE),
+        )
+
+        assert alignment.spans[0].other_text == "be familiar with evacuation"
+        assert alignment.spans[1].other_text == "procedures and fire exits"
+
+    def test_a_real_disagreement_inside_a_coarse_span_still_shows(self):
+        """The whole point of the pairing, and the thing not to break."""
+
+        wrong = [
+            TranscriptSegment(
+                start_seconds=0,
+                end_seconds=4,
+                text="be familiar with evacuation procedures and fire escapes",
+                speaker=None,
+            )
+        ]
+
+        alignment = align_transcripts(
+            make_transcript("deepgram", self.FINE),
+            make_transcript("assemblyai", wrong),
+        )
+
+        assert not alignment.spans[0].is_divergent
+        assert alignment.spans[1].is_divergent
+        assert "escapes" in alignment.spans[1].other_text

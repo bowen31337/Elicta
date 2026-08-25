@@ -1,3 +1,5 @@
+import type { CapabilityReadiness } from './ReadinessWarnings';
+
 import { useCallback, useEffect, useState } from 'react';
 
 import { getApiClient, type ApiClient } from '../../services/apiClient';
@@ -5,7 +7,6 @@ import { getApiClient, type ApiClient } from '../../services/apiClient';
 export type SecretKey =
   | 'anthropic_api_key'
   | 'anthropic_oauth_token'
-  | 'asr_vendor_api_key'
   | 'capture_vendor_api_key'
   | 'microsoft_graph_client_secret'
   | 'state_database_url';
@@ -29,7 +30,29 @@ export interface SecretStatus {
   readonly hint: string | null;
 }
 
-export type SpeechVendor = 'deepgram' | 'assemblyai' | 'custom';
+export type SpeechVendor = 'deepgram' | 'assemblyai' | 'gemini' | 'custom';
+
+/**
+ * How the pool picks which key serves the next request.
+ *
+ * `single` names one and uses it until told otherwise. `rotate` moves through
+ * the enabled keys in order, which is what spreads a meeting's load across
+ * several accounts rather than exhausting one.
+ */
+export type SelectionPolicy = 'single' | 'rotate';
+
+export interface SpeechCredential {
+  readonly id: string;
+  readonly vendor: SpeechVendor;
+  readonly label: string;
+  readonly enabled: boolean;
+}
+
+export interface SpeechCredentialPool {
+  readonly credentials: readonly SpeechCredential[];
+  readonly policy: SelectionPolicy;
+  readonly active_id: string | null;
+}
 
 /**
  * Where Claude calls are routed. Every option speaks the Anthropic Messages
@@ -57,7 +80,6 @@ export interface InferenceSettings {
 export interface ConnectorSettings {
   readonly custom_vendor_name?: string | null;
   readonly custom_base_url?: string | null;
-  readonly live_vendor: SpeechVendor;
   readonly record_vendors: readonly SpeechVendor[];
   readonly keyterm_prompting: boolean;
   readonly disable_vendor_retention: boolean;
@@ -103,10 +125,23 @@ export interface ServiceSettings {
   readonly inference: InferenceSettings;
   readonly vendors: { asr_base_url: string | null; capture_base_url: string | null };
   readonly connectors: ConnectorSettings;
+  /**
+   * The speech keys, and which one serves. Not part of `secrets` because
+   * these are not one named field each: there are as many as the operator
+   * has, and they are added and removed rather than overwritten.
+   */
+  readonly speech?: SpeechCredentialPool;
   readonly documents?: DocumentSourceSettings;
   readonly storage?: StorageSettings;
   readonly consent?: ConsentSettings;
   readonly secrets: readonly SecretStatus[];
+  /**
+   * What cannot run, and what it costs. Computed by the service from the
+   * secrets and the modes actually selected, so the screen never has to know
+   * which key matters for which capability — a rule that lived only in the
+   * composition root, where no operator could read it.
+   */
+  readonly readiness?: readonly CapabilityReadiness[];
   readonly durable: boolean;
 }
 
@@ -132,6 +167,29 @@ export interface UseSettingsResult {
   readonly error: string | null;
   readonly save: (draft: SettingsDraft) => Promise<boolean>;
   readonly test: (key: SecretKey) => Promise<string>;
+  /**
+   * The four pool operations. Unlike everything else on this screen they
+   * apply the moment they are called rather than waiting for Save, because
+   * each is its own request — there is no field on the settings body that
+   * could carry "one more key" alongside the rest of the form.
+   *
+   * Each returns null on success and a sentence to show the operator
+   * otherwise, and reloads the settings so the list on screen is the
+   * service's, never an optimistic guess.
+   */
+  readonly addSpeechKey: (
+    vendor: SpeechVendor,
+    label: string,
+    value: string,
+  ) => Promise<string | null>;
+  readonly setSpeechKeyEnabled: (id: string, enabled: boolean) => Promise<string | null>;
+  readonly removeSpeechKey: (id: string) => Promise<string | null>;
+  readonly setSpeechPolicy: (policy: SelectionPolicy) => Promise<string | null>;
+  /**
+   * The verdict on one key, in a sentence to show beside it. Unlike the other
+   * four this changes nothing, so it does not reload the settings.
+   */
+  readonly testSpeechKey: (id: string) => Promise<string>;
 }
 
 /**
@@ -208,5 +266,90 @@ export function useSettings(client: ApiClient = getApiClient()): UseSettingsResu
     [client],
   );
 
-  return { settings, loading, saving, error, save, test };
+  /**
+   * One request, then a reload. The reload is the point: the pool the screen
+   * shows after a change is the one the service holds, so a rejected write
+   * cannot leave a key rendered that is not there.
+   */
+  const poolWrite = useCallback(
+    async (send: () => Promise<{ error?: unknown }>): Promise<string | null> => {
+      try {
+        const { error: failure } = await send();
+        if (failure) return 'The service rejected that change.';
+        await load();
+        return null;
+      } catch {
+        return 'The service is unreachable. Nothing was changed.';
+      }
+    },
+    [load],
+  );
+
+  const addSpeechKey = useCallback(
+    (vendor: SpeechVendor, label: string, value: string) =>
+      poolWrite(() =>
+        client.POST('/api/admin/settings/speech/credentials', {
+          body: { vendor, label, value } as never,
+        }),
+      ),
+    [client, poolWrite],
+  );
+
+  const setSpeechKeyEnabled = useCallback(
+    (id: string, enabled: boolean) =>
+      poolWrite(() =>
+        client.PATCH('/api/admin/settings/speech/credentials/{credential_id}', {
+          params: { path: { credential_id: id } },
+          body: { enabled } as never,
+        }),
+      ),
+    [client, poolWrite],
+  );
+
+  const removeSpeechKey = useCallback(
+    (id: string) =>
+      poolWrite(() =>
+        client.DELETE('/api/admin/settings/speech/credentials/{credential_id}', {
+          params: { path: { credential_id: id } },
+        }),
+      ),
+    [client, poolWrite],
+  );
+
+  const testSpeechKey = useCallback(
+    async (id: string): Promise<string> => {
+      try {
+        const { data } = await client.POST(
+          '/api/admin/settings/speech/credentials/{credential_id}/test',
+          { params: { path: { credential_id: id } } },
+        );
+        return data ? (data as { detail: string }).detail : 'Could not test this key.';
+      } catch {
+        return 'The service is unreachable.';
+      }
+    },
+    [client],
+  );
+
+  const setSpeechPolicy = useCallback(
+    (policy: SelectionPolicy) =>
+      poolWrite(() =>
+        client.PUT('/api/admin/settings/speech/policy', { body: { policy } as never }),
+      ),
+    [client, poolWrite],
+  );
+
+  return {
+    settings,
+    loading,
+    saving,
+    error,
+    save,
+    test,
+    addSpeechKey,
+    setSpeechKeyEnabled,
+    removeSpeechKey,
+    testSpeechKey,
+    setSpeechPolicy,
+  };
 }

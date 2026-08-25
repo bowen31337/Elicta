@@ -172,6 +172,25 @@ class Candidate(Base):
     pruned: Mapped[bool] = mapped_column(
         sa.Boolean(), nullable=False, default=False, server_default=sa.false()
     )
+    # Which document this question was drafted from, and the document
+    # statuses it rests on. Nullable and empty respectively, because the
+    # Analyst also reasons questions out of the engagement rather than off a
+    # page — and *that* is the operator's signal that a bank is inference
+    # rather than evidence, so it has to reload as absence rather than as a
+    # value that went missing.
+    # Typed to match `candidates_create` exactly — `Text` and a *nullable*
+    # JSON column. The chain has carried both since that revision; only the
+    # model and the wire type dropped them. The drift guard compares column
+    # names, so a type or a nullability that disagreed with the chain would
+    # pass it and fail on PostgreSQL, which is the failure the guard exists
+    # to prevent in its other half.
+    source_doc: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    authority_match: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    # Carried for the live path: the panel's headline, and which of the
+    # gate's conditions this question answers. Both nullable to match the
+    # chain, and both absent on a bank compiled before they were kept.
+    stub: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    trigger_types: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
     # Position within the engagement's bank, so the list reads back in the
     # order it was compiled in rather than in whatever order the rows return.
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)

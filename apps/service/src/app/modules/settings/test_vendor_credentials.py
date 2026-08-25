@@ -77,18 +77,20 @@ def test_each_vendor_key_is_probed_against_its_own_vendor() -> None:
     assert _vendor_probe_for(SecretKey.ASSEMBLYAI_API_KEY, store) is probe_assemblyai
 
 
-def test_the_live_path_key_still_follows_the_live_vendor_setting() -> None:
-    """Unchanged behaviour for the credential this task does not own."""
+def test_the_generic_key_is_probed_against_the_provider_the_live_path_drives() -> None:
+    """There is no vendor setting for it to follow any more.
+
+    It followed `connectors.live_vendor`, which the live path did not: the
+    recogniser was Deepgram whatever that said. The pool decides the provider
+    now — choosing a credential is choosing a vendor — so this key, which
+    predates the pool, is probed against the provider the live path can
+    actually drive.
+    """
 
     from app.composition import _vendor_probe_for
-    from app.modules.settings.models import ConnectorSettings, SpeechVendor
     from app.modules.settings.probes import probe_deepgram
     from app.modules.settings.store import InMemorySettingsStore
 
     store = InMemorySettingsStore()
-    # Through the store's own writer, not by mutating what `read()` returned:
-    # `read()` builds a fresh `ServiceSettings` each call and only happens to
-    # reuse the nested `connectors` instance.
-    store.write_connectors(ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM))
 
     assert _vendor_probe_for(SecretKey.ASR_VENDOR_API_KEY, store) is probe_deepgram

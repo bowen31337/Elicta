@@ -27,9 +27,16 @@ from .models import (
     SpeechVendor,
     VendorSettings,
 )
-from .probes import ProbeFailed, probe_deepgram
+from .probes import ProbeFailed, probe_deepgram, probe_for_vendor
 from .router import build_settings_router
 from .service import apply_settings_update
+from .speech_admin import (
+    add_credential,
+    check_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
 from .sqlite_store import (
     SettingsKeyUnavailableError,
     SqliteSettingsStore,
@@ -89,10 +96,10 @@ async def test_saving_connectors_alone_leaves_the_other_panels_untouched() -> No
 
     settings = await apply_settings_update(
         store,
-        SettingsUpdateRequest(connectors=ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM)),
+        SettingsUpdateRequest(connectors=ConnectorSettings(keyterm_prompting=False)),
     )
 
-    assert settings.connectors.live_vendor is SpeechVendor.DEEPGRAM
+    assert settings.connectors.keyterm_prompting is False
     assert settings.vendors.asr_base_url == "https://asr.example"
 
 
@@ -100,10 +107,10 @@ def test_writing_connectors_is_readable_back(tmp_path: Path) -> None:
     store = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False)
 
     store.write_vendors(VendorSettings(asr_base_url="https://asr.example"))
-    store.write_connectors(ConnectorSettings(live_vendor=SpeechVendor.DEEPGRAM))
+    store.write_connectors(ConnectorSettings(keyterm_prompting=False))
 
     reopened = SqliteSettingsStore(tmp_path / "settings.db", read_environment=False).read()
-    assert reopened.connectors.live_vendor is SpeechVendor.DEEPGRAM
+    assert reopened.connectors.keyterm_prompting is False
     assert reopened.vendors.asr_base_url == "https://asr.example"
 
 
@@ -167,8 +174,36 @@ def _client(check_connection) -> TestClient:
     async def apply_settings(payload):
         return await apply_settings_update(store, payload)
 
+    async def add_speech(payload):
+        return add_credential(store, payload)
+
+    async def update_speech(credential_id, payload):
+        return update_credential(store, credential_id, payload)
+
+    async def remove_speech(credential_id):
+        remove_credential(store, credential_id)
+
+    async def check_speech(credential_id):
+        return await check_credential(
+            store, credential_id, lambda vendor: probe_for_vendor(vendor.value)
+        )
+
+    async def speech_policy(payload):
+        return set_policy(store, payload)
+
     app = FastAPI()
-    app.include_router(build_settings_router(read_settings, apply_settings, check_connection))
+    app.include_router(
+        build_settings_router(
+            read_settings,
+            apply_settings,
+            check_connection,
+            add_speech,
+            update_speech,
+            remove_speech,
+            check_speech,
+            speech_policy,
+        )
+    )
     return TestClient(app)
 
 

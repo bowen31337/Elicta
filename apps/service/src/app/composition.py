@@ -202,10 +202,25 @@ from app.modules.settings.models import (
     SecretKey,
     ServiceSettings,
     SettingsUpdateRequest,
+    SpeechVendor,
 )
 from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
 from app.modules.settings.service import apply_settings_update, check_secret_connection
+from app.modules.settings.speech_admin import (
+    SpeechCredentialCheck,
+    SpeechCredentialCreate,
+    SpeechCredentialUpdate,
+    SpeechCredentialView,
+    SpeechPolicyUpdate,
+    add_credential,
+    check_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
+from app.modules.settings.speech_credentials import SpeechCredentialPool
+from app.modules.settings.speech_resolution import resolve_speech_key
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.modules.trigger.gate import evaluate as evaluate_utterance
 from app.modules.trigger.listener import LiveUtterances
@@ -428,6 +443,10 @@ class Backend:
     #: runs outside its request, and an `asyncio` task nobody holds a reference
     #: to can be collected mid-flight — so these are held until they end.
     compile_tasks: dict[str, Any] = field(default_factory=dict)
+    #: Stages a compile has finished, while it is still running. The run
+    #: itself keeps the same list and is the record afterwards; this is the
+    #: only way to see inside one that has not returned yet.
+    compile_stages: dict[str, list[str]] = field(default_factory=dict)
     extraction_passes: dict[str, Any] = field(default_factory=dict)
     structuring_passes: dict[str, Any] = field(default_factory=dict)
     batch_submissions: dict[str, Any] = field(default_factory=dict)
@@ -799,6 +818,27 @@ def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
     return read
 
 
+def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
+    """Drop every live session for this meeting.
+
+    Module level because the two moments a session ends sit in different
+    scopes — starting the next one, and handing the audio to the record path.
+
+    Dropped rather than flagged: the only reader is the "what is being
+    recorded right now" listing, and nothing else in the service asks
+    `live_sessions` anything. What a finished session leaves behind — its
+    engagement, its audio, its transcripts — is keyed elsewhere and is
+    deliberately untouched here.
+    """
+
+    for session_id in [
+        key
+        for key, session in backend.live_sessions.items()
+        if session.meeting_id == meeting_id
+    ]:
+        del backend.live_sessions[session_id]
+
+
 def _engagement_of_meeting(backend: Backend, meeting_id: str) -> str | None:
     """Which engagement a meeting belongs to, or `None` if nothing knows.
 
@@ -1087,7 +1127,10 @@ def _vendor_probe_for(key: SecretKey, settings_store: SettingsStore) -> Any:
     if key is SecretKey.ASSEMBLYAI_API_KEY:
         return probe_for_vendor("assemblyai")
     if key is SecretKey.ASR_VENDOR_API_KEY:
-        return probe_for_vendor(settings_store.read().connectors.live_vendor.value)
+        # The pool decides which provider the live path uses, so there is no
+        # separate setting to consult. The generic key predates the pool and
+        # is probed against the provider the live path can actually drive.
+        return probe_for_vendor(SpeechVendor.DEEPGRAM.value)
     return None
 
 
@@ -1617,6 +1660,14 @@ def build_app(
         """
 
         backend.retained_audio[session_id] = audio_ref
+        # And it is the end of the meeting. The desktop posts this when the
+        # operator presses Stop, and there is no other end-of-meeting signal
+        # to hang this on — the app has no "end session" call at all, so
+        # without this a meeting that is stopped and not started again stays
+        # listed as live until the process exits. `session_id` here is the id
+        # the chunks were posted under, which the desktop sends as the
+        # meeting's.
+        _end_live_sessions_of(backend, session_id)
 
     app.include_router(
         _asr_router.build_record_path_router(
@@ -1934,8 +1985,15 @@ def build_app(
                     if key is SecretKey.ANTHROPIC_API_KEY
                     else AuthMode.OAUTH_TOKEN
                 )
+                # The model the operator chose, not a default: "this
+                # credential works" and "this credential works for what you
+                # have configured" are different claims, and only the second
+                # is worth showing.
                 await probe_anthropic_credential(
-                    secret, base_url=inference.base_url, mode=mode
+                    secret,
+                    base_url=inference.base_url,
+                    mode=mode,
+                    model=inference.model,
                 )
 
         # The speech vendors have real probes now, each key tested against its
@@ -1954,8 +2012,41 @@ def build_app(
 
         return await check_secret_connection(settings_store, key, probe)
 
+    async def add_speech_credential(
+        payload: SpeechCredentialCreate,
+    ) -> SpeechCredentialView:
+        return add_credential(settings_store, payload)
+
+    async def update_speech_credential(
+        credential_id: str, payload: SpeechCredentialUpdate
+    ) -> SpeechCredentialView:
+        return update_credential(settings_store, credential_id, payload)
+
+    async def remove_speech_credential(credential_id: str) -> None:
+        remove_credential(settings_store, credential_id)
+
+    async def check_speech_credential(credential_id: str) -> SpeechCredentialCheck:
+        # The probe follows the credential's own vendor, and `probe_for_vendor`
+        # answers None where this build has no client — which the verdict
+        # reports as "configured, not verified" rather than as a failure.
+        return await check_credential(
+            settings_store, credential_id, lambda vendor: probe_for_vendor(vendor.value)
+        )
+
+    async def set_speech_policy(payload: SpeechPolicyUpdate) -> SpeechCredentialPool:
+        return set_policy(settings_store, payload)
+
     app.include_router(
-        build_settings_router(read_settings, apply_settings, check_connection)
+        build_settings_router(
+            read_settings,
+            apply_settings,
+            check_connection,
+            add_speech_credential,
+            update_speech_credential,
+            remove_speech_credential,
+            check_speech_credential,
+            set_speech_policy,
+        )
     )
 
     _include_operational_routers(
@@ -2040,6 +2131,12 @@ def _include_operational_routers(
             # second half of the pair so a future caller that skips admission
             # still cannot start a session against nothing.
             return None  # pragma: no cover
+        # A meeting has one live session. Starting a second used to leave the
+        # first listed for the life of the process, because nothing anywhere
+        # removed one — `live_sessions` was written on start and read for the
+        # listing and touched nowhere else. A recorder that stopped and
+        # started again showed up as two meetings being recorded at once.
+        _end_live_sessions_of(backend, meeting_id)
         backend.next_session_id += 1
         started = SessionStart(
             session_id=f"session-{backend.next_session_id}",
@@ -2508,7 +2605,12 @@ def _include_operational_routers(
         async def chain() -> None:
             try:
                 run = await _run_engagement_compile(
-                    backend, engagement_id, compiler_engines
+                    backend,
+                    engagement_id,
+                    compiler_engines,
+                    lambda stage: backend.compile_stages.setdefault(
+                        compile_id, []
+                    ).append(stage),
                 )
                 backend.compile_runs[compile_id] = run
                 log_compile_outcome(compile_id, run)
@@ -2565,7 +2667,14 @@ def _include_operational_routers(
                 compile_id=latest,
                 state="running",
                 complete=False,
-                stages_completed=[],
+                # What it has actually finished, not a hardcoded nothing. The
+                # run records its own stages and only becomes reachable when
+                # the whole chain returns, so for the several minutes a real
+                # compile takes this said `[]` — and a compile working
+                # steadily read exactly like one hung on its first model
+                # call. That is the question worth being able to answer about
+                # a long job, and it was the one thing this could not say.
+                stages_completed=list(backend.compile_stages.get(latest, [])),
             )
 
         run = backend.compile_runs.get(latest)
@@ -2950,10 +3059,19 @@ def _include_operational_routers(
         # Only asked of the vendor-backed default. A recogniser handed in by a
         # caller answers for its own readiness, and gating it on a Deepgram
         # credential would make an injected one untestable without buying one.
+        #
+        # Through `resolve_speech_key`, which is the function the recogniser
+        # itself calls. That is the point rather than a convenience: these are
+        # two askings of one question, and when they consulted different
+        # places they disagreed — the recogniser moved to the pool, this gate
+        # kept reading the fixed key, and an operator who added their key on
+        # the Settings screen got silence. Not an error and not a log line;
+        # the chunk returned quietly, exactly as on a deployment that has
+        # bought no speech at all.
         if (
             live_recogniser is None
             and settings_store is not None
-            and settings_store.get_secret(SecretKey.DEEPGRAM_API_KEY) is None
+            and resolve_speech_key(settings_store, SpeechVendor.DEEPGRAM) is None
         ):
             return
         await live_utterances.feed(session_id, pcm)
@@ -3426,7 +3544,10 @@ def _record_debrief_artifacts(backend: Backend, session_id: str, run: Any) -> No
 
 
 async def _run_engagement_compile(
-    backend: Backend, engagement_id: str, engines: CompilerEngines
+    backend: Backend,
+    engagement_id: str,
+    engines: CompilerEngines,
+    on_stage: Any = None,
 ) -> Any:
     """Run the §3.10 compiler chain for one engagement."""
 
@@ -3484,6 +3605,7 @@ async def _run_engagement_compile(
         context_pack=context_pack,
         engines=engines,
         sinks=sinks,
+        on_stage=on_stage,
     )
     if run.complete:
         run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
@@ -3703,6 +3825,10 @@ def _store_compiled_candidates(backend: Backend, engagement_id: str, run: Any) -
             # question — that is `recompile_meeting_bank`'s flag to set.
             inherited_from_open_question=False,
             pruned=False,
+            source_doc=getattr(candidate, "source_doc", None),
+            authority_match=list(getattr(candidate, "authority_match", []) or []),
+            stub=getattr(candidate, "stub", "") or "",
+            trigger_types=list(getattr(candidate, "trigger_types", []) or []),
         )
         for candidate in compiled
     ]

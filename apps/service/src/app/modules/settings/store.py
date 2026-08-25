@@ -37,6 +37,7 @@ from .models import (
     StorageSettings,
     VendorSettings,
 )
+from .speech_credentials import SpeechCredentialPool
 
 # The environment variable each secret falls back to, so an existing headless
 # deployment keeps working unchanged after this module lands.
@@ -145,6 +146,8 @@ class SettingsStore(Protocol):
 
     def write_consent(self, consent: ConsentSettings) -> None: ...
 
+    def write_speech(self, speech: SpeechCredentialPool) -> None: ...
+
     def set_secret(self, key: SecretKey, value: str) -> None:
         """Store a secret. An empty value clears it."""
 
@@ -162,6 +165,10 @@ class InMemorySettingsStore:
         self._connectors = ConnectorSettings()
         self._documents = DocumentSourceSettings()
         self._consent = ConsentSettings()
+        # Empty rather than absent: an empty pool answers "nothing
+        # configured" in the same shape a populated one does, so the missing
+        # case does not have to be handled by every caller.
+        self._speech = SpeechCredentialPool()
         self._secrets: dict[SecretKey, SecretValue] = {}
         self._secret_updated: dict[SecretKey, datetime] = {}
         self._updated_at: datetime | None = None
@@ -181,6 +188,7 @@ class InMemorySettingsStore:
             documents=_documents_with_environment(self._documents, self._read_environment),
             storage=_storage_view(self.get_secret(SecretKey.STATE_DATABASE_URL)),
             consent=self._consent,
+            speech=self._speech,
             secrets=[self._status(key) for key in SecretKey],
             durable=self.durable,
             updated_at=self._updated_at,
@@ -194,6 +202,9 @@ class InMemorySettingsStore:
             hint=secret.hint() if secret is not None else None,
             updated_at=self._secret_updated.get(key),
         )
+
+    def write_speech(self, speech: SpeechCredentialPool) -> None:
+        self._speech = speech
 
     def write_inference(self, inference: InferenceSettings) -> None:
         self._inference = inference

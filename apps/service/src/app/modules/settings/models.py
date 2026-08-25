@@ -25,8 +25,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 
 class SecretKey(str, Enum):
@@ -254,7 +255,27 @@ class SpeechVendor(str, Enum):
 
     DEEPGRAM = "deepgram"
     ASSEMBLYAI = "assemblyai"
+    #: Held so a key can be stored and labelled before there is a client for
+    #: it. Selection is filtered by what the service can actually drive, so a
+    #: credential here is reported as unusable rather than chosen and failed.
+    GEMINI = "gemini"
     CUSTOM = "custom"
+
+
+#: Connector keys that existed in saved settings and no longer exist here.
+#:
+#: `ConnectorSettings` forbids extra keys so a typo fails loudly instead of
+#: being ignored, which also means removing a field breaks every settings file
+#: still containing it — at startup, on the operator's own configuration.
+#: Naming the retired ones keeps both properties: these are dropped, anything
+#: else unknown still fails.
+RETIRED_CONNECTOR_KEYS: frozenset[str] = frozenset({"live_vendor"})
+
+
+def without_retired_connector_keys(stored: dict) -> dict:
+    """A saved connectors payload, minus fields this build has retired."""
+
+    return {k: v for k, v in stored.items() if k not in RETIRED_CONNECTOR_KEYS}
 
 
 class ConnectorSettings(BaseModel):
@@ -268,14 +289,13 @@ class ConnectorSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    live_vendor: SpeechVendor = Field(
-        default=SpeechVendor.ASSEMBLYAI,
-        description=(
-            "Streaming engine for the live trigger path. AssemblyAI's "
-            "confidence-based turn model reaches a lower latency floor than a "
-            "silence timer (§14.2) and is the cheaper of the two per hour."
-        ),
-    )
+    # `live_vendor` was here, naming the streaming engine for the live path.
+    # It is gone because the speech credential pool decides: the ASR service
+    # takes one credential at a time and the credential carries its vendor, so
+    # choosing it *is* choosing the provider. Two places claiming to select a
+    # vendor could disagree, and did — a deployment read AssemblyAI here while
+    # the live path drove Deepgram regardless, which is what sent an operator
+    # to set the wrong key.
     record_vendors: list[SpeechVendor] = Field(
         default_factory=lambda: [SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI],
         description=(
@@ -322,7 +342,7 @@ class ConnectorSettings(BaseModel):
         operator can fix it, rather than in a meeting.
         """
 
-        selected = [self.live_vendor, *self.record_vendors]
+        selected = list(self.record_vendors)
         if SpeechVendor.CUSTOM in selected and not self.custom_base_url:
             raise ValueError(
                 "a custom speech service needs custom_base_url — the endpoint to call"
@@ -458,6 +478,42 @@ class ConsentSettings(BaseModel):
     )
 
 
+class Capability(str, Enum):
+    """The things an operator would notice not working."""
+
+    INFERENCE = "inference"
+    LIVE_NUDGES = "live_nudges"
+    RECORD_TRANSCRIPTION = "record_transcription"
+    DOCUMENT_LINKS = "document_links"
+
+
+class CapabilityReadiness(BaseModel):
+    """One capability, and why it is or is not available."""
+
+    capability: Capability
+    ready: bool
+    missing: tuple[SecretKey, ...] = Field(
+        default=(),
+        description="The secrets that would make it ready, in the modes currently selected.",
+    )
+    consequence: str = Field(
+        description=(
+            "What does not happen without them, in the operator's terms — what "
+            "stops, not which field is blank. The screen already shows which "
+            "field is blank."
+        )
+    )
+    optional: bool = Field(
+        default=False,
+        description=(
+            "Whether the deployment is usable without it. An optional "
+            "capability is an extra somebody may not want; a required one "
+            "missing means a core promise of the product silently does not "
+            "happen."
+        ),
+    )
+
+
 class ServiceSettings(BaseModel):
     """Everything an operator can administer, with no secret values in it."""
 
@@ -469,7 +525,36 @@ class ServiceSettings(BaseModel):
     documents: DocumentSourceSettings = Field(default_factory=DocumentSourceSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     consent: ConsentSettings = Field(default_factory=ConsentSettings)
+    speech: Any = Field(
+        default=None,
+        description=(
+            "The pool of speech credentials and how one is chosen. Typed loosely "
+            "here because `speech_credentials` imports this module; the store "
+            "supplies a `SpeechCredentialPool`."
+        ),
+    )
     secrets: list[SecretStatus] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def readiness(self) -> list[CapabilityReadiness]:
+        """What is not configured, and what it costs.
+
+        Derived here rather than assembled by each store, so the two stores
+        cannot disagree and no caller has to remember a second request. The
+        rules live in `readiness.py`; this is only where they meet the wire.
+        """
+
+        from .readiness import readiness_of
+
+        return list(
+            readiness_of(
+                configured={s.key for s in self.secrets if s.configured},
+                auth_mode=self.inference.auth_mode,
+                pool=self.speech,
+            )
+        )
+
     durable: bool = Field(
         default=False,
         description=(

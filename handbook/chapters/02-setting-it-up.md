@@ -62,21 +62,39 @@ item: Clear is separate and deliberate | Removing a credential is its own action
 item: Test really tests | It checks the credential against the service rather than reporting "configured" as though that meant "working". If it fails you see the service's own explanation, never your key.
 ```
 
-## Choosing transcription services
+## Speech keys
 
-The live transcription and the after-the-meeting transcription are set up
-separately, because they are bought on different qualities. The live one is
-chosen for how quickly it can tell that a sentence has finished. The
-after-the-meeting ones are chosen for being accurate — and for disagreeing
-usefully with each other.
+Transcription keys are a list you add to, not a field you fill in. You can hold
+as many as you have, from as many companies, and each one is listed under the
+name of the company that issued it — the name on the tab you copied it from.
 
-![Transcription services](../../docs/journeys/screenshots/settings-speech-vendors.png)
+![Speech keys](../../docs/journeys/screenshots/settings-speech-vendors.png)
 
-The key for transcription sits with that choice, under the name of the company
-that issued it, because that is the name on the tab you copied it from.
+There is no separate setting for which company transcribes. Adding a key is
+choosing one. That is why a list replaced the single field that used to be
+here: with one field, a second key silently replaced the first, and the only
+sign was four characters changing.
 
-The two used for the recording must be different companies. The same service
-twice would agree with itself and flag nothing, so the form will not accept it.
+Each key says what it is actually doing, because the two jobs do not want the
+same companies. One transcribes while people are still talking, which is what
+the suggestions during the meeting depend on; the other transcribes the
+recording afterwards, and needs two different companies so that where they
+disagree can be flagged for you. A key that does one and not the other says
+so on its own line, rather than leaving you to wonder whether it is broken.
+
+Everything in this list saves itself the moment you do it. The Save bar at the
+bottom of the screen is for the rest of the settings, not for these.
+
+Three things you can do to a key you already have. **Test** asks the company
+itself, and you see their answer rather than ours. **Take out of service**
+stops it being used and keeps it, which is what you want while you find out
+whether a key has been revoked. **Remove** asks once and then it is gone — the
+key itself is never shown again, by design, so there is nothing to copy back.
+
+When you hold more than one, the setting below the list decides how they are
+used: one key until you say otherwise, or each request taking the next in turn,
+which spreads a long meeting across several accounts instead of exhausting one.
+
 You can also point Elicta at a service it does not ship support for, though it
 will tell you that some behaviour then needs checking against that provider
 yourself.

@@ -24,7 +24,8 @@ from typing import Any
 
 import httpx
 
-from app.modules.settings.models import SecretKey
+from app.modules.settings.models import SpeechVendor
+from app.modules.settings.speech_resolution import resolve_speech_key
 
 from .deepgram_engines import DeepgramUnavailable, deepgram_listen_url
 
@@ -61,8 +62,12 @@ def deepgram_live_recogniser(
     """
 
     async def recognise(session_id: str, pcm: bytes) -> str:
-        secret = store.get_secret(SecretKey.DEEPGRAM_API_KEY)
-        if secret is None:
+        # Through the pool rather than the fixed key: an operator may hold
+        # several Deepgram keys — one per client for attribution, or a spare
+        # against one being revoked — and the fixed key remains as the
+        # fallback for a deployment that predates the pool.
+        key = resolve_speech_key(store, SpeechVendor.DEEPGRAM)
+        if key is None:
             raise DeepgramUnavailable("no Deepgram credential is configured")
 
         connectors = store.read().connectors
@@ -76,7 +81,7 @@ def deepgram_live_recogniser(
                     opt_out_of_retention=connectors.disable_vendor_retention,
                 ),
                 headers={
-                    "Authorization": f"Token {secret.reveal()}",
+                    "Authorization": f"Token {key}",
                     "Content-Type": "application/octet-stream",
                 },
                 content=pcm,

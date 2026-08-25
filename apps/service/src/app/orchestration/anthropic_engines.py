@@ -69,6 +69,7 @@ from app.modules.debrief.pipeline.models import (
     BmadProjectBriefDraft,
     TranslationOutcome,
 )
+from app.modules.trigger.lexicon import GATE_TRIGGER_TYPES
 
 from .engines import (
     STAGE_CLASSIFY,
@@ -110,7 +111,15 @@ _BANK_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "template_section": {"type": "string"},
-                    "trigger_types": {"type": "array", "items": {"type": "string"}},
+                    # A closed vocabulary, and the gate's own. Free strings
+                    # were accepted here and nothing could consume them: the
+                    # runtime matches a hit's category against this list, and
+                    # a model writing "vague quantity" where the gate says
+                    # `unquantified_amount` records a fact no one can use.
+                    "trigger_types": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(GATE_TRIGGER_TYPES)},
+                    },
                     "phrasing": {"type": "string"},
                     "stub": {"type": "string"},
                     "lang": {"type": "string"},
@@ -335,9 +344,16 @@ Tag every candidate:
   not a question for this template; leave it out. Never file a candidate under
   a meeting artifact such as an open-questions list or a decision log; those
   are written after a meeting, and this is a bank for going into one.
-- `trigger_types`: the conversational conditions that should surface it — an
-  unquantified quantity, a vague adjective, a named system nobody briefed you
-  on, a contradiction with a document, a topic left uncovered.
+- `trigger_types`: which conversational conditions should surface it, from
+  this exact list and no other wording:
+  `unquantified_amount` (a quantity nobody put a number on — "many", "a few"),
+  `unquantified_property` (a quality nobody measured — "fast", "flexible"),
+  `unquantified_time` (a date nobody fixed — "soon", "shortly"),
+  `qualified_agreement` (an answer that agreed with conditions — "typically",
+  "if possible").
+  Name every one the question would genuinely answer; a question that answers
+  none of them belongs to no trigger and will only ever be read on the
+  preparation screen.
 - `stub`: the same question at a glance, short enough to read without breaking
   eye contact.
 - `phrasing`: the exact wording, ready to be read aloud.
@@ -428,11 +444,18 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
         retry_after = _retry_after(exc)
         if retry_after is None:
             # A 429 with no `retry-after` and no rate-limit headers is what
-            # Anthropic returns when the *model* is not one the credential's
-            # plan includes: the body says `rate_limit_error`, and the same
+            # Anthropic returns when the credential is not entitled to make
+            # this request: the body says `rate_limit_error`, and the same
             # request a second later is refused identically. Promising it
             # "should succeed shortly" sends an operator away to wait for
             # something that never happens — which is exactly what it did.
+            #
+            # This named the model as the cause and only the model, which sent
+            # the next operator to check a setting that was already right: the
+            # engagement had `claude-opus-5` chosen and `models.list` returned
+            # `claude-opus-5`. What was refused was an OAuth token's right to
+            # call `/v1/messages` at all. The credential is the first thing to
+            # look at, and the model the second.
             #
             # `NOT_ENTITLED` rather than `RATE_LIMITED`, because that kind is
             # documented as "a missing OAuth scope or a model the plan does not
@@ -444,9 +467,11 @@ def _upstream_failure(stage: str, exc: AnthropicError) -> UpstreamUnavailableErr
                 stage,
                 UpstreamFailure.NOT_ENTITLED,
                 "the model provider refused this request as rate limited but "
-                "gave no time to retry after. That usually means the model "
-                "chosen in Settings is one this credential may not be available "
-                "to use — check it there before waiting.",
+                "gave no time to retry after, so waiting will not clear it. "
+                "That is how a request the credential is not entitled to make "
+                "is refused: most often an OAuth token used where an API key "
+                "is required, and sometimes a model the plan does not include. "
+                "Check the credential first and the model second, in Settings.",
             )
         return UpstreamUnavailableError(
             stage,
@@ -534,16 +559,29 @@ def anthropic_debrief_engines(
     *,
     model: str = DEFAULT_MODEL,
     diarize: Any = None,
+    parse: Any = None,
+    converse_raw: Any = None,
 ) -> DebriefEngines:
     """The four text stages of §7, backed by Claude.
 
     `diarize` is passed through untouched: it is a speech-vendor seam, not a
     model call, so this module neither supplies nor wraps it.
+
+    `parse` and `converse_raw` are the two model calls the stages make, and
+    they are injectable so another harness can supply them without a second
+    copy of the stages. ADR-012 puts the debrief engine on the Agent SDK, and
+    everything that makes these stages worth trusting is *after* the model
+    call — the per-utterance alignment, the gap handling FR-2.19 asks for, the
+    strict zips. Writing those twice is how one harness quietly stops matching
+    the other on the failure that corrupts artifacts while still looking
+    well-formed.
     """
 
-    client = client or AsyncAnthropic()
-
     async def _parse(system: str, prompt: str, schema: type[BaseModel]) -> Any:
+        if parse is not None:
+            return await parse(system, prompt, schema)
+        nonlocal client
+        client = client or AsyncAnthropic()
         response = await client.messages.parse(
             model=model,
             max_tokens=MAX_TOKENS,
@@ -646,6 +684,10 @@ def anthropic_debrief_engines(
         verbatim and replays them back as the next turn's history.
         """
 
+        if converse_raw is not None:
+            return await converse_raw(_DEBRIEF_CONVERSATION_SYSTEM, turns)
+        nonlocal client
+        client = client or AsyncAnthropic()
         response = await client.messages.create(
             model=model,
             max_tokens=MAX_TOKENS,
@@ -716,6 +758,38 @@ def _by_utterance(lines: list[Any], count: int, stage: str) -> list[Any | None]:
     return slots
 
 
+def analyst_prompt(context_pack: Any) -> str:
+    """The one place the Analyst request is written.
+
+    Every route to the same pass reads this — the batch, the direct request,
+    and the Agent SDK adapter. Written more than once they would drift, and a
+    bank drafted by one route would quietly stop matching one drafted by
+    another: the kind of difference nobody notices until two engagements
+    disagree for no reason anyone can find.
+
+    Module-level rather than a closure because it is now shared across
+    modules, not just across the two routes in this one.
+    """
+
+    documents = "\n\n".join(
+        f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
+        for d in getattr(context_pack, "documents", [])
+    )
+    # In the request rather than the system prompt: the system prompt is
+    # cached across every engagement, and these vary per engagement.
+    sections = list(getattr(context_pack, "template_sections", None) or ())
+    if not sections:
+        sections = list(DEFAULT_TEMPLATE_SECTIONS)
+    listed = "\n".join(f"- {section}" for section in sections)
+    return (
+        f"Sector: {context_pack.sector}\n"
+        f"Project type: {context_pack.project_type}\n\n"
+        f"Template sections — file every candidate under exactly one of "
+        f"these, and cover all of them:\n{listed}\n\n"
+        f"Documents:\n\n{documents}"
+    )
+
+
 def anthropic_compiler_engines(
     client: AsyncAnthropic | None = None, *, model: str = DEFAULT_MODEL
 ) -> CompilerEngines:
@@ -772,32 +846,7 @@ def anthropic_compiler_engines(
             ]
         )
 
-    def _analyst_prompt(context_pack: Any) -> str:
-        """The one place the Analyst request is written.
-
-        Both routes to the same pass read this. Written twice they would drift,
-        and a bank drafted by the fallback would quietly stop matching one
-        drafted by the batch — the kind of difference nobody notices until two
-        engagements disagree for no reason anyone can find.
-        """
-
-        documents = "\n\n".join(
-            f"<document id=\"{d.document_id}\" status=\"{d.status.value}\">\n{d.text}\n</document>"
-            for d in getattr(context_pack, "documents", [])
-        )
-        # In the request rather than the system prompt: the system prompt is
-        # cached across every engagement, and these vary per engagement.
-        sections = list(getattr(context_pack, "template_sections", None) or ())
-        if not sections:
-            sections = list(DEFAULT_TEMPLATE_SECTIONS)
-        listed = "\n".join(f"- {section}" for section in sections)
-        return (
-            f"Sector: {context_pack.sector}\n"
-            f"Project type: {context_pack.project_type}\n\n"
-            f"Template sections — file every candidate under exactly one of "
-            f"these, and cover all of them:\n{listed}\n\n"
-            f"Documents:\n\n{documents}"
-        )
+    _analyst_prompt = analyst_prompt
 
     @_upstream_aware(STAGE_RUN_ANALYST)
     async def run_analyst(engagement_id: str, context_pack: Any) -> list[AnalystBatchResult]:
@@ -1065,12 +1114,46 @@ def engines_from_settings(
     unconfigured environment does.
     """
 
+    from app.modules.settings.models import AuthMode, SecretKey
+
     client = SettingsBackedClient(store)
-    model = store.read().inference.model or DEFAULT_MODEL
-    return (
-        anthropic_debrief_engines(client, model=model, diarize=diarize),
-        anthropic_compiler_engines(client, model=model),
-    )
+    settings = store.read()
+    model = settings.inference.model or DEFAULT_MODEL
+
+    # ADR-012 names the Agent SDK as the compiler's harness; the compiler
+    # shipped on the Messages API for both. With an API key that difference is
+    # a tidiness matter and the Messages API is the better of the two here —
+    # it has the Batch API, which §3.10 wants and the agent loop has not.
+    #
+    # With an OAuth token it stops being a preference. `claude setup-token`
+    # issues a credential entitled to Claude Code's surface, which is what the
+    # Agent SDK runs; `/v1/messages` refuses it with a 429 carrying no
+    # rate-limit headers, so on that credential the Messages API compiler
+    # cannot draft a bank at all. The credential decides the harness because
+    # only one harness will accept it.
+    compiler: CompilerEngines
+    debrief: DebriefEngines
+    if settings.inference.auth_mode is AuthMode.OAUTH_TOKEN:
+        from .agent_sdk_engines import (
+            agent_sdk_compiler_engines,
+            agent_sdk_debrief_engines,
+        )
+
+        token = store.get_secret(SecretKey.ANTHROPIC_OAUTH_TOKEN)
+        revealed = token.reveal() if token else None
+        compiler = agent_sdk_compiler_engines(oauth_token=revealed, model=model)
+        # Both halves, or the credential drafts a bank and then cannot write
+        # up the meeting the bank was drafted for. ADR-012 puts the debrief
+        # engine on the Agent SDK anyway; with this credential it is the only
+        # harness that will take it.
+        debrief = agent_sdk_debrief_engines(
+            oauth_token=revealed, model=model, diarize=diarize
+        )
+    else:
+        compiler = anthropic_compiler_engines(client, model=model)
+        debrief = anthropic_debrief_engines(client, model=model, diarize=diarize)
+
+    return (debrief, compiler)
 
 
 def configured_engines(
@@ -1097,18 +1180,52 @@ def configured_engines(
 
 
 async def probe_anthropic_credential(
-    secret: str, *, base_url: str | None = None, mode: Any = None
+    secret: str,
+    *,
+    base_url: str | None = None,
+    mode: Any = None,
+    model: str | None = None,
+    run: Any = None,
 ) -> None:
     """Verify an Anthropic credential, raising if it does not work.
 
-    Lists models rather than sending a message: it exercises the same
-    authentication path, costs no tokens, and cannot be mistaken for product
-    traffic in the operator's usage. Raises the SDK's own typed error, which
-    the settings surface renders by type and message — never echoing the
-    credential back.
+    Sends the smallest possible message on the configured model — one token,
+    no cache, no tools — because that is the request the product makes and the
+    only one whose success means anything.
+
+    This used to call `models.list`, on the reasoning that listing exercises
+    the same authentication path while costing no tokens. It does not. An
+    OAuth token authenticates, lists models, and includes the configured model
+    in what it lists, and is then refused for `/v1/messages`. So the Settings
+    screen said "Verified (…TAAA)" while every bank compile stopped at the
+    first model call, and the credential was the last thing anybody suspected.
+    A probe whose pass does not imply the product works is worse than no probe,
+    because it is read as evidence.
+
+    Raises the SDK's own typed error, which the settings surface renders by
+    type and message — never echoing the credential back.
     """
 
     from app.modules.settings.models import AuthMode
 
+    chosen = model or DEFAULT_MODEL
+
+    # The probe follows the harness, because the harness follows the
+    # credential. `engines_from_settings` runs the compiler on the Agent SDK
+    # for an OAuth token, so probing that credential against `/v1/messages`
+    # reports the 429 it is refused with there — for a token that drafts a
+    # bank perfectly well through the agent loop. That is the `models.list`
+    # mistake inverted: it passed a credential that could not work, this would
+    # fail one that does.
+    if (mode or AuthMode.API_KEY) is AuthMode.OAUTH_TOKEN:
+        from .agent_sdk_engines import probe_agent_sdk_credential
+
+        await probe_agent_sdk_credential(secret, model=chosen, run=run)
+        return
+
     client = build_anthropic_client(mode or AuthMode.API_KEY, secret, base_url=base_url)
-    await client.models.list(limit=1)
+    await client.messages.create(
+        model=chosen,
+        max_tokens=1,
+        messages=[{"role": "user", "content": "."}],
+    )

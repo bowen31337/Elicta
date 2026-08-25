@@ -114,6 +114,46 @@ def test_the_candidate_bank_keeps_its_compiled_order(database: str) -> None:
     assert [c.id for c in reloaded["eng-1"]] == ["c-1", "c-2"]
 
 
+def test_where_a_question_came_from_survives_a_restart(database: str) -> None:
+    """Provenance is the operator's grounds for trusting the bank at all.
+
+    Held only in memory it would come back undone on the next launch, which
+    is the same shape as the pruning flag beside it: a judgement about the
+    bank that has to outlast the process that computed it. And the absence of
+    a source is the *signal* for a reasoned question, so it has to reload as
+    absence rather than as a lost value.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    store = open_state_store(database)
+    bank = store.candidates(lambda row: BankCandidate(**row))
+    bank["eng-1"] = [
+        BankCandidate(
+            id="c-1",
+            template_section="Volumes",
+            phrasing="How many a month?",
+            priority=1,
+            source_doc="depot-pack.pdf",
+            authority_match=["ground truth"],
+        ),
+        BankCandidate(
+            id="c-2",
+            template_section="Volumes",
+            phrasing="And on a bad day?",
+            priority=2,
+        ),
+    ]
+    store.close()
+
+    reloaded = open_state_store(database).candidates(lambda row: BankCandidate(**row))
+    grounded, reasoned = reloaded["eng-1"]
+    assert grounded.source_doc == "depot-pack.pdf"
+    assert grounded.authority_match == ["ground truth"]
+    assert reasoned.source_doc is None
+    assert reasoned.authority_match == []
+
+
 def test_replacing_a_list_does_not_leave_the_old_entries_behind(database: str) -> None:
     from app.modules.compiler.api.recompile import InheritedOpenQuestion
 

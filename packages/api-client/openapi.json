@@ -1794,6 +1794,219 @@
         }
       }
     },
+    "/api/admin/settings/speech/credentials": {
+      "post": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Add Credential",
+        "description": "Add a speech key to the pool.\n\nA separate route from `PUT /api/admin/settings` because these are not\none named field each: the pool holds as many keys per vendor as an\noperator has, and the settings body has no way to say \"another one\"\nrather than \"this one, replacing what was there\". A single field is\nexactly what silently overwrote the first key with the second.",
+        "operationId": "add_credential_api_admin_settings_speech_credentials_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechCredentialCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechCredentialView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings/speech/credentials/{credential_id}": {
+      "patch": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Patch Credential",
+        "description": "Rename a key or take it out of service, keeping its value.",
+        "operationId": "patch_credential_api_admin_settings_speech_credentials__credential_id__patch",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechCredentialUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechCredentialView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Delete Credential",
+        "operationId": "delete_credential_api_admin_settings_speech_credentials__credential_id__delete",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings/speech/credentials/{credential_id}/test": {
+      "post": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Test Credential",
+        "description": "A 200 with `reachable: false` rather than an error status.\n\nThe request itself succeeded; the operator needs the reason rendered\nbeside the key in the list, not an exception page.",
+        "operationId": "test_credential_api_admin_settings_speech_credentials__credential_id__test_post",
+        "parameters": [
+          {
+            "name": "credential_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechCredentialCheck"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/settings/speech/policy": {
+      "put": {
+        "tags": [
+          "admin-settings"
+        ],
+        "summary": "Put Policy",
+        "description": "Choose whether one named key serves, or the pool rotates.",
+        "operationId": "put_policy_api_admin_settings_speech_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeechCredentialPool"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition": {
       "post": {
         "tags": [
@@ -3716,6 +3929,56 @@
         "title": "CandidatePatchRequest",
         "description": "A partial update to one bank candidate: edit its phrasing, reorder its priority, or prune it (PRD FR-4.8).\n\nAll fields are optional so a caller can change just one aspect at a\ntime, but at least one must be supplied, since a PATCH with nothing to\nchange has no meaningful effect to report as a 200."
       },
+      "Capability": {
+        "type": "string",
+        "enum": [
+          "inference",
+          "live_nudges",
+          "record_transcription",
+          "document_links"
+        ],
+        "title": "Capability",
+        "description": "The things an operator would notice not working."
+      },
+      "CapabilityReadiness": {
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/SecretKey"
+            },
+            "type": "array",
+            "title": "Missing",
+            "description": "The secrets that would make it ready, in the modes currently selected.",
+            "default": []
+          },
+          "consequence": {
+            "type": "string",
+            "title": "Consequence",
+            "description": "What does not happen without them, in the operator's terms \u2014 what stops, not which field is blank. The screen already shows which field is blank."
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "description": "Whether the deployment is usable without it. An optional capability is an extra somebody may not want; a required one missing means a core promise of the product silently does not happen.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "capability",
+          "ready",
+          "consequence"
+        ],
+        "title": "CapabilityReadiness",
+        "description": "One capability, and why it is or is not available."
+      },
       "CitationRow": {
         "properties": {
           "session_id": {
@@ -3855,11 +4118,6 @@
       },
       "ConnectorSettings": {
         "properties": {
-          "live_vendor": {
-            "$ref": "#/components/schemas/SpeechVendor",
-            "description": "Streaming engine for the live trigger path. AssemblyAI's confidence-based turn model reaches a lower latency floor than a silence timer (\u00a714.2) and is the cheaper of the two per hour.",
-            "default": "assemblyai"
-          },
           "record_vendors": {
             "items": {
               "$ref": "#/components/schemas/SpeechVendor"
@@ -6294,6 +6552,15 @@
         "title": "SecretUpdate",
         "description": "One secret being set or cleared.\n\nAn empty `value` clears the secret. That is the only way to remove one,\nand it is deliberately distinct from omitting the entry entirely, which\nleaves the stored secret alone."
       },
+      "SelectionPolicy": {
+        "type": "string",
+        "enum": [
+          "single",
+          "rotate"
+        ],
+        "title": "SelectionPolicy",
+        "description": "How the pool chooses between the credentials a vendor has.\n\nTwo, deliberately. A third \u2014 weighted, or health-ranked \u2014 is a guess about\na deployment nobody is running yet, and each additional policy is another\nbranch that has to be right when a meeting is in progress."
+      },
       "ServiceSettings": {
         "properties": {
           "inference": {
@@ -6313,6 +6580,10 @@
           },
           "consent": {
             "$ref": "#/components/schemas/ConsentSettings"
+          },
+          "speech": {
+            "title": "Speech",
+            "description": "The pool of speech credentials and how one is chosen. Typed loosely here because `speech_credentials` imports this module; the store supplies a `SpeechCredentialPool`."
           },
           "secrets": {
             "items": {
@@ -6338,10 +6609,22 @@
               }
             ],
             "title": "Updated At"
+          },
+          "readiness": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityReadiness"
+            },
+            "type": "array",
+            "title": "Readiness",
+            "description": "What is not configured, and what it costs.\n\nDerived here rather than assembled by each store, so the two stores\ncannot disagree and no caller has to remember a second request. The\nrules live in `readiness.py`; this is only where they meet the wire.",
+            "readOnly": true
           }
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "readiness"
+        ],
         "title": "ServiceSettings",
         "description": "Everything an operator can administer, with no secret values in it."
       },
@@ -6539,11 +6822,220 @@
         "title": "SlowLaneTickResult",
         "description": "What accepting one slow-lane tick for a meeting produced (PRD FR-5.10).\n\n`coverage_updates` is empty when the pass changed no slot's fill state,\nand `new_candidates` is empty when it surfaced nothing new -- a tick\nthat runs but produces neither is still a 200, not an error: PRD FR-5.10\nand architecture \u00a73.8 make failure non-fatal, and \"nothing changed this\npass\" is not a failure."
       },
+      "SpeechCredential": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable address for this credential's secret."
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/SpeechVendor"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "What the operator calls it \u2014 'Deepgram, Northwind account'. The point of a pool is telling them apart, and a four-character hint cannot do that.",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether it is in service. Disabling rather than deleting is how a key is taken out without losing it: deleting means re-entering the secret to resume, which nobody will do mid-meeting.",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vendor"
+        ],
+        "title": "SpeechCredential",
+        "description": "One key an operator has, and what it is for.\n\nThe value is not here. It lives in the secrets table under\n`secret_key_for(id)`, write-only like every other secret: a read reports\nthat it is configured and its last four characters, never the key."
+      },
+      "SpeechCredentialCheck": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/SpeechVendor"
+          },
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vendor",
+          "reachable",
+          "detail"
+        ],
+        "title": "SpeechCredentialCheck",
+        "description": "The verdict on one pooled key.\n\nIdentified by credential id rather than by `SecretKey`, which is the\nwhole improvement: the single field this replaced was tested against\nwhichever vendor the service had *saved*, so changing the dropdown above\nit produced \"Deepgram rejected the credential (401)\" underneath a field\nlabelled \"AssemblyAI key\". A credential carries its own vendor, so there\nis no gap left to answer across."
+      },
+      "SpeechCredentialCreate": {
+        "properties": {
+          "vendor": {
+            "$ref": "#/components/schemas/SpeechVendor"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Label",
+            "default": ""
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vendor",
+          "value"
+        ],
+        "title": "SpeechCredentialCreate",
+        "description": "A key an operator is adding, with the value they typed."
+      },
+      "SpeechCredentialPool": {
+        "properties": {
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/SpeechCredential"
+            },
+            "type": "array",
+            "title": "Credentials",
+            "default": []
+          },
+          "policy": {
+            "$ref": "#/components/schemas/SelectionPolicy",
+            "default": "single"
+          },
+          "active_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Id",
+            "description": "Under `single`, the one that serves. Ignored under `rotate`."
+          }
+        },
+        "type": "object",
+        "title": "SpeechCredentialPool",
+        "description": "Every speech credential, and the rule for choosing between them."
+      },
+      "SpeechCredentialUpdate": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "SpeechCredentialUpdate",
+        "description": "What may be changed after the fact. Not the value: replace it instead.\n\nEditing a stored secret in place would need the old one to be readable to\nshow what is being edited, and it is deliberately not."
+      },
+      "SpeechCredentialView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/SpeechVendor"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint",
+            "description": "Last four characters of the stored value, or null if it is gone."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vendor",
+          "label",
+          "enabled"
+        ],
+        "title": "SpeechCredentialView",
+        "description": "One credential as the screen sees it \u2014 never the value."
+      },
+      "SpeechPolicyUpdate": {
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/SelectionPolicy"
+          },
+          "active_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "title": "SpeechPolicyUpdate"
+      },
       "SpeechVendor": {
         "type": "string",
         "enum": [
           "deepgram",
           "assemblyai",
+          "gemini",
           "custom"
         ],
         "title": "SpeechVendor",
@@ -7014,6 +7506,24 @@
             "type": "boolean",
             "title": "Pruned",
             "default": false
+          },
+          "source_doc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Doc"
+          },
+          "authority_match": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authority Match"
           }
         },
         "type": "object",

@@ -594,3 +594,87 @@ async def test_keyterm_prompting_switched_off_sends_no_word_boost() -> None:
     await engine("session_123", "audio_ref_unused", ["FROSTLINE"])
 
     assert submitted_bodies[0]["word_boost"] == []
+
+
+class TestOneSpeakerIsNotOneSegment:
+    """The reconciliation FR-2.6 exists for, silently producing nothing.
+
+    `utterances` means different things at the two vendors. Deepgram splits
+    on silence, so a session arrives as dozens of short spans. AssemblyAI
+    splits on *speaker turn*, so a recording of one person talking arrives as
+    a single span covering the whole meeting.
+
+    `align_transcripts` compares each reference span against the other
+    engine's overlapping text, and one span overlaps everything — so every
+    Deepgram span was scored against the entire session's words. Measured on
+    a real 10-minute recording: 207 spans, 207 of them divergent, 0%
+    agreement, between two transcripts that plainly said the same thing.
+
+    Nothing failed. Both engines reported `complete`, and the screen reported
+    total disagreement — which is worse than an error, because it is the
+    number an operator would act on.
+    """
+
+    #: One speaker, one utterance, with the word timings AssemblyAI returns
+    #: alongside it. Deliberately spanning a pause and two sentences.
+    ONE_TURN = {
+        "status": "completed",
+        "text": "The dock rule is fifteen minutes. Is that written down?",
+        "utterances": [
+            {
+                "start": 0,
+                "end": 9000,
+                "speaker": "A",
+                "text": "The dock rule is fifteen minutes. Is that written down?",
+                "words": [
+                    {"start": 0, "end": 400, "text": "The"},
+                    {"start": 400, "end": 800, "text": "dock"},
+                    {"start": 800, "end": 1200, "text": "rule"},
+                    {"start": 1200, "end": 1600, "text": "is"},
+                    {"start": 1600, "end": 2000, "text": "fifteen"},
+                    {"start": 2000, "end": 2600, "text": "minutes."},
+                    # A long silence, exactly what Deepgram would split on.
+                    {"start": 7000, "end": 7400, "text": "Is"},
+                    {"start": 7400, "end": 7800, "text": "that"},
+                    {"start": 7800, "end": 8400, "text": "written"},
+                    {"start": 8400, "end": 9000, "text": "down?"},
+                ],
+            }
+        ],
+    }
+
+    def test_one_turn_becomes_several_spans(self):
+        output = to_batch_transcription(self.ONE_TURN, "assemblyai")
+
+        assert len(output.segments) > 1
+
+    def test_no_word_is_lost_in_the_splitting(self):
+        """A transcript that drops words would fail the comparison for real."""
+
+        output = to_batch_transcription(self.ONE_TURN, "assemblyai")
+
+        rejoined = " ".join(segment.text for segment in output.segments)
+        assert rejoined.split() == self.ONE_TURN["utterances"][0]["text"].split()
+
+    def test_the_spans_keep_the_turn_speaker(self):
+        output = to_batch_transcription(self.ONE_TURN, "assemblyai")
+
+        assert {segment.speaker for segment in output.segments} == {"A"}
+
+    def test_the_spans_are_timed_from_their_own_words(self):
+        """Not inherited from the turn, or they all overlap everything again."""
+
+        output = to_batch_transcription(self.ONE_TURN, "assemblyai")
+
+        assert output.segments[0].start_seconds == 0.0
+        assert output.segments[0].end_seconds < 7.0
+        assert output.segments[-1].end_seconds == 9.0
+        for earlier, later in zip(output.segments, output.segments[1:]):
+            assert earlier.end_seconds <= later.start_seconds
+
+    def test_a_turn_with_no_words_is_still_one_span(self):
+        """Older responses, and any turn the vendor sends unworded."""
+
+        output = to_batch_transcription(RESPONSE, "assemblyai")
+
+        assert len(output.segments) == 2

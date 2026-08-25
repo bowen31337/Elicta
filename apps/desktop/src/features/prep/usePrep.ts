@@ -135,6 +135,8 @@ interface WireBankCandidate {
   readonly phrasing: string;
   readonly priority: number;
   readonly pruned: boolean;
+  readonly source_doc?: string | null;
+  readonly authority_match?: readonly string[];
 }
 
 interface WireBank {
@@ -272,6 +274,8 @@ function toSection(section: WireBank['sections'][number]) {
         id: candidate.id,
         phrasing: candidate.phrasing,
         priority: candidate.priority,
+        sourceDoc: candidate.source_doc ?? null,
+        authorityMatch: candidate.authority_match ?? [],
       })),
   };
 }

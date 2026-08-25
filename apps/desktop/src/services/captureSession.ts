@@ -437,6 +437,8 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    * its meter, and must not cost it the meeting.
    */
   let shellChannel: Promise<void> | null = null;
+  /** Set when the event channel could not be opened; see the catch below. */
+  let channelRefused = false;
   function openShellChannel(): Promise<void> {
     if (!shellAvailable()) return Promise.resolve();
     // Returned rather than fired and forgotten, because a recording started
@@ -477,7 +479,17 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
             });
           });
         } catch {
-          /* see the note above */
+          // Not rethrown: the note above is right that a dead channel must
+          // not stop the meeting being recorded, and a recording held on the
+          // machine is worth more than no recording.
+          //
+          // Silence was the mistake. `capture://frame` is the meter and can
+          // degrade to absent, but `capture://pcm` is the only path a desktop
+          // recording reaches the service by — losing it means nothing is
+          // uploaded while the screen shows a healthy recording throughout,
+          // which is the shape of failure this whole module is written
+          // against. So the meeting continues and the operator is told.
+          channelRefused = true;
         }
       })();
     }
@@ -506,6 +518,12 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
     'The microphone is open but no audio is being read from it, so nothing is ' +
     'being uploaded and this meeting will not be transcribed. Stop and start ' +
     'the recording again.';
+
+  const NO_EVENT_CHANNEL =
+    'The recording is running, but this app could not open the channel that ' +
+    'carries its audio, so nothing is being uploaded and this meeting will ' +
+    'not be transcribed. The audio is not lost — stop, restart the app, and ' +
+    'record again.';
 
   const NO_PCM_TAP =
     'This browser cannot read the recorded audio, so nothing is being uploaded ' +
@@ -549,6 +567,15 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       // before the bridge is told there is any.
       await openShellChannel();
       await startBridge();
+      if (channelRefused) {
+        // Said once, here, rather than waited for: the silence watch below
+        // would report "no audio is being read" five seconds later, which is
+        // true and describes the symptom rather than the cause. An operator
+        // told the channel was refused knows to restart the app; one told the
+        // microphone is delivering nothing goes looking at the microphone.
+        publish({ uploadNote: NO_EVENT_CHANNEL });
+        return;
+      }
       // Watched on this backend too. The cause differs — a Rust device that
       // opens and then emits nothing rather than a graph that will not run --
       // and what the operator needs told is the same either way.

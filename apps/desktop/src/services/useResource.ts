@@ -38,6 +38,69 @@ export interface Resource<T> {
 
 export class ServiceUnreachable extends Error {}
 
+/**
+ * Everything currently waiting on a service that was not up when it asked.
+ *
+ * The shell brings the window up before the service answers — a frozen Python
+ * takes seconds to unpack, and blocking on it means no window at all for that
+ * long, which reads as an app that did not launch. The half that was missing
+ * is that the screens asked once: a genuine cold start made zero API requests
+ * for the life of the window and sat on "Cannot reach the service" against
+ * one that came up two seconds later.
+ *
+ * Deliberately a signal rather than a retry budget. The shell already knows
+ * when the service starts answering and now emits `service://ready`; guessing
+ * with a backoff instead would delay *every* genuine failure by the length of
+ * the guess, which is the one thing `useResource` exists to report promptly.
+ */
+const waiting = new Set<() => void>();
+
+/** Called when the shell says the service has started answering. */
+export function announceServiceReady(): void {
+  // Copied first: a listener that refetches and re-subscribes must not
+  // mutate the set being iterated.
+  for (const listener of [...waiting]) listener();
+}
+
+/**
+ * Every mounted read, by the path it is a read of.
+ *
+ * `useResource` is otherwise per component instance — `useState` and an
+ * effect, no shared cache — which is deliberate and fine while a read is only
+ * a read. It stops being fine at a write: the Engagements screen deleting an
+ * engagement reloaded *its own* list, and the toolbar went on holding the
+ * answer it fetched at mount. The stored choice still matched a row in that
+ * copy, so the fallback for "the choice no longer exists" never ran and the
+ * toolbar kept naming a deleted client, with its meetings still beside it.
+ *
+ * A registry rather than a shared cache: two components asking the same
+ * question still each own their answer, and this only says when an answer has
+ * been overtaken.
+ */
+const mounted = new Map<string, Set<() => void>>();
+
+/**
+ * Tell every mounted read to ask again, whatever it is a read of.
+ *
+ * Called by the write helpers after any successful mutation, which is what
+ * makes this hard to get wrong: a caller cannot forget to say what it
+ * changed, because it does not have to know. Remembering per call site is the
+ * habit that produced the bug this exists for — the toolbar naming a client
+ * that had been deleted, because the screen that deleted it refreshed only
+ * itself.
+ *
+ * Blunt on purpose. A handful of reads are mounted at once, they are all
+ * conditional GETs against a service on this machine, and a discrete write is
+ * a thing the operator did once — not a keystroke. Being exactly right about
+ * which read a write invalidated is work that buys nothing here and is wrong
+ * the moment the service grows a relationship nobody updated.
+ */
+export function invalidateReads(): void {
+  for (const [, reloaders] of [...mounted]) {
+    for (const reload of [...reloaders]) reload();
+  }
+}
+
 /** A GET that treats 404 as a value rather than a throw. */
 export async function fetchJson<T>(path: string): Promise<T | null> {
   let response: Response;
@@ -114,12 +177,36 @@ export function useResource<T>(path: string | null): Resource<T> {
     };
   }, [path, attempt]);
 
-  return {
-    data,
-    status,
-    error,
-    reload: useCallback(() => setAttempt((count) => count + 1), []),
-  };
+  const reload = useCallback(() => setAttempt((count) => count + 1), []);
+
+  // Registered under the path so a write elsewhere can reach this read. A
+  // `null` path is a screen with nothing to ask for yet and registers
+  // nothing.
+  useEffect(() => {
+    if (path === null) return;
+    const reloaders = mounted.get(path) ?? new Set<() => void>();
+    reloaders.add(reload);
+    mounted.set(path, reloaders);
+    return () => {
+      reloaders.delete(reload);
+      if (reloaders.size === 0) mounted.delete(path);
+    };
+  }, [path, reload]);
+
+  // Only while this read has no answer. A screen showing data does not need
+  // re-asking because something else finally started, and re-asking every
+  // mounted resource on an announcement would be a thundering herd against a
+  // service that has just come up.
+  const unanswered = status === 'error';
+  useEffect(() => {
+    if (!unanswered) return;
+    waiting.add(reload);
+    return () => {
+      waiting.delete(reload);
+    };
+  }, [unanswered, reload]);
+
+  return { data, status, error, reload };
 }
 
 /** The worst of several statuses — what a screen assembled from more than one read should show. */

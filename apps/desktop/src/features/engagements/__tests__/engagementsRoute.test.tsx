@@ -99,15 +99,22 @@ describe('the engagements screen', () => {
     expect(window.location.hash).toBe('#/prep');
   });
 
-  it('does not label the current client with the same word as the button beside it', async () => {
+  it('says which client is in force without spending a word on it', async () => {
     // "Open" as a status and "Open" as an action, side by side, read as two
-    // buttons where one of them does nothing.
+    // buttons where one of them does nothing. The first fix renamed the
+    // status to "Current", which still put a second piece of text on the row
+    // competing to describe it. The row now says it as a selected row does —
+    // materially, and to assistive technology through `aria-current`.
     stubService();
     render(<EngagementsRoute />);
     await screen.findByText('Northwind Logistics');
 
-    expect(screen.getByText('Current')).toBeInTheDocument();
-    expect(screen.getAllByText('Open')).toHaveLength(2); // the two Open buttons
+    const current = screen.getByRole('button', { name: /Open Northwind Logistics/i });
+    expect(current).toHaveAttribute('aria-current', 'true');
+    expect(
+      screen.getByRole('button', { name: /Open Calder & Rowe/i }),
+    ).not.toHaveAttribute('aria-current');
+    expect(screen.queryByText('Current')).not.toBeInTheDocument();
   });
 
   it('creates a client from the three things it asks for', async () => {
@@ -147,8 +154,13 @@ describe('the engagements screen', () => {
     const written = stubService();
     render(<EngagementsRoute />);
 
+    // Two presses now: removal takes a client's meetings, documents and
+    // vocabulary off every screen at once, and asks first.
     await userEvent.click(
       await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
     );
 
     await waitFor(() => expect(written).toHaveLength(1));
@@ -177,5 +189,71 @@ describe('the engagements screen', () => {
     expect(
       await screen.findByRole('heading', { name: 'Cannot reach the service' }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('the weight of the actions matches what they do', () => {
+  it('asks before removing a client, because one click should not', async () => {
+    /* Removal takes a client's meetings, documents and vocabulary off every
+       screen at once. It sat as a single-click button the same size as
+       "Open", one row apart from it, with nothing between an accidental
+       press and the whole engagement disappearing. */
+    const written = stubService();
+    render(<EngagementsRoute />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
+    );
+
+    expect(written).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('removes it once that is confirmed', async () => {
+    const written = stubService();
+    render(<EngagementsRoute />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
+    );
+
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0].method).toBe('DELETE');
+  });
+
+  it('lets the operator back out, and leaves nothing armed behind them', async () => {
+    const written = stubService();
+    render(<EngagementsRoute />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /^Keep Calder & Rowe$/i }));
+
+    expect(written).toHaveLength(0);
+    expect(
+      screen.queryByRole('button', { name: /for good/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('arms one client at a time', async () => {
+    /* Two rows both showing "Remove for good" is a screen inviting the wrong
+       one to be pressed. */
+    stubService();
+    render(<EngagementsRoute />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: /Remove Northwind Logistics/i }),
+    );
+
+    expect(screen.getAllByRole('button', { name: /for good/i })).toHaveLength(1);
   });
 });

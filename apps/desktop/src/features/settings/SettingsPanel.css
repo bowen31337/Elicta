@@ -616,3 +616,144 @@
 @media (prefers-reduced-transparency: reduce) {
   .settings-actions { background: var(--bg-tertiary); }
 }
+
+/* What is not configured, and what it costs.
+ *
+ * Two tones, because two different things are being said. A blocked
+ * capability is a promise of the product that silently does not happen and
+ * gets the same orange as the durability warning above it. An optional one is
+ * a feature nobody may want, and is deliberately quiet — an operator told
+ * twice that they have a problem stops reading the one that mattered.
+ *
+ * Colours come from the ink tokens rather than the vivid fills: `--label` on a
+ * tinted ground is what the rest of this screen uses, and `--label-secondary`
+ * fails AA at this size. */
+.settings-readiness {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+.settings-readiness--blocked {
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+.settings-readiness-lead {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-footnote);
+  color: var(--label);
+}
+.settings-readiness-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.settings-readiness-title {
+  margin: 0;
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--label);
+}
+.settings-readiness-consequence {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+  color: var(--label-supporting);
+}
+.settings-readiness-keys {
+  margin: 0;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-caption);
+  color: var(--label-supporting);
+}
+
+/* --- the speech key pool ------------------------------------------------
+ *
+ * A list rather than a field, because there are as many keys as the operator
+ * has. Each row is a card on the group ground, so an out-of-service key can
+ * recede without its text dimming: `opacity` on the whole row would take
+ * already-reduced ink below AA, which is a real failure this codebase has
+ * had. The fill changes; the ink does not.
+ */
+.speech-pool {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.speech-key {
+  background: var(--fill-4);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+}
+.speech-key.is-off { background: transparent; box-shadow: inset 0 0 0 1px var(--separator-opaque); }
+
+.speech-key-name {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.speech-key-vendor {
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--label);
+}
+.speech-key-label {
+  font-size: var(--text-footnote);
+  color: var(--label-supporting);
+}
+/* `--green-ink`, not the vivid `--green`: this is text, and it sits on the
+ * glass composite, which is the darker of the two grounds it can land on. */
+.speech-key-badge {
+  font-size: var(--text-caption-1);
+  font-weight: 600;
+  color: var(--green-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.speech-key-note {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-caption-1);
+  line-height: var(--leading-relaxed);
+  color: var(--label-supporting);
+}
+/* The last test's answer, under what the key is for rather than instead of
+ * it. `--label`, not the supporting ink: this is the sentence the operator
+ * asked for and it should not be the quietest thing in the row. */
+.speech-key-verdict {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-caption-1);
+  line-height: var(--leading-relaxed);
+  color: var(--label);
+}
+
+.speech-key-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+.speech-key-actions button {
+  font-size: var(--text-caption-1);
+  padding: var(--space-1) var(--space-3);
+  min-height: 28px;
+}
+/* Only the confirming step is red. A "Remove" that is red before it asks
+ * makes the destructive colour ordinary, and then the confirmation does not
+ * read as one. */
+.speech-key-actions .is-destructive { color: var(--red-ink); }
+
+.speech-add {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.speech-add select { flex: 0 1 11rem; }
+.speech-add input { flex: 1 1 8rem; min-width: 0; }
+.speech-add button { flex: 0 0 auto; }
+
+.settings-state.is-warn { color: var(--orange-ink); }

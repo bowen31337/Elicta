@@ -17,9 +17,16 @@ the room, so that nobody has to be asked to choose one before a meeting starts.
 
 ![Your clients, and the form for adding one](../../docs/journeys/screenshots/engagements-list.png)
 
-Opening a client is what makes it the one every other screen is about. It is
-also where you remove one you no longer want on the list — which takes its
-meetings, documents and vocabulary out of view with it, and erases nothing.
+Opening a client is what makes it the one every other screen is about, and the
+row itself is what opens it — press anywhere along it. The one in force is
+tinted rather than labelled, the way a chosen row looks anywhere else on this
+machine.
+
+It is also where you remove a client you no longer want on the list, which
+takes its meetings, documents and vocabulary out of view with it and erases
+nothing. Removing asks first: the button arms, and a second press beside it
+confirms. One press taking a whole client off every screen at once was more
+than a single button's worth of consequence.
 
 Everything else on this page happens on the Preparation screen, about the one
 client you opened.
@@ -158,6 +165,18 @@ once you have clicked anywhere on the page, which on a screen this long is worth
 knowing.
 
 ![The preparation screen: documents, the client's vocabulary, and the question bank grouped by section](../../docs/journeys/screenshots/prep-question-tree.png)
+
+Under each question is where it came from: the document it was drafted from
+and how you tagged that document, or *reasoned from the engagement* where
+there was no page behind it and Elicta worked it out from the sector and the
+commercial shape instead.
+
+That line is the one to read when you are deciding what to cut. A question
+drawn from a document you called ground truth stands on something the client
+wrote down. A reasoned one is a guess — often a good guess, and on a thin set
+of documents most of the bank will be guesses, which is worth knowing before
+you walk in rather than after. It also makes a long bank quicker to review:
+you can take out the guesses in one pass and read the rest properly.
 
 This review is worth doing even if you never open Elicta during the meeting. A
 good question list makes you better prepared on its own — which is why it comes

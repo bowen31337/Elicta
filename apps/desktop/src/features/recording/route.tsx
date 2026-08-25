@@ -29,7 +29,19 @@ export interface RecordingScreenProps {
    * reports would be a measurement of something that did not happen.
    */
   readonly recorded: boolean;
-  readonly engines: readonly { name: string; status: 'complete' | 'failed' }[];
+  readonly engines: readonly {
+    name: string;
+    status: 'complete' | 'failed';
+    /** Why it failed, in the engine's own words, when it recorded one. */
+    detail?: string | null;
+  }[];
+  /**
+   * Whether any engine produced a transcript. Consulted rather than assumed:
+   * "the other engine still produced a transcript" used to be printed beside
+   * every failure, including the case where both had failed and there was no
+   * transcript at all.
+   */
+  readonly anyComplete?: boolean;
   /** `null` when nothing was aligned — see `useRecording`. */
   readonly agreementPercent: number | null;
   readonly divergences: readonly Divergence[];
@@ -132,6 +144,7 @@ function RecordingEmpty() {
  */
 function RecordingReview({
   engines,
+  anyComplete = false,
   agreementPercent,
   divergences,
   audioDestroyedAt,
@@ -178,8 +191,13 @@ function RecordingReview({
                 <span className="t-footnote">
                   {engine.status === 'complete'
                     ? 'Transcribed the full session'
-                    : 'Failed — the other engine still produced a transcript'}
+                    : anyComplete
+                      ? 'Failed — the other engine still produced a transcript'
+                      : 'Failed, and so did the other one — this session has no transcript'}
                 </span>
+                {engine.status !== 'complete' && engine.detail ? (
+                  <span className="t-footnote engine-detail">{engine.detail}</span>
+                ) : null}
               </div>
               <span className={engine.status === 'complete' ? 'pill pill--ok' : 'pill pill--alert'}>
                 {engine.status}
@@ -257,6 +275,7 @@ export function RecordingScreen({
   meetingTitle,
   recorded,
   engines,
+  anyComplete,
   agreementPercent,
   divergences,
   audioDestroyedAt,
@@ -273,6 +292,7 @@ export function RecordingScreen({
       {recorded ? (
         <RecordingReview
           engines={engines}
+          anyComplete={anyComplete}
           agreementPercent={agreementPercent}
           divergences={divergences}
           audioDestroyedAt={audioDestroyedAt}
@@ -311,6 +331,7 @@ export default function RecordingRoute() {
       meetingTitle={recording.meetingTitle}
       recorded={recording.recorded}
       engines={recording.engines}
+      anyComplete={recording.anyComplete}
       agreementPercent={recording.agreementPercent}
       divergences={recording.divergences}
       audioDestroyedAt={recording.audioDestroyedAt}

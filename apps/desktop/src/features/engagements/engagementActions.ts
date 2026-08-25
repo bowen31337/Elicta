@@ -1,4 +1,5 @@
 import { apiUrl } from '../../services/apiClient';
+import { invalidateReads } from '../../services/useResource';
 /**
  * Creating and removing a client engagement.
  *
@@ -52,6 +53,11 @@ async function send<T>(
     throw new Error('The service could not be reached.');
   }
   if (!response.ok) throw new Error(await failureMessage(response));
+  // The write landed, so every mounted read may now be answering for a state
+  // that no longer exists. Invalidated here rather than at each call site
+  // because a call site that forgets is exactly what left the toolbar naming
+  // a deleted client.
+  if ((init.method ?? 'GET') !== 'GET') invalidateReads();
   try {
     return (await response.json()) as T;
   } catch {

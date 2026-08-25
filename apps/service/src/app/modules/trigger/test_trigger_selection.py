@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.modules.trigger.gate import evaluate
+from app.modules.trigger.lexicon import UNQUANTIFIED_AMOUNT, UNQUANTIFIED_TIME
 from app.modules.trigger.selection import select
 
 NOW = datetime(2026, 8, 23, 9, 0, 0, tzinfo=UTC)
@@ -170,3 +171,228 @@ def test_a_bank_question_about_the_term_that_fired_is_preferred() -> None:
 
     assert nudge is not None
     assert nudge.candidate_id == "cand-4", "the drafted question about this term should win"
+
+
+class TestTheStubTellsOneNudgeFromAnother:
+    """Reported from a live meeting: "why do I just see one nudge?"
+
+    Three had fired, the panel was rendering all three, and every one carried
+    the same headline — because the stub was looked up by trigger *category*
+    and there are four categories. Same category, same words, however
+    different the questions underneath.
+
+    The glanceable half is the largest thing on the panel and was the only
+    part carrying no information at all.
+    """
+
+    def test_two_hits_on_one_category_do_not_share_a_headline(self):
+        """The exact shape of the report: "many", then "several"."""
+
+        first = select(_hit_on("We move many pallets a day."), [], now=NOW)
+        second = select(
+            _hit_on("There are several bays."), [], now=NOW + timedelta(minutes=5)
+        )
+
+        assert first is not None and second is not None
+        assert first.stub != second.stub
+
+    def test_the_headline_names_what_the_client_actually_said(self):
+        """Which is the fact worth the biggest text on the screen.
+
+        It tells the operator which sentence the panel reacted to, so they can
+        decide whether it read the room before they read the question.
+        """
+
+        nudge = select(_hit_on("There are several bays."), [], now=NOW)
+
+        assert nudge is not None
+        assert "several" in nudge.stub
+
+    def test_it_stays_glanceable(self):
+        """FR-6.1's cap is the whole reason the stub exists."""
+
+        for utterance in (
+            "We move many pallets a day.",
+            "It needs to be fast.",
+            "We need it soon.",
+            "Typically that works.",
+        ):
+            nudge = select(_hit_on(utterance), [], now=NOW)
+            if nudge is not None:
+                assert len(nudge.stub.split()) <= 8, nudge.stub
+
+    def test_a_chosen_bank_question_gets_the_same_treatment(self):
+        """Not only the templated fallback — the reported case had a bank."""
+
+        first = select(_hit_on("The dashboard must be fast."), BANK, now=NOW)
+        second = select(
+            _hit_on("Reporting should be flexible."),
+            BANK,
+            now=NOW + timedelta(minutes=5),
+        )
+
+        assert first is not None and second is not None
+        assert first.stub != second.stub
+
+
+def _hit_on(utterance: str):
+    hit = evaluate(utterance)
+    assert hit is not None, utterance
+    return hit
+
+
+class TestTheBankIsAskedByWhatItWasDraftedFor:
+    """The reasoning the compiler did and the runtime threw away.
+
+    Relevance was decided by whether the *question text* happened to contain
+    the word the client said. The compiler already records `trigger_types` —
+    which kinds of ambiguity each question was drafted to answer — and
+    selection never looked at it.
+
+    The cost is a templated question in place of a drafted one. A bank can
+    hold twenty questions written for unquantified quantities, and a client
+    saying "several" still got the generic fallback, because none of the
+    twenty happened to contain the word "several".
+    """
+
+    def _candidate(self, identifier, phrasing, priority, *, triggers=(), stub=""):
+        candidate = _Candidate(identifier, "Volumes", phrasing, priority)
+        candidate.trigger_types = list(triggers)
+        candidate.stub = stub
+        return candidate
+
+    def test_a_question_drafted_for_this_trigger_beats_the_templated_one(self):
+        bank = [
+            self._candidate(
+                "cand-1",
+                "How many consignments cross the dock in a week?",
+                1,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "cand-1", "the bank had one and it was not used"
+
+    def test_a_question_about_the_actual_word_is_still_preferred(self):
+        """Category is the fallback for relevance, not a replacement for it.
+
+        A question naming what the client just said is about *that sentence*;
+        one merely drafted for the same kind of ambiguity is about the same
+        kind of thing. The first is the better pairing with the reason line
+        the operator reads beside it.
+        """
+
+        bank = [
+            self._candidate(
+                "by-category", "How many crates in a week?", 1,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            ),
+            self._candidate(
+                "by-term", "Several pallets — how many is several?", 9,
+                triggers=[UNQUANTIFIED_AMOUNT],
+            ),
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "by-term"
+
+    def test_a_question_for_a_different_trigger_is_not_offered(self):
+        """The embarrassment case: a mismatched pairing costs the reason line
+        its credibility for the rest of the meeting."""
+
+        bank = [
+            self._candidate(
+                "wrong-kind", "What date does that need to be?", 1,
+                triggers=[UNQUANTIFIED_TIME],
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id is None, "a time question was offered for a quantity"
+
+    def test_the_bank_supplies_the_headline_when_it_supplies_the_question(self):
+        """The compiler drafts a stub per question; it was dropped in transit.
+
+        The term-anchored stub built to work around that is still right for a
+        templated question — there is no candidate to take one from — but a
+        drafted question has its own, written for it.
+        """
+
+        bank = [
+            self._candidate(
+                "cand-1", "How many consignments cross the dock in a week?", 1,
+                triggers=[UNQUANTIFIED_AMOUNT], stub="A week's crossings?",
+            )
+        ]
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.stub == "A week's crossings?"
+
+    def test_a_templated_question_still_names_what_was_said(self):
+        """No candidate means no drafted stub, and the fallback still applies."""
+
+        nudge = select(_hit_on("We move several pallets a day."), [], now=NOW)
+
+        assert nudge is not None
+        assert "several" in nudge.stub
+
+
+class TestTheHeadlineStaysGlanceable:
+    """A stub is only worth having if it can be read without looking away.
+
+    FR-6.2 asks for three to five words. The bank's own stub is drafted by a
+    model against a schema with a minimum length and no maximum, and once
+    selection began preferring it — which is the right preference — nothing
+    stood between a model writing a sentence and the panel rendering it as
+    the headline. Before, the headline came from a four-entry table and was
+    fixed-length by construction, so this could not happen.
+
+    Falling back rather than trimming: a sentence cut mid-way is worse than
+    a plain one, and the templated stub is a real headline. Falling back
+    rather than rejecting the pass, too — refusing a hundred and sixty good
+    questions over one bad label is the mistake the candidate-count floor
+    already learned not to make.
+    """
+
+    def _with_stub(self, stub: str):
+        candidate = _Candidate("cand-1", "Volumes", "How many crates in a week?", 1)
+        candidate.trigger_types = [UNQUANTIFIED_AMOUNT]
+        candidate.stub = stub
+        return [candidate]
+
+    def test_a_headline_too_long_to_glance_at_is_not_used(self):
+        bank = self._with_stub(
+            "How many crates cross the dock in a typical week, and how much "
+            "does that vary between sites?"
+        )
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "cand-1", "the question itself is still good"
+        assert "several" in nudge.stub, "it should fall back to the templated headline"
+
+    def test_a_headline_of_the_right_length_is_kept(self):
+        bank = self._with_stub("A week's crossings?")
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.stub == "A week's crossings?"
+
+    def test_every_headline_this_can_produce_is_glanceable(self):
+        for stub in ("", "   ", "A week's crossings?", "word " * 40):
+            nudge = select(
+                _hit_on("We move several pallets a day."), self._with_stub(stub), now=NOW
+            )
+            assert nudge is not None
+            assert len(nudge.stub.split()) <= 8, nudge.stub

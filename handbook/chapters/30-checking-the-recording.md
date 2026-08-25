@@ -29,6 +29,15 @@ agreement and say nothing. It is the numbers and the names that decide what
 gets built, and they are exactly what two services disagree about, so those
 are the ones put in front of you.
 
+What does not count as a difference is where each service chose to break the
+text up. They do not agree about that and never will: one starts a new line
+wherever the room goes quiet, the other at the end of a sentence. Comparing
+them used to treat that as disagreement, which made two transcriptions that
+matched word for word come back as though they agreed about almost nothing —
+a paragraph shown against four words, and every line flagged. What is
+compared now is what was said over the same stretch of the recording, so what
+is left flagged is what the two services actually heard differently.
+
 ## Before there is anything to check
 
 Most of the time you will open this page for a meeting that has not been
@@ -46,6 +55,21 @@ It now says which one it is, says plainly that nothing has gone wrong, and
 offers the one step that would fill it. What is listed underneath is what the
 page will hold once a recording exists — worth saying while there is room to
 say it.
+
+## When one of them could not do it
+
+Each service is listed by name with what became of it, and if one could not
+transcribe, it says why in that service's own words — no credential, nothing
+to transcribe, a refusal from the company. That sentence is the one thing
+worth reading on this page when a figure looks wrong, and for a while it was
+the one thing the page would not tell you: it printed a fixed line instead,
+which said the other service had produced a transcript whether or not it had.
+When both had failed it said that twice, about a meeting with no transcript
+at all.
+
+It also shows the most recent attempt rather than every attempt ever made.
+Retrying a meeting a few times used to leave every one of those tries listed,
+so one meeting tried nine times read as nine broken services.
 
 ## It is still there tomorrow
 

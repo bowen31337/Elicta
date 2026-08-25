@@ -111,6 +111,15 @@ case collision, and two packages with no universal2 wheel. `pnpm --filter
 elicta-desktop test` covers the first (see `src/__tests__/fileCasing.test.ts`);
 the others are only found by building.
 
+The nastier version of this is a **Tauri window setting**, because there is no
+build failure at all — the bundle is fine and one feature is silently dead.
+`dragDropEnabled` defaults to true, which makes Tauri intercept OS file drags
+before the page sees them, so the document dropzone worked in `pnpm dev`, in
+`start.sh` and in every test, and did nothing in the `.dmg`. Where a setting
+like that decides whether a feature works, assert the setting — the effect
+cannot be reproduced anywhere the check can run
+(`src/__tests__/dragDropConfig.test.ts`).
+
 The macOS job runs on `macos-26` at 10x billing for ~35 min, and
 `cancel-in-progress` means a second run kills the first mid-flight. It
 uploads an artifact rather than publishing a release; attaching a `.dmg` to a

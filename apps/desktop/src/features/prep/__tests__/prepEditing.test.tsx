@@ -483,6 +483,30 @@ describe('dropping documents onto the screen', () => {
     expect(written[0].body).toEqual({ file: 'Throughput study.pdf', status: 'superseded' });
   });
 
+  it('still uploads with the window-wide stray-drop guard installed', async () => {
+    /* The guard exists because an unhandled drop navigates the webview to the
+       file, which in the packaged app has no way back. It must not claim the
+       one drop that *is* handled — and the ordering that keeps it honest is
+       subtle enough to be worth asserting rather than reasoning about. React
+       delegates to the root container, which is below `document`, so the
+       zone's `preventDefault` lands first and the guard sees the event
+       already claimed. */
+    const { refuseStrayDrops } = await import('../../../services/strayDrop');
+    const stop = refuseStrayDrops();
+    try {
+      const written = await readyWithWrites();
+
+      fireEvent.drop(screen.getByTestId('document-dropzone'), {
+        dataTransfer: { files: [fileOf('Guarded.pdf')], types: ['Files'] },
+      });
+
+      await waitFor(() => expect(written).toHaveLength(1));
+      expect((written[0].body as { file: string }).file).toBe('Guarded.pdf');
+    } finally {
+      stop();
+    }
+  });
+
   it('uploads every file in one drop, not just the first', async () => {
     const written = await readyWithWrites();
 

@@ -31,14 +31,64 @@ from .lexicon import (
 #: cost is not recovered by going quiet again later.
 MINIMUM_GAP = timedelta(seconds=60)
 
-#: The glanceable half (FR-6.3): what an operator can take in without turning
-#: away from the client. Deliberately not the question itself.
-STUBS: dict[str, str] = {
-    UNQUANTIFIED_AMOUNT: "How many, exactly?",
-    UNQUANTIFIED_PROPERTY: "In numbers?",
-    UNQUANTIFIED_TIME: "By when, exactly?",
-    QUALIFIED_AGREEMENT: "Always, or sometimes?",
+#: The ask, per category, in as few words as it can be put.
+#:
+#: Joined to the term that fired rather than used alone. Alone there are four
+#: of these and a meeting raises many more nudges than that, so every nudge
+#: from one category carried the identical headline — reported from a live
+#: meeting as "why do I just see one nudge?", with three on screen and the
+#: largest text on each of them the same four words.
+#:
+#: The term is what makes them differ, and it is also the more useful half:
+#: the stub is the one line an operator reads without turning away from the
+#: client, and "which of their words did this react to" is what tells them
+#: whether it heard the room — before they read the question.
+ASKS: dict[str, str] = {
+    UNQUANTIFIED_AMOUNT: "how many?",
+    UNQUANTIFIED_PROPERTY: "in numbers?",
+    UNQUANTIFIED_TIME: "by when?",
+    QUALIFIED_AGREEMENT: "always?",
 }
+
+
+#: The most words a headline may carry and still be read without looking away
+#: from the client. FR-6.2 asks for three to five; this is the point at which
+#: a stub has stopped being one, not the target — refusing a good six-word
+#: headline in favour of a generic four-word one would be the same mistake
+#: the candidate-count floor already learned not to make.
+GLANCEABLE_WORDS = 8
+
+
+def glanceable(stub: str) -> str | None:
+    """The bank's headline, if it can actually be glanced at.
+
+    `None` where it cannot, so the caller uses the templated one instead.
+    Not trimmed: a sentence cut mid-way is worse than a plain headline, and
+    the templated stub is a real one.
+
+    Needed because selection began preferring the bank's stub — which is the
+    right preference, since it says what *this* question asks — and the
+    schema that produces it sets a minimum length and no maximum. The
+    headline it replaced came from a four-entry table and was glanceable by
+    construction.
+    """
+
+    words = stub.split()
+    return stub.strip() if 0 < len(words) <= GLANCEABLE_WORDS else None
+
+
+def stub_for(category: str, term: str) -> str:
+    """The glanceable half (FR-6.3), anchored to what was actually said.
+
+    Built here rather than read off the chosen candidate because the bank
+    does not carry one: the compiler drafts a stub per question and it is
+    dropped before persistence, so recovering it needs a schema change and a
+    recompile of every candidate. This costs nothing, works on a bank already
+    compiled, and stays a pure function — which the replay parity gates
+    require of everything on this path.
+    """
+
+    return f"\u201c{term}\u201d \u2014 {ASKS[category]}"
 
 #: Asked when the operator wants to follow a thread further, and the bank has
 #: nothing left about it. Deliberately a different question from the first
@@ -67,6 +117,11 @@ class Candidate(Protocol):
     template_section: str
     phrasing: str
     priority: int
+    #: What the compiler drafted this question to answer, in the gate's own
+    #: vocabulary, and its glanceable form. Both optional: a bank compiled
+    #: before they were carried has neither, and must go on working.
+    trigger_types: list[str]
+    stub: str
 
 
 @dataclass(frozen=True)
@@ -109,7 +164,7 @@ def select(
     if last_surfaced_at is not None and now - last_surfaced_at < MINIMUM_GAP:
         return None
 
-    stub = STUBS[hit.category]
+    stub = stub_for(hit.category, hit.term)
     unused = [
         candidate for candidate in candidates if candidate.id not in already_surfaced
     ]
@@ -121,8 +176,24 @@ def select(
     # them the product misheard the room. That is the M2 embarrassment case,
     # and it costs the reason line its credibility for the rest of the
     # meeting.
+    # Relevance in two tiers, and the order matters.
+    #
+    # A question naming what the client just said is about *that sentence*.
+    # One merely drafted for the same kind of ambiguity is about the same kind
+    # of thing — weaker, but far better than the templated fallback, which is
+    # what a bank of twenty quantity questions was reduced to whenever none of
+    # them happened to contain the word "several".
+    #
+    # Additive on purpose: the first tier is exactly what this did before, so
+    # a bank compiled without `trigger_types` — every bank that exists today —
+    # selects precisely as it always has, and gains the second tier when it is
+    # next compiled.
     about_this = [
         candidate for candidate in unused if mentions_term(hit.term, candidate.phrasing)
+    ] or [
+        candidate
+        for candidate in unused
+        if hit.category in (getattr(candidate, "trigger_types", None) or ())
     ]
     # Lower `priority` ranks higher — the ascending convention `OpenQuestion`
     # and `BankCandidate` already use. Ties keep the order the bank was
@@ -139,7 +210,12 @@ def select(
         )
 
     return SelectedNudge(
-        stub=stub,
+        # The bank's own headline where it has one. The term-anchored stub
+        # above was built because the bank carried none, and it is still what
+        # a templated question gets — there is no candidate to take one from.
+        # A drafted question has a stub written for it, which says what *this*
+        # question asks rather than which rule fired.
+        stub=glanceable(getattr(chosen, "stub", "") or "") or stub,
         question=chosen.phrasing,
         trigger_reason=hit.reason,
         created_at=now,

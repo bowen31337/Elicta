@@ -61,6 +61,29 @@ pub fn is_built_in_transport(transport_type: u32) -> bool {
     transport_type == TRANSPORT_TYPE_BUILT_IN
 }
 
+/// Whether a device belongs in the input picker at all.
+///
+/// `None` means the device's input scope could not be read.
+///
+/// The argument is deliberately a `bool` already decided by the caller rather
+/// than a device id: asking CoreAudio is the part that cannot be compiled off
+/// a Mac, and the part worth testing is which answer keeps the row.
+///
+/// Enumerating with `kAudioHardwarePropertyDevices` and an input scope does
+/// *not* filter — that selector belongs to the system object and returns
+/// every device whatever scope is asked for, which is how an output-only
+/// monitor and a pair of speakers reached a picker labelled "microphone or
+/// audio interface". The input test has to be made per device, and presence
+/// of the stream-configuration property is not it either: output-only devices
+/// answer it too, with zero buffers.
+///
+/// Unreadable keeps the device. The two failures are not symmetric — an
+/// unusable row is visible and recoverable, while hiding the only interface
+/// somebody owns leaves them unable to record with nothing to act on.
+pub fn is_offerable_input(supports_input_scope: Option<bool>) -> bool {
+    supports_input_scope.unwrap_or(true)
+}
+
 /// Resolves what the operator asked for against what is actually connected.
 ///
 /// `None` back means "no specific device": open whatever the OS prefers,
@@ -187,4 +210,28 @@ mod tests {
         assert!(!is_built_in_transport(u32::from_be_bytes(*b"blue")));
         assert!(!is_built_in_transport(0));
     }
+
+    #[test]
+    fn an_output_only_device_is_not_offered_as_an_input() {
+        // The bug this exists to prevent, seen in a built .dmg: the picker
+        // offered "BenQ RD280U" and "MacBook Pro Speakers", both of which
+        // CoreAudio reports with zero input channels. Choosing one is a row
+        // that exists only to fail.
+        assert!(!is_offerable_input(Some(false)));
+    }
+
+    #[test]
+    fn a_device_with_input_channels_is_offered() {
+        assert!(is_offerable_input(Some(true)));
+    }
+
+    #[test]
+    fn a_device_whose_scope_cannot_be_read_is_still_offered() {
+        // Unknown is kept, not hidden. The two failures are not symmetric:
+        // an unusable row is visible and recoverable -- pick another -- while
+        // hiding the only interface leaves an operator unable to record at
+        // all, with nothing on screen explaining why.
+        assert!(is_offerable_input(None));
+    }
+
 }

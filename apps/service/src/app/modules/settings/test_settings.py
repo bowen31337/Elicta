@@ -21,9 +21,16 @@ from .models import (
     SettingsUpdateRequest,
     VendorSettings,
 )
-from .probes import ProbeFailed
+from .probes import ProbeFailed, probe_for_vendor
 from .router import build_settings_router
 from .service import apply_settings_update, check_secret_connection
+from .speech_admin import (
+    add_credential,
+    check_credential,
+    remove_credential,
+    set_policy,
+    update_credential,
+)
 from .store import InMemorySettingsStore
 
 REAL_KEY = "sk-ant-api03-VERYSECRETVALUE-abcd"
@@ -41,7 +48,35 @@ def _client(store: InMemorySettingsStore) -> TestClient:
     async def check(key):
         return await check_secret_connection(store, key)
 
-    app.include_router(build_settings_router(read_settings, apply, check))
+    async def add_speech(payload):
+        return add_credential(store, payload)
+
+    async def update_speech(credential_id, payload):
+        return update_credential(store, credential_id, payload)
+
+    async def remove_speech(credential_id):
+        remove_credential(store, credential_id)
+
+    async def check_speech(credential_id):
+        return await check_credential(
+            store, credential_id, lambda vendor: probe_for_vendor(vendor.value)
+        )
+
+    async def speech_policy(payload):
+        return set_policy(store, payload)
+
+    app.include_router(
+        build_settings_router(
+            read_settings,
+            apply,
+            check,
+            add_speech,
+            update_speech,
+            remove_speech,
+            check_speech,
+            speech_policy,
+        )
+    )
     return TestClient(app)
 
 
@@ -367,22 +402,32 @@ def test_cloud_providers_use_the_hosts_own_credentials() -> None:
 def test_a_custom_speech_service_can_be_configured() -> None:
     """An engagement may mandate a processor we have never heard of."""
 
-    from .models import ConnectorSettings, SpeechVendor
+    from .models import ConnectorSettings
 
     connectors = ConnectorSettings(
-        live_vendor=SpeechVendor.CUSTOM,
         custom_vendor_name="In-house STT",
         custom_base_url="https://stt.internal",
     )
 
-    assert connectors.live_vendor is SpeechVendor.CUSTOM
+    assert connectors.custom_base_url == "https://stt.internal"
 
 
 def test_a_custom_speech_service_without_an_endpoint_is_rejected() -> None:
+    """Asserted through the record pair now that the live path has no setting.
+
+    The rule is unchanged — a custom vendor without an endpoint is a meeting
+    that fails at the first call — and it was reached through `live_vendor`
+    only because that was the shortest way to name a custom vendor. The pool
+    chooses the live provider now; the record pair is where a vendor is still
+    named in settings.
+    """
+
     from .models import ConnectorSettings, SpeechVendor
 
     with pytest.raises(ValueError, match="custom_base_url"):
-        ConnectorSettings(live_vendor=SpeechVendor.CUSTOM)
+        ConnectorSettings(
+            record_vendors=[SpeechVendor.CUSTOM, SpeechVendor.DEEPGRAM]
+        )
 
 
 def test_the_record_pair_must_still_differ_even_when_custom() -> None:

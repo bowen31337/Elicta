@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { useResource, type Resource, type ResourceStatus } from './useResource';
 import { apiUrl } from './apiClient';
@@ -76,6 +76,33 @@ export function loadSelectedMeetingId(): string | null {
   return read(MEETING_KEY);
 }
 
+/**
+ * What the toolbar is *showing*, which is not always what was chosen.
+ *
+ * Both hooks below fall back when nothing was chosen or the choice no longer
+ * exists, and deliberately do not persist that fallback. Every screen reads
+ * through the hooks and so agrees with the toolbar; the audio bridge does not,
+ * because it runs where no hook does. Reading the stored choice there refused
+ * to attach a recording to the meeting the operator could plainly see
+ * selected, and told them to choose one.
+ *
+ * Held in memory rather than written back: persisting is the thing the
+ * fallback exists to avoid, and a resolution is only true for as long as the
+ * list it was resolved against.
+ */
+let showingEngagementId: string | null = null;
+let showingMeetingId: string | null = null;
+
+/** The engagement a recording belongs to: what the toolbar shows. */
+export function loadEffectiveEngagementId(): string | null {
+  return showingEngagementId ?? loadSelectedEngagementId();
+}
+
+/** The meeting a recording belongs to: what the toolbar shows. */
+export function loadEffectiveMeetingId(): string | null {
+  return showingMeetingId ?? loadSelectedMeetingId();
+}
+
 export function saveSelectedMeetingId(meetingId: string): void {
   write(MEETING_KEY, meetingId);
 }
@@ -150,8 +177,13 @@ export function useCurrentEngagement(): CurrentEngagement {
     engagements[0] ??
     null;
 
+  const engagementId = engagement?.engagement_id ?? null;
+  useEffect(() => {
+    showingEngagementId = engagementId;
+  }, [engagementId]);
+
   return {
-    engagementId: engagement?.engagement_id ?? null,
+    engagementId,
     engagement,
     engagements,
     // The service answering with nothing is `ready`, not `missing`: an empty
@@ -205,8 +237,13 @@ export function useCurrentMeeting(engagementId: string | null): CurrentMeeting {
   // pin the operator to whatever happened to be newest the first time they
   // opened the screen, and a meeting created afterwards would never surface.
 
+  const meetingId = meeting?.meeting_id ?? null;
+  useEffect(() => {
+    showingMeetingId = meetingId;
+  }, [meetingId]);
+
   return {
-    meetingId: meeting?.meeting_id ?? null,
+    meetingId,
     meeting,
     meetings,
     status: list.status,

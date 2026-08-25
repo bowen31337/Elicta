@@ -49,7 +49,9 @@ from .models import (
     SecretValue,
     ServiceSettings,
     VendorSettings,
+    without_retired_connector_keys,
 )
+from .speech_credentials import SpeechCredentialPool
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,18 @@ CREATE TABLE IF NOT EXISTS secrets (
     updated_at TEXT NOT NULL
 );
 """
+
+def _key_text(key: object) -> str:
+    """The string a secret is stored under.
+
+    The table has always been keyed by plain string; only `SecretKey`
+    constrained it. Speech credentials address their secrets by a derived name
+    (`asr.<id>`), so both forms reach here — an enum member and the string it
+    stands for store and read identically.
+    """
+
+    return key.value if isinstance(key, SecretKey) else str(key)
+
 
 KEY_ENV_VAR = "ELICTA_SETTINGS_KEY"
 KEY_COMMAND_ENV_VAR = "ELICTA_SETTINGS_KEY_COMMAND"
@@ -207,6 +221,9 @@ class SqliteSettingsStore:
                 (key, json.dumps(payload), datetime.now(UTC).isoformat()),
             )
 
+    def write_speech(self, speech: SpeechCredentialPool) -> None:
+        self._write_json("speech", speech.model_dump(mode="json"))
+
     def write_inference(self, inference: InferenceSettings) -> None:
         self._write_json("inference", inference.model_dump(mode="json"))
 
@@ -227,14 +244,14 @@ class SqliteSettingsStore:
     def set_secret(self, key: SecretKey, value: str) -> None:
         with self._connect() as connection:
             if value == "":
-                connection.execute("DELETE FROM secrets WHERE key = ?", (key.value,))
+                connection.execute("DELETE FROM secrets WHERE key = ?", (_key_text(key),))
                 return
             connection.execute(
                 "INSERT INTO secrets (key, ciphertext, updated_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET ciphertext = excluded.ciphertext, "
                 "updated_at = excluded.updated_at",
                 (
-                    key.value,
+                    _key_text(key),
                     self._fernet.encrypt(value.encode()),
                     datetime.now(UTC).isoformat(),
                 ),
@@ -243,7 +260,7 @@ class SqliteSettingsStore:
     def get_secret(self, key: SecretKey) -> SecretValue | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT ciphertext FROM secrets WHERE key = ?", (key.value,)
+                "SELECT ciphertext FROM secrets WHERE key = ?", (_key_text(key),)
             ).fetchone()
 
         if row is not None:
@@ -254,7 +271,7 @@ class SqliteSettingsStore:
                 # configured" turns this into "re-enter your credential"
                 # rather than a service that will not start.
                 logger.warning(
-                    "settings: %s could not be decrypted with the current key", key.value
+                    "settings: %s could not be decrypted with the current key", _key_text(key)
                 )
                 return None
 
@@ -285,6 +302,7 @@ class SqliteSettingsStore:
         connectors = self._read_json("connectors")
         documents = self._read_json("documents")
         consent = self._read_json("consent")
+        speech = self._read_json("speech")
 
         with self._connect() as connection:
             updated = connection.execute(
@@ -310,6 +328,7 @@ class SqliteSettingsStore:
             )
 
         return ServiceSettings(
+            speech=SpeechCredentialPool(**speech) if speech else SpeechCredentialPool(),
             inference=_inference_with_environment(
                 InferenceSettings(**inference) if inference else InferenceSettings(),
                 self._read_environment,
@@ -318,7 +337,11 @@ class SqliteSettingsStore:
                 written=inference is not None,
             ),
             vendors=VendorSettings(**vendors) if vendors else VendorSettings(),
-            connectors=ConnectorSettings(**connectors) if connectors else ConnectorSettings(),
+            connectors=(
+                ConnectorSettings(**without_retired_connector_keys(connectors))
+                if connectors
+                else ConnectorSettings()
+            ),
             storage=_storage_view(self.get_secret(SecretKey.STATE_DATABASE_URL)),
             documents=_documents_with_environment(
                 DocumentSourceSettings(**documents) if documents else DocumentSourceSettings(),

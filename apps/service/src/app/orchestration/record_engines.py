@@ -17,7 +17,8 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.modules.settings.models import SecretKey, SpeechVendor
+from app.modules.settings.models import SpeechVendor
+from app.modules.settings.speech_resolution import resolve_speech_key
 from app.orchestration.assemblyai_engines import assemblyai_record_engine
 from app.orchestration.deepgram_engines import deepgram_record_engine
 from app.orchestration.engines import EngineNotConfiguredError
@@ -59,7 +60,7 @@ def _no_client_engine(vendor: SpeechVendor) -> Callable[[str, str, list[str]], A
 
 def _credential_checked(
     name: str,
-    key: SecretKey,
+    vendor: SpeechVendor,
     store: Any,
     transcribe: Callable[[str, str, list[str]], Awaitable[Any]],
 ) -> Callable[[str, str, list[str]], Awaitable[Any]]:
@@ -79,23 +80,23 @@ def _credential_checked(
     """
 
     async def call(session_id: str, audio_ref: str, keyterms: list[str]) -> Any:
-        if store.get_secret(key) is None:
+        if resolve_speech_key(store, vendor) is None:
             raise EngineNotConfiguredError(
                 f"the {name} record-path engine",
-                f"a credential ({key.value}) to authenticate with",
+                f"a key for {name} on the Speech settings screen to authenticate with",
             )
         return await transcribe(session_id, audio_ref, keyterms)
 
     return call
 
 
-_FACTORIES: dict[SpeechVendor, tuple[str, SecretKey, Any]] = {
-    SpeechVendor.DEEPGRAM: ("deepgram", SecretKey.DEEPGRAM_API_KEY, deepgram_record_engine),
-    SpeechVendor.ASSEMBLYAI: (
-        "assemblyai",
-        SecretKey.ASSEMBLYAI_API_KEY,
-        assemblyai_record_engine,
-    ),
+#: No `SecretKey` here any more. Which secret authenticates a vendor is
+#: `resolve_speech_key`'s business — the pool may hold several keys for one
+#: vendor, and naming a single fixed one here is what made an operator's
+#: pooled keys invisible to this path.
+_FACTORIES: dict[SpeechVendor, tuple[str, Any]] = {
+    SpeechVendor.DEEPGRAM: ("deepgram", deepgram_record_engine),
+    SpeechVendor.ASSEMBLYAI: ("assemblyai", assemblyai_record_engine),
 }
 
 
@@ -126,16 +127,15 @@ def build_record_engines(
             )
             engines.append((vendor.value, _no_client_engine(vendor)))
             continue
-        name, key, build = factory
-        if store.get_secret(key) is None:
+        name, build = factory
+        if resolve_speech_key(store, vendor) is None:
             logger.warning(
-                "startup: %s selected as a record-path engine, but %s is not "
-                "configured — it will fail closed on every call until it is",
+                "startup: %s selected as a record-path engine, but no key for "
+                "it is configured — it will fail closed on every call until one is",
                 name,
-                key.value,
             )
         engines.append(
-            (name, _credential_checked(name, key, store, build(read_audio, store, name=name)))
+            (name, _credential_checked(name, vendor, store, build(read_audio, store, name=name)))
         )
     return engines
 
@@ -160,7 +160,11 @@ def describe_record_engines(store: Any) -> list[str]:
         if factory is None:
             labels.append(f"{vendor.value} (NO CLIENT, fails closed)")
             continue
-        name, key, _build = factory
-        status = "configured" if store.get_secret(key) is not None else "NO CREDENTIAL, fails closed"
+        name, _build = factory
+        status = (
+            "configured"
+            if resolve_speech_key(store, vendor) is not None
+            else "NO CREDENTIAL, fails closed"
+        )
         labels.append(f"{name} ({status})")
     return labels

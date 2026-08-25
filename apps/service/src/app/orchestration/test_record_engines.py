@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.modules.settings.models import SecretKey, SpeechVendor
+from app.modules.settings.speech_admin import SpeechCredentialCreate, add_credential
 from app.modules.settings.store import InMemorySettingsStore
 from app.orchestration.engines import EngineNotConfiguredError
 from app.orchestration.record_engines import (
@@ -57,7 +58,11 @@ async def test_an_uncredentialed_vendor_still_builds_an_engine_that_fails_closed
     assert [name for name, _ in engines] == ["deepgram", "assemblyai"]
 
     _name, transcribe = engines[1]
-    with pytest.raises(EngineNotConfiguredError, match="assemblyai_api_key"):
+    # Named as a key on the Speech screen rather than as `assemblyai_api_key`,
+    # which is a setting the operator no longer has a field for: this sentence
+    # reaches them on the recording screen, and it has to name somewhere they
+    # can actually go.
+    with pytest.raises(EngineNotConfiguredError, match="a key for assemblyai"):
         await transcribe("session-1", "fixture://audio", [])
 
 
@@ -170,10 +175,57 @@ async def test_a_credential_entered_after_startup_takes_effect_without_a_restart
     engines = build_record_engines(store, lambda _session: b"")
     _name, transcribe = engines[1]
 
-    with pytest.raises(EngineNotConfiguredError, match="assemblyai_api_key"):
+    with pytest.raises(EngineNotConfiguredError, match="a key for assemblyai"):
         await transcribe("session-1", "fixture://audio", [])
 
     store.set_secret(SecretKey.ASSEMBLYAI_API_KEY, "aai")
 
     with pytest.raises(AssemblyAIUnavailable, match="nothing to transcribe"):
         await transcribe("session-1", "fixture://audio", [])
+
+
+class TestThePoolDrivesTheRecordPathToo:
+    """The same divergence the live lane had, one path over.
+
+    An operator adds a Deepgram key and an AssemblyAI key on the Settings
+    screen, and the record path refuses both — because these checks read the
+    two fixed secrets the pool replaced. The engine fails closed by name,
+    which at least says *something*, but it names a credential
+    (`deepgram_api_key`) the operator has no field for any more and sends
+    them looking for a setting that no longer exists.
+    """
+
+    @pytest.mark.anyio
+    async def test_a_pooled_key_authenticates_the_engine(self) -> None:
+        store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
+        for vendor in (SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI):
+            add_credential(
+                store,
+                SpeechCredentialCreate(vendor=vendor, label="Northwind", value=f"k-{vendor.value}"),
+            )
+
+        engines = build_record_engines(store, lambda _session: b"pcm")
+
+        for _name, call in engines:
+            # Whatever happens next is the vendor's business — being refused
+            # here for having no credential is not.
+            with pytest.raises(Exception) as raised:
+                await call("meeting-1", "audio-1", [])
+            assert not isinstance(raised.value, EngineNotConfiguredError)
+
+    def test_the_startup_log_counts_a_pooled_key_as_configured(self) -> None:
+        """Or it reports a working install as broken every time it starts."""
+
+        store = _store(SpeechVendor.DEEPGRAM, SpeechVendor.ASSEMBLYAI)
+        add_credential(
+            store,
+            SpeechCredentialCreate(
+                vendor=SpeechVendor.DEEPGRAM, label="Northwind", value="dg"
+            ),
+        )
+
+        labels = describe_record_engines(store)
+
+        assert "NO CREDENTIAL" not in [label for label in labels if "deepgram" in label][0]
+        # The other one genuinely is unconfigured, and must still say so.
+        assert "NO CREDENTIAL" in [label for label in labels if "assemblyai" in label][0]
