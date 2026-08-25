@@ -29,7 +29,8 @@ from typing import Any
 
 import httpx
 
-from app.modules.settings.models import SecretKey
+from app.modules.settings.models import SpeechVendor
+from app.modules.settings.speech_resolution import resolve_speech_key
 
 _models = importlib.import_module("app.modules.asr-record.models")
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
@@ -138,7 +139,7 @@ def assemblyai_record_engine(
 
         # Read per call, so a key entered on the Settings screen takes effect
         # without a restart.
-        secret = store.get_secret(SecretKey.ASSEMBLYAI_API_KEY)
+        secret = resolve_speech_key(store, SpeechVendor.ASSEMBLYAI)
         if secret is None:
             raise AssemblyAIUnavailable("no AssemblyAI credential is configured")
 
@@ -150,7 +151,7 @@ def assemblyai_record_engine(
         if not store.read().connectors.keyterm_prompting:
             keyterms = []
 
-        headers = {"authorization": secret.reveal()}
+        headers = {"authorization": secret}
 
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             uploaded = await client.post(

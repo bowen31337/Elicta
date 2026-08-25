@@ -18,7 +18,8 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.modules.settings.models import SecretKey
+from app.modules.settings.models import SpeechVendor
+from app.modules.settings.speech_resolution import resolve_speech_key
 
 _models = importlib.import_module("app.modules.asr-record.models")
 BatchTranscriptionOutput = _models.BatchTranscriptionOutput
@@ -214,7 +215,7 @@ async def _listen(
 
     # Read per call, so a key entered on the Settings screen takes effect
     # without a restart.
-    secret = store.get_secret(SecretKey.DEEPGRAM_API_KEY)
+    secret = resolve_speech_key(store, SpeechVendor.DEEPGRAM)
     if secret is None:
         raise DeepgramUnavailable("no Deepgram credential is configured")
 
@@ -233,7 +234,7 @@ async def _listen(
                 opt_out_of_retention=connectors.disable_vendor_retention,
             ),
             headers={
-                "Authorization": f"Token {secret.reveal()}",
+                "Authorization": f"Token {secret}",
                 "Content-Type": "application/octet-stream",
             },
             content=bytes(audio),
