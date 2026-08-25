@@ -344,3 +344,55 @@ class TestTheBankIsAskedByWhatItWasDraftedFor:
 
         assert nudge is not None
         assert "several" in nudge.stub
+
+
+class TestTheHeadlineStaysGlanceable:
+    """A stub is only worth having if it can be read without looking away.
+
+    FR-6.2 asks for three to five words. The bank's own stub is drafted by a
+    model against a schema with a minimum length and no maximum, and once
+    selection began preferring it — which is the right preference — nothing
+    stood between a model writing a sentence and the panel rendering it as
+    the headline. Before, the headline came from a four-entry table and was
+    fixed-length by construction, so this could not happen.
+
+    Falling back rather than trimming: a sentence cut mid-way is worse than
+    a plain one, and the templated stub is a real headline. Falling back
+    rather than rejecting the pass, too — refusing a hundred and sixty good
+    questions over one bad label is the mistake the candidate-count floor
+    already learned not to make.
+    """
+
+    def _with_stub(self, stub: str):
+        candidate = _Candidate("cand-1", "Volumes", "How many crates in a week?", 1)
+        candidate.trigger_types = [UNQUANTIFIED_AMOUNT]
+        candidate.stub = stub
+        return [candidate]
+
+    def test_a_headline_too_long_to_glance_at_is_not_used(self):
+        bank = self._with_stub(
+            "How many crates cross the dock in a typical week, and how much "
+            "does that vary between sites?"
+        )
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.candidate_id == "cand-1", "the question itself is still good"
+        assert "several" in nudge.stub, "it should fall back to the templated headline"
+
+    def test_a_headline_of_the_right_length_is_kept(self):
+        bank = self._with_stub("A week's crossings?")
+
+        nudge = select(_hit_on("We move several pallets a day."), bank, now=NOW)
+
+        assert nudge is not None
+        assert nudge.stub == "A week's crossings?"
+
+    def test_every_headline_this_can_produce_is_glanceable(self):
+        for stub in ("", "   ", "A week's crossings?", "word " * 40):
+            nudge = select(
+                _hit_on("We move several pallets a day."), self._with_stub(stub), now=NOW
+            )
+            assert nudge is not None
+            assert len(nudge.stub.split()) <= 8, nudge.stub

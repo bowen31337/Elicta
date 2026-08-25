@@ -51,6 +51,32 @@ ASKS: dict[str, str] = {
 }
 
 
+#: The most words a headline may carry and still be read without looking away
+#: from the client. FR-6.2 asks for three to five; this is the point at which
+#: a stub has stopped being one, not the target — refusing a good six-word
+#: headline in favour of a generic four-word one would be the same mistake
+#: the candidate-count floor already learned not to make.
+GLANCEABLE_WORDS = 8
+
+
+def glanceable(stub: str) -> str | None:
+    """The bank's headline, if it can actually be glanced at.
+
+    `None` where it cannot, so the caller uses the templated one instead.
+    Not trimmed: a sentence cut mid-way is worse than a plain headline, and
+    the templated stub is a real one.
+
+    Needed because selection began preferring the bank's stub — which is the
+    right preference, since it says what *this* question asks — and the
+    schema that produces it sets a minimum length and no maximum. The
+    headline it replaced came from a four-entry table and was glanceable by
+    construction.
+    """
+
+    words = stub.split()
+    return stub.strip() if 0 < len(words) <= GLANCEABLE_WORDS else None
+
+
 def stub_for(category: str, term: str) -> str:
     """The glanceable half (FR-6.3), anchored to what was actually said.
 
@@ -189,7 +215,7 @@ def select(
         # a templated question gets — there is no candidate to take one from.
         # A drafted question has a stub written for it, which says what *this*
         # question asks rather than which rule fired.
-        stub=(getattr(chosen, "stub", "") or "").strip() or stub,
+        stub=glanceable(getattr(chosen, "stub", "") or "") or stub,
         question=chosen.phrasing,
         trigger_reason=hit.reason,
         created_at=now,
