@@ -24,9 +24,13 @@ machine.
 
 It is also where you remove a client you no longer want on the list, which
 takes its meetings, documents and vocabulary out of view with it and erases
-nothing. Removing asks first: the button arms, and a second press beside it
-confirms. One press taking a whole client off every screen at once was more
-than a single button's worth of consequence.
+nothing. Removing asks first, in a dialog naming the client and saying what
+removal actually does — one press taking a whole client off every screen at
+once was more than a single button's worth of consequence. Removing a meeting
+asks in the same way, and says what it keeps.
+
+The safe answer is the one already selected, so pressing Enter out of habit
+keeps rather than removes, and Escape is a way out rather than agreement.
 
 Everything else on this page happens on the Preparation screen, about the one
 client you opened.

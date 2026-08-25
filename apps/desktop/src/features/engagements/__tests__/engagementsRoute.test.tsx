@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -160,7 +160,7 @@ describe('the engagements screen', () => {
       await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
     );
     await userEvent.click(
-      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }),
     );
 
     await waitFor(() => expect(written).toHaveLength(1));
@@ -193,7 +193,7 @@ describe('the engagements screen', () => {
 });
 
 describe('the weight of the actions matches what they do', () => {
-  it('asks before removing a client, because one click should not', async () => {
+  it('asks in a dialog before removing a client', async () => {
     /* Removal takes a client's meetings, documents and vocabulary off every
        screen at once. It sat as a single-click button the same size as
        "Open", one row apart from it, with nothing between an accidental
@@ -206,9 +206,11 @@ describe('the weight of the actions matches what they do', () => {
     );
 
     expect(written).toHaveLength(0);
-    expect(
-      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
-    ).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveAccessibleName(/Calder & Rowe/);
+    // The consequence, in the dialog rather than a footnote further down the
+    // page: it is what the answer depends on.
+    expect(within(dialog).getByText(/Nothing is erased/i)).toBeInTheDocument();
   });
 
   it('removes it once that is confirmed', async () => {
@@ -219,7 +221,7 @@ describe('the weight of the actions matches what they do', () => {
     );
 
     await userEvent.click(
-      screen.getByRole('button', { name: /Remove Calder & Rowe for good/i }),
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }),
     );
 
     await waitFor(() => expect(written).toHaveLength(1));
@@ -233,27 +235,27 @@ describe('the weight of the actions matches what they do', () => {
       await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /^Keep Calder & Rowe$/i }));
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Keep it' }),
+    );
 
     expect(written).toHaveLength(0);
-    expect(
-      screen.queryByRole('button', { name: /for good/i }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('arms one client at a time', async () => {
-    /* Two rows both showing "Remove for good" is a screen inviting the wrong
-       one to be pressed. */
+  it('asks about the client whose row was pressed', async () => {
+    /* One dialog, naming one client. The inline version this replaced could
+       arm two rows at once, which is a screen inviting the wrong one. */
     stubService();
     render(<EngagementsRoute />);
 
     await userEvent.click(
-      await screen.findByRole('button', { name: /Remove Calder & Rowe/i }),
-    );
-    await userEvent.click(
-      screen.getByRole('button', { name: /Remove Northwind Logistics/i }),
+      await screen.findByRole('button', { name: /Remove Northwind Logistics/i }),
     );
 
-    expect(screen.getAllByRole('button', { name: /for good/i })).toHaveLength(1);
+    expect(await screen.findByRole('dialog')).toHaveAccessibleName(
+      /Northwind Logistics/,
+    );
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
   });
 });

@@ -4,6 +4,7 @@ import './engagements.css';
 import { useState } from 'react';
 
 import { useCurrentEngagement } from '../../services/selection';
+import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { ScreenEyebrow } from '../../ui/Mark';
 import { ScreenState } from '../../ui/ScreenState';
 import { createEngagement, deleteEngagement } from './engagementActions';
@@ -75,12 +76,13 @@ export function EngagementsScreen({
   const [sector, setSector] = useState('');
   const [commercialContext, setCommercialContext] = useState('');
   /**
-   * The one client whose removal is a press away, or none.
+   * The client the dialog is asking about, or none.
    *
-   * One at a time, and held here rather than per row: two rows both offering
-   * "Remove for good" is a screen inviting the wrong one to be pressed.
+   * Held here rather than per row so there is one dialog naming one client.
+   * The inline pair this replaced could arm two rows at once, which is a
+   * screen inviting the wrong one to be pressed.
    */
-  const [arming, setArming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<EngagementSummaryRow | null>(null);
 
   const complete =
     clientOrganisation.trim() !== '' && sector.trim() !== '' && commercialContext.trim() !== '';
@@ -101,6 +103,19 @@ export function EngagementsScreen({
 
   return (
     <main className="screen" aria-labelledby="engagements-title">
+      <ConfirmDialog
+        open={confirming !== null}
+        title={`Remove ${confirming?.clientOrganisation ?? ''}?`}
+        body="Its meetings, documents and vocabulary go off every screen with it. Nothing is erased, and it can be brought back."
+        confirmLabel="Remove"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          const going = confirming;
+          setConfirming(null);
+          if (going !== null) void write.run(() => actions.remove(going.id));
+        }}
+      />
+
       <header className="screen-head">
         <ScreenEyebrow>Engagements</ScreenEyebrow>
         <h1 className="t-large-title" id="engagements-title">
@@ -136,14 +151,8 @@ export function EngagementsScreen({
                 engagement={engagement}
                 current={engagement.id === currentId}
                 busy={write.busy}
-                armed={arming === engagement.id}
-                onArm={() => setArming(engagement.id)}
-                onDisarm={() => setArming(null)}
                 onOpen={() => actions.open(engagement.id)}
-                onRemove={() => {
-                  setArming(null);
-                  void write.run(() => actions.remove(engagement.id));
-                }}
+                onRemove={() => setConfirming(engagement)}
               />
             ))
           )}
@@ -222,18 +231,12 @@ function EngagementRow({
   engagement,
   current,
   busy,
-  armed,
-  onArm,
-  onDisarm,
   onOpen,
   onRemove,
 }: {
   readonly engagement: EngagementSummaryRow;
   readonly current: boolean;
   readonly busy: boolean;
-  readonly armed: boolean;
-  readonly onArm: () => void;
-  readonly onDisarm: () => void;
   readonly onOpen: () => void;
   readonly onRemove: () => void;
 }) {
@@ -255,37 +258,15 @@ function EngagementRow({
         </span>
       </button>
 
-      {armed ? (
-        <>
-          <button
-            type="button"
-            className="btn btn--danger"
-            disabled={busy}
-            aria-label={`Remove ${engagement.clientOrganisation} for good`}
-            onClick={onRemove}
-          >
-            Remove for good
-          </button>
-          <button
-            type="button"
-            className="btn"
-            aria-label={`Keep ${engagement.clientOrganisation}`}
-            onClick={onDisarm}
-          >
-            Keep
-          </button>
-        </>
-      ) : (
-        <button
-          type="button"
-          className="btn engagement-remove"
-          disabled={busy}
-          aria-label={`Remove ${engagement.clientOrganisation}`}
-          onClick={onArm}
-        >
-          Remove
-        </button>
-      )}
+      <button
+        type="button"
+        className="btn engagement-remove"
+        disabled={busy}
+        aria-label={`Remove ${engagement.clientOrganisation}`}
+        onClick={onRemove}
+      >
+        Remove
+      </button>
     </div>
   );
 }

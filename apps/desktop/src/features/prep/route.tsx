@@ -3,6 +3,7 @@ import './screens.css';
 import { useCallback, useState } from 'react';
 
 import { ScreenEyebrow } from '../../ui/Mark';
+import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { ScreenState } from '../../ui/ScreenState';
 import {
   addVocabularyTerm,
@@ -157,6 +158,14 @@ export function PrepScreen({
    * a set would let two rows hold two drafts of the same field.
    */
   const [renaming, setRenaming] = useState<string | null>(null);
+  /**
+   * The meeting the dialog is asking about, or none.
+   *
+   * The whole meeting rather than its id, so the question can name it. An id
+   * would make the dialog read "Remove meeting-2?", which is the label on the
+   * button that opened it and tells the operator nothing they did not have.
+   */
+  const [removingMeeting, setRemovingMeeting] = useState<PreparedMeeting | null>(null);
   const [purposeDraft, setPurposeDraft] = useState('');
   /**
    * Which bank sections are open, or `null` for "the operator has not said".
@@ -324,6 +333,18 @@ export function PrepScreen({
        a sticky rail has to be free to travel. Nested inside the column it
        could only travel within its own row, which is no distance at all. */
     <div className="screen-layout">
+      <ConfirmDialog
+        open={removingMeeting !== null}
+        title={`Remove ${removingMeeting === null ? '' : meetingName(removingMeeting)}?`}
+        body="It comes off this list. If the meeting happened, its consent record and its recording stay exactly where they are — nothing is erased."
+        confirmLabel="Remove"
+        onCancel={() => setRemovingMeeting(null)}
+        onConfirm={() => {
+          const going = removingMeeting;
+          setRemovingMeeting(null);
+          if (going !== null) void write.run(() => actions.removeMeeting(going.id));
+        }}
+      />
       <SectionIndex entries={indexEntries} currentId={index.currentId} onJump={jump} />
 
       <main className="screen screen--indexed" aria-labelledby="prep-title" ref={index.attach}>
@@ -724,7 +745,7 @@ export function PrepScreen({
                     className="btn btn--danger"
                     disabled={write.busy}
                     aria-label={`Remove ${meetingName(meeting)}`}
-                    onClick={() => void write.run(() => actions.removeMeeting(meeting.id))}
+                    onClick={() => setRemovingMeeting(meeting)}
                   >
                     Remove
                   </button>

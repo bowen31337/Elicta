@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -578,6 +578,11 @@ describe('editing the meetings on the list', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Remove Discovery 2 — volumes' }),
     );
+    // The press opens the question; nothing is sent until it is answered.
+    expect(written).toHaveLength(0);
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }),
+    );
 
     await waitFor(() => expect(written).toHaveLength(1));
     expect(written[0].path).toBe('/api/meetings/meeting-1');
@@ -595,7 +600,13 @@ describe('editing the meetings on the list', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Remove Discovery 2 — volumes' }),
     );
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }),
+    );
 
+    // On the page behind, not in the dialog: the dialog asked its question
+    // and got an answer, and a refusal by the service is about the meeting
+    // rather than about the question.
     expect(await screen.findByText('meeting not found')).toBeInTheDocument();
   });
 
@@ -687,6 +698,17 @@ describe('editing the meetings on the list', () => {
       expect(screen.getByRole('button', { name: 'Remove meeting-2' })).toBeInTheDocument();
 
       await userEvent.click(screen.getByRole('button', { name: 'Remove meeting-2' }));
+      // Asks first. A meeting carries a consent record and a recording, and
+      // this button sat one row from Rename with nothing between a mis-aimed
+      // press and the meeting leaving the list.
+      expect(written).toHaveLength(0);
+      const dialog = await screen.findByRole('dialog');
+      // "Remove meeting-2" is a fair label on a button and a poor question:
+      // what decides the answer is whether the consent record and the
+      // recording go with it.
+      expect(dialog).toHaveAccessibleName(/meeting-2/);
+      expect(within(dialog).getByText(/consent record/i)).toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
       await waitFor(() => expect(written).toHaveLength(1));
       expect(written[0].path).toBe('/api/meetings/meeting-2');
     } finally {
@@ -698,4 +720,5 @@ describe('editing the meetings on the list', () => {
       };
     }
   });
+
 });

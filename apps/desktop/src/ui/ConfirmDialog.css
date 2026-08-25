@@ -1,0 +1,87 @@
+/* The confirmation dialog.
+ *
+ * A sheet on the top layer, over a scrim that dims what it is about. The
+ * material is the panel's own `.glass` idiom rather than a flat card: this
+ * floats above the page, and a surface that floats should read as one.
+ */
+
+.confirm {
+  /* `<dialog>` ships with a border, padding and a black background nobody
+     wants. Cleared here rather than fought at each rule below. */
+  border: 0;
+  padding: 0;
+  color: var(--label);
+  /* The raised-surface token, not the page one. `--bg-secondary` *is* the
+     page colour in light mode, which made this read as a flat rectangle
+     lying on the page rather than a sheet above it; in dark it sat one step
+     off black and had no edge at all. `--bg-tertiary` is what the grouped
+     cards use and is clearly above the ground in both themes. */
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  /* A material, not a blur: depth shadow to lift it, and a hairline rim so
+     it has an edge where the shadow is too soft to give it one — which on a
+     near-black ground is everywhere. */
+  box-shadow: var(--shadow-4), inset 0 0 0 0.5px var(--separator);
+  /* Narrow enough that the title and the two buttons are one glance, wide
+     enough that a client's name does not wrap. */
+  inline-size: min(26rem, calc(100vw - var(--space-8)));
+  padding: var(--space-6);
+}
+
+.confirm::backdrop {
+  /* Dimmed rather than blurred: what is behind is the list this is about,
+     and it stays readable so the operator can check they picked the right
+     row without dismissing the question.
+     Heavier than it first was — at a third, the page behind competed with
+     the sheet for attention, which is the one thing a modal exists to stop. */
+  background: rgb(0 0 0 / 0.45);
+}
+
+.confirm-title {
+  margin: 0;
+  /* Titles track tight; the type role carries that, so nothing is set here
+     beyond the spacing this layout needs. */
+}
+
+.confirm-body {
+  margin: var(--space-3) 0 var(--space-6);
+  color: var(--label-supporting);
+  line-height: var(--leading-relaxed);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* The destructive half. Red, and second — the safe one sits where the eye
+ * and the tab order reach first, which is also where focus lands. */
+.confirm-go {
+  color: var(--red-ink);
+}
+
+/* Black at any opacity does very little over a near-black page, so on dark
+ * the separation has to come from the sheet rather than the scrim. The rim
+ * above is doing that work; the scrim is only holding the page back. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .confirm::backdrop {
+    background: rgb(0 0 0 / 0.6);
+  }
+}
+[data-theme='dark'] .confirm::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .confirm::backdrop {
+    background: rgb(0 0 0 / 0.75);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .confirm {
+    outline: 1px solid var(--separator-opaque);
+    outline-offset: -1px;
+  }
+}
