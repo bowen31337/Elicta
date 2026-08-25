@@ -3560,6 +3560,10 @@ export interface components {
              * @default false
              */
             pruned: boolean;
+            /** Source Doc */
+            source_doc?: string | null;
+            /** Authority Match */
+            authority_match?: string[];
         };
         /**
          * BankCandidate

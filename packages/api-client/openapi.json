@@ -7506,6 +7506,24 @@
             "type": "boolean",
             "title": "Pruned",
             "default": false
+          },
+          "source_doc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Doc"
+          },
+          "authority_match": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Authority Match"
           }
         },
         "type": "object",
