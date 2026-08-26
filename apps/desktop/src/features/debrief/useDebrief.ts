@@ -52,7 +52,16 @@ interface WireCompletion {
   readonly stopped_at: string | null;
   /** Written for whoever is debugging the pipeline. Never rendered. */
   readonly reason: string | null;
-  readonly cause: 'not_configured' | 'failed' | 'input_gone' | 'unknown' | null;
+  readonly cause:
+    | 'not_configured'
+    | 'failed'
+    | 'input_gone'
+    | 'rate_limited'
+    | 'unavailable'
+    | 'credential_rejected'
+    | 'not_entitled'
+    | 'unknown'
+    | null;
   /** Whether the pipeline is working on it right now. */
   readonly running?: boolean;
 }
@@ -131,10 +140,46 @@ export function incompleteNotice(
       ? ' Something it needs is not set up yet.'
       : completion.cause === 'input_gone'
         ? ' The recording it needed had already been destroyed, as it is once a meeting has been transcribed.'
-        : completion.cause === 'failed'
-          ? ' The call it needed did not get through.'
-          : '';
+        : completion.cause === 'rate_limited'
+          ? // The one failure with a time on it. `spentAllowance` lifts the
+            // provider's own sentence out of the stage record, because it
+            // names the limit and the reset in the operator's timezone and
+            // nothing here has a better source for either. Rendering "the
+            // call did not get through" for this sent people to look at
+            // their network.
+            ` The Claude allowance for this deployment is spent.${spentAllowance(completion.reason)}`
+          : completion.cause === 'credential_rejected'
+            ? ' The Claude credential was refused.'
+            : completion.cause === 'not_entitled'
+              ? ' This credential is not permitted to make that request.'
+              : completion.cause === 'failed' || completion.cause === 'unavailable'
+                ? ' The call it needed did not get through.'
+                : '';
   return `The write-up stopped while ${stage}.${because} Nothing below is missing on purpose.`;
+}
+
+/**
+ * The provider's own sentence about a spent allowance, when it gave one.
+ *
+ * Lifted rather than composed: the CLI says which limit and when it resets,
+ * in the operator's own timezone, and there is no better source here. It
+ * arrives behind the stage prefix and the `[rate_limited]` marker that
+ * `upstream_failure_in` reads, so only the tail is worth showing.
+ *
+ * The exception to "never put the pipeline's own words on the screen", and a
+ * narrow one: this text is addressed to whoever is using the credential,
+ * which is the person reading it, and the reset time is the only actionable
+ * thing in the whole failure.
+ */
+export function spentAllowance(reason: string | null | undefined): string {
+  if (!reason) return '';
+  const said = reason.split(']:').pop()?.trim();
+  if (!said) return '';
+  // Anything that reads like a stack trace or an identifier is left out — the
+  // test for it is the one the citation extractor uses on quotes: if it does
+  // not look like something said to a person, it is not shown to one.
+  if (/[_{}<>]|\.py:|Traceback/.test(said)) return '';
+  return ` ${said.charAt(0).toUpperCase()}${said.slice(1)}${said.endsWith('.') ? '' : '.'}`;
 }
 
 /** Said when the screen has nothing on it, and the run never started. */

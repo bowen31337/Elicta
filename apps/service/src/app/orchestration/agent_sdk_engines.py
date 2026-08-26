@@ -119,6 +119,51 @@ def json_payload(text: str) -> dict[str, Any]:
     return loaded
 
 
+#: Named generically because `_default_run` is shared by every stage, and the
+#: stage the pipeline actually stopped at is recorded separately — this string
+#: is the prefix on the detail, not the answer to "where did it stop".
+STAGE_AGENT_SDK = "the Claude Agent SDK"
+
+
+def rate_limit_refusal(messages: Any) -> str | None:
+    """What the CLI said about a spent allowance, if that is why it stopped.
+
+    Observed on a real write-up. A credential that has spent its seven-day
+    Claude Code allowance gets an assistant turn saying so — "You've hit your
+    weekly limit · resets Aug 28 at 5pm" — and then a result flagged
+    `is_error` whose subtype is, contradictorily, `success`. The SDK renders
+    that pair as "Claude Code returned an error result: success", which
+    classifies as an unrecognised failure and reaches the operator as a
+    network problem.
+
+    Three things wrong with that in one sentence: nothing failed to get
+    through, there is nothing to retry until a stated time, and the remedy is
+    nowhere near a network. So the stream is read for what it plainly said.
+
+    Taken from the assistant turn rather than composed here: the CLI names the
+    limit and the reset in the operator's own timezone, and this module has no
+    better source for either.
+    """
+
+    said: str | None = None
+    limited = False
+    for message in messages:
+        info = getattr(message, "rate_limit_info", None)
+        if info is not None and getattr(info, "status", None) == "rejected":
+            limited = True
+        if getattr(message, "error", None) == "rate_limit":
+            limited = True
+            for block in getattr(message, "content", None) or []:
+                text = getattr(block, "text", None)
+                if text:
+                    said = text
+    if not limited:
+        return None
+    # A limit with nothing said is still a limit: the fallback names the kind
+    # so the operator is not left with an empty explanation.
+    return said or "the configured Claude credential has no allowance left right now"
+
+
 def _default_run(
     *, oauth_token: str | None, model: str
 ) -> Callable[[str, str], Awaitable[str]]:
@@ -166,11 +211,32 @@ def _default_run(
         )
 
         chunks: list[str] = []
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        chunks.append(block.text)
+        seen: list[Any] = []
+        try:
+            async for message in query(prompt=prompt, options=options):
+                seen.append(message)
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            chunks.append(block.text)
+        except Exception as exc:
+            # The CLI exits non-zero after refusing for quota, so the refusal
+            # arrives as an exception rather than a return. What it said on the
+            # way out is the only actionable thing in the whole failure, and it
+            # is already in `seen`.
+            spent = rate_limit_refusal(seen)
+            if spent is None:
+                raise
+            raise UpstreamUnavailableError(
+                STAGE_AGENT_SDK, UpstreamFailure.RATE_LIMITED, spent
+            ) from exc
+
+        spent = rate_limit_refusal(seen)
+        if spent is not None:
+            raise UpstreamUnavailableError(
+                STAGE_AGENT_SDK, UpstreamFailure.RATE_LIMITED, spent
+            )
+
         answer = "".join(chunks).strip()
         if not answer:
             raise AgentSdkUnavailableError(

@@ -251,3 +251,81 @@ class TestTheDebriefEngineOnTheAgentSdk:
 
         with pytest.raises(EngineNotConfiguredError):
             asyncio.run(engines.diarize("session-1"))
+
+
+class TestExhaustedQuotaIsSaidPlainly:
+    """A weekly Claude limit is not "the call did not get through".
+
+    Observed on a real write-up. The credential had spent its seven-day Claude
+    Code allowance, and the CLI says so in an assistant turn -- "You've hit
+    your weekly limit - resets Aug 28 at 5pm" -- then ends the run with a
+    result flagged `is_error` whose subtype is, contradictorily, `success`.
+    The SDK renders that pair as `Claude Code returned an error result:
+    success`, which the panel classified as an unrecognised failure and
+    rendered as a network problem.
+
+    Three wrong things in one sentence: nothing failed to get through, there
+    is nothing to retry until a stated time, and the remedy is nowhere near a
+    network. `UpstreamFailure.RATE_LIMITED` already exists for exactly this
+    and the agent-SDK path simply never raised it.
+    """
+
+    def _rate_limited_stream(self):
+        """The messages the CLI actually sent, in the order it sent them."""
+
+        return [
+            _FakeRateLimitEvent(
+                rate_limit_info=_FakeRateLimitInfo(
+                    status="rejected", rate_limit_type="seven_day", resets_at=1787900400
+                )
+            ),
+            _FakeAssistant(
+                content=[_FakeText("You've hit your weekly limit · resets Aug 28 at 5pm")],
+                error="rate_limit",
+            ),
+        ]
+
+    def test_a_spent_weekly_allowance_is_classified_as_a_rate_limit(self):
+        from app.orchestration.agent_sdk_engines import rate_limit_refusal
+
+        refusal = rate_limit_refusal(self._rate_limited_stream())
+
+        assert refusal is not None, "a rejected weekly limit is a rate limit"
+        assert "weekly limit" in refusal
+
+    def test_an_ordinary_answer_is_not_mistaken_for_one(self):
+        from app.orchestration.agent_sdk_engines import rate_limit_refusal
+
+        ordinary = [_FakeAssistant(content=[_FakeText("OK")], error=None)]
+        assert rate_limit_refusal(ordinary) is None
+
+    def test_the_reset_time_survives_into_the_message(self):
+        """It is the only actionable thing in the whole failure."""
+
+        from app.orchestration.agent_sdk_engines import rate_limit_refusal
+
+        refusal = rate_limit_refusal(self._rate_limited_stream())
+        assert "resets" in refusal.lower()
+
+
+class _FakeText:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeAssistant:
+    def __init__(self, content, error):
+        self.content = content
+        self.error = error
+
+
+class _FakeRateLimitInfo:
+    def __init__(self, status, rate_limit_type, resets_at):
+        self.status = status
+        self.rate_limit_type = rate_limit_type
+        self.resets_at = resets_at
+
+
+class _FakeRateLimitEvent:
+    def __init__(self, rate_limit_info):
+        self.rate_limit_info = rate_limit_info
