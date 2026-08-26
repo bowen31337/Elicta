@@ -835,6 +835,13 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
         // banner makes is the one thing on that screen that must not depend on
         // both sides of an IPC boundary agreeing.
         feeding = false;
+        // Stopped, not merely ignored. The watch asks whether a recording
+        // that should be delivering audio is delivering any; a paused one
+        // should not be. On this backend Rust drops paused frames before it
+        // emits them, so a pause left watched raised "no audio is being read"
+        // five seconds in — true, exactly what the operator asked for, and
+        // indistinguishable on screen from a dead microphone.
+        stopSilenceWatch();
         bankClock();
         publish({ status: next });
         flattenMeter();
@@ -848,6 +855,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       // happened, timed and dated. The shell drops paused frames in Rust
       // before they are emitted; this is the browser doing the same.
       feeding = false;
+      stopSilenceWatch();
       bankClock();
       publish({ status: { ...snapshot.status, state: 'paused' } });
       flattenMeter();
@@ -858,6 +866,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
         const next = await invoke<CaptureStatus>('resume_capture').catch(() => null);
         if (next === null) return;
         feeding = bridge !== null;
+        if (bridge !== null) startSilenceWatch();
         startClock();
         publish({ status: next });
         return;
@@ -865,6 +874,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       if (session === null) return;
       session.resume();
       feeding = tap !== null;
+      if (tap !== null) startSilenceWatch();
       startClock();
       startMeter();
       publish({ status: { ...snapshot.status, state: 'capturing' } });
@@ -880,7 +890,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
         const next = await invoke<CaptureStatus>('stop_capture').catch(() => null);
         resetClock();
         closeMeter();
-        publish({ status: next ?? IDLE });
+        publish({ status: next ?? IDLE, uploadNote: null });
         await upload?.stop();
         return;
       }
@@ -888,7 +898,7 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       session = null;
       resetClock();
       closeMeter();
-      publish({ status: IDLE });
+      publish({ status: IDLE, uploadNote: null });
       // Last: the tail chunk goes, and the record path is asked for a
       // transcript of what was sent.
       await upload?.stop();

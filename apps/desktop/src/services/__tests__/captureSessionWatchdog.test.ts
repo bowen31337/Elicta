@@ -148,6 +148,28 @@ describe('a recording that is reading no audio', () => {
 
     expect(store.getSnapshot().uploadNote).toBeNull();
   });
+
+  it('starts watching again when the recording resumes', async () => {
+    // The other half of pausing the watch. A microphone that dies during a
+    // pause is the same silent failure as one that dies during a recording,
+    // and a watch that is never restarted is a watch that has been removed.
+    const context = fakeContext();
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge: () => fakeBridge() }),
+    );
+
+    await store.refresh();
+    await store.start('mic-1');
+    context.emit(new Float32Array(320).fill(0.2));
+    await store.pause();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(store.getSnapshot().uploadNote).toBeNull();
+
+    await store.resume();
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    expect(store.getSnapshot().uploadNote).toMatch(/no audio/i);
+  });
 });
 
 describe('the same watch on the desktop shell', () => {
@@ -179,6 +201,101 @@ describe('the same watch on the desktop shell', () => {
 
     await store.refresh();
     await store.start('mic-1');
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    expect(store.getSnapshot().uploadNote).toMatch(/no audio/i);
+  });
+});
+
+describe('the warning and the recording it is about', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('takes the warning down when the recording stops', async () => {
+    /* Reported: "i have already stopped the recording. why does UI show The
+       microphone is open but no audio is being read from it".
+
+       Because it did, and then stopped. `stop()` publishes `IDLE` and clears
+       nothing else, so a note raised mid-recording outlived the recording it
+       describes — in the present tense, about a microphone that is shut.
+
+       The test above it does stop a recording, and passes against this: it
+       stops before the five seconds are up, so there is no warning standing
+       when `stop` runs and nothing for `stop` to fail to clear. */
+    const context = fakeContext();
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge: () => fakeBridge() }),
+    );
+
+    await store.refresh();
+    await store.start('mic-1');
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(store.getSnapshot().uploadNote).toMatch(/no audio/i);
+
+    await store.stop();
+
+    expect(store.getSnapshot().uploadNote).toBeNull();
+  });
+
+  it('does not raise it over a recording the operator paused', async () => {
+    /* The shell drops paused frames in Rust before it emits them, so a paused
+       recording delivers nothing to count -- and the watch counts *after* the
+       feeding gate on that path, which the browser path deliberately does not
+       (see the comment on its own `sawSamples` call). Five seconds into a
+       pause the operator was told their microphone was delivering nothing,
+       which is true, is the state they asked for, and reads as a fault. */
+    const bridge = fakeBridge();
+    const listeners: Record<string, (event: { payload: unknown }) => void> = {};
+    const store = createCaptureStore(
+      deps({
+        shellAvailable: () => true,
+        environment: () => ({ isSecureContext: true, mediaDevices: undefined }),
+        pcmContext: () => null,
+        createBridge: () => bridge,
+        invoke: (async (command: string) => {
+          if (command === 'list_audio_sources') return [];
+          if (command === 'capture_status') return null;
+          if (command === 'pause_capture') return { state: 'paused', source: null, frames: 0 };
+          return { state: 'capturing', source: null, frames: 0 };
+        }) as never,
+        listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
+          listeners[name] = handler;
+          return () => {};
+        },
+      }),
+    );
+
+    await store.refresh();
+    await store.start('line-in');
+    // Audio is flowing, so nothing is wrong.
+    listeners['capture://pcm']?.({ payload: { pcm: 'AAAA' } });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(store.getSnapshot().uploadNote).toBeNull();
+
+    await store.pause();
+    // Rust emits nothing at all while paused.
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(store.getSnapshot().uploadNote).toBeNull();
+  });
+
+  it('starts watching again when the recording resumes', async () => {
+    // The other half of pausing the watch. A microphone that dies during a
+    // pause is the same silent failure as one that dies during a recording,
+    // and a watch that is never restarted is a watch that has been removed.
+    const context = fakeContext();
+    const store = createCaptureStore(
+      deps({ pcmContext: () => () => context.context, createBridge: () => fakeBridge() }),
+    );
+
+    await store.refresh();
+    await store.start('mic-1');
+    context.emit(new Float32Array(320).fill(0.2));
+    await store.pause();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(store.getSnapshot().uploadNote).toBeNull();
+
+    await store.resume();
     await vi.advanceTimersByTimeAsync(12_000);
 
     expect(store.getSnapshot().uploadNote).toMatch(/no audio/i);
