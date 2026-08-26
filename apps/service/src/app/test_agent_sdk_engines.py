@@ -329,3 +329,41 @@ class _FakeRateLimitInfo:
 class _FakeRateLimitEvent:
     def __init__(self, rate_limit_info):
         self.rate_limit_info = rate_limit_info
+
+
+class TestTheServiceRunsInIsolation:
+    """A stage's answer must not depend on whose laptop it ran on.
+
+    The options said as much in a comment -- "the operator's own Claude Code
+    settings, skills and MCP servers are not this service's to load: they
+    would change the answer a compile gives depending on whose laptop it ran
+    on" -- and then asked for the opposite of what it meant.
+
+    `setting_sources=None` is the SDK's *default*, and its documented meaning
+    is "all sources are loaded (matches CLI defaults)"; `[]` is the isolation
+    mode. And `allowed_tools=[]` is not the lever at all: it governs which
+    tools may be called without prompting, while `tools` decides which exist.
+    An empty list is falsy, so neither flag was ever sent and the CLI used its
+    defaults for both.
+
+    Seen on a live call: a session init carrying Task, Bash and Cron among its
+    tools, `cwd` set to the developer's checkout, and two SessionStart hooks
+    from that developer's own configuration firing inside a service request.
+    """
+
+    def _options(self):
+        from app.orchestration.agent_sdk_engines import isolated_options
+
+        return isolated_options(system="s", model="m", oauth_token=None)
+
+    def test_no_filesystem_settings_are_loaded(self):
+        # `None` means "load everything". Isolation is the empty list.
+        assert self._options().setting_sources == []
+
+    def test_no_built_in_tools_exist(self):
+        # Every stage is one question about text already in the prompt. A loop
+        # that could read the filesystem is a wider grant than the work needs.
+        assert self._options().tools == []
+
+    def test_the_operators_skills_are_not_enabled(self):
+        assert self._options().skills in (None, [])

@@ -164,6 +164,62 @@ def rate_limit_refusal(messages: Any) -> str | None:
     return said or "the configured Claude credential has no allowance left right now"
 
 
+def isolated_options(*, system: str, model: str, oauth_token: str | None) -> Any:
+    """The options one stage runs under, loading nothing of the operator's.
+
+    Extracted so the isolation can be asserted without spawning a CLI. It was
+    asserted nowhere, and was wrong in two ways that a comment claiming the
+    opposite made harder to see.
+
+    `setting_sources=None` is the SDK's *default*, whose documented meaning is
+    "all sources are loaded (matches CLI defaults)". `[]` is the isolation
+    mode. And `allowed_tools` is the wrong lever entirely — it governs which
+    tools may be called without prompting, while `tools` decides which tools
+    exist at all. Both were given empty lists, both are falsy, so neither flag
+    was ever sent to the CLI and it used its defaults for each.
+
+    What that looked like on a live call: a session init carrying Task, Bash
+    and Cron among its tools, `cwd` set to the developer's checkout, and two
+    of that developer's own SessionStart hooks firing inside a service
+    request. A compile would have given a different answer on a different
+    laptop, which is exactly what this is here to prevent.
+    """
+
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    env: dict[str, str] = {}
+    if oauth_token:
+        # The variable the SDK itself reads. `ANTHROPIC_OAUTH_TOKEN` is this
+        # service's own settings name and means nothing to the SDK, which is a
+        # difference worth stating once here rather than rediscovering from a
+        # silent fall-through to the Keychain.
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
+
+    return ClaudeAgentOptions(
+        system_prompt=system,
+        model=model,
+        env=env,
+        # No tools at all. Every stage here is a single question about text
+        # already in the prompt; a loop that could read the filesystem would
+        # be a wider grant than the work needs.
+        tools=[],
+        # Kept as well, and not instead: this one says nothing may be called
+        # without asking, which is the right answer even if `tools` ever
+        # acquires a default again.
+        allowed_tools=[],
+        # Neither the operator's settings, nor their skills, nor the MCP
+        # servers those settings would mount.
+        setting_sources=[],
+        skills=None,
+        # Deliberately uncapped. `max_turns=1` looks like the obvious bound
+        # for a single question and is not: Claude Code counts its own turns,
+        # so a large document set fails with "Reached maximum number of turns
+        # (1)" — an opaque refusal that reads like a provider problem and is a
+        # setting. With no tools granted there is no loop to bound: the model
+        # answers and stops.
+    )
+
+
 def _default_run(
     *, oauth_token: str | None, model: str
 ) -> Callable[[str, str], Awaitable[str]]:
@@ -175,40 +231,9 @@ def _default_run(
     """
 
     async def run(system: str, prompt: str) -> str:
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            TextBlock,
-            query,
-        )
+        from claude_agent_sdk import AssistantMessage, TextBlock, query
 
-        env: dict[str, str] = {}
-        if oauth_token:
-            # The variable the SDK itself reads. `ANTHROPIC_OAUTH_TOKEN` is
-            # this service's own settings name and means nothing to the SDK,
-            # which is a difference worth stating once here rather than
-            # rediscovering from a silent fall-through to the Keychain.
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth_token
-
-        options = ClaudeAgentOptions(
-            system_prompt=system,
-            model=model,
-            env=env,
-            # No tools: every stage here is a single question about text that
-            # is already in the prompt. A loop that could read the filesystem
-            # would be a wider grant than the work needs.
-            allowed_tools=[],
-            # Deliberately uncapped. `max_turns=1` looks like the obvious
-            # bound for a single question and is not: Claude Code counts its
-            # own turns, so a large document set fails with "Reached maximum
-            # number of turns (1)" — an opaque refusal that reads like a
-            # provider problem and is a setting. With no tools granted there
-            # is no loop to bound: the model answers and stops.
-            # The operator's own Claude Code settings, skills and MCP servers
-            # are not this service's to load: they would change the answer a
-            # compile gives depending on whose laptop it ran on.
-            setting_sources=None,
-        )
+        options = isolated_options(system=system, model=model, oauth_token=oauth_token)
 
         chunks: list[str] = []
         seen: list[Any] = []
