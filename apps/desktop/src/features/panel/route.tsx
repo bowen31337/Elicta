@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import './route.css';
 import {
@@ -87,6 +87,14 @@ export function OperatorPanel({
     : never;
 }) {
   const [state, setState] = useState<PanelState>(initial);
+  /**
+   * Sections the operator has marked asked, by slot id.
+   *
+   * Kept apart from the stream's coverage because the two are different
+   * facts with different owners, and holding them in one place meant the
+   * stream's next frame silently discarded the operator's.
+   */
+  const [askedSlots, setAskedSlots] = useState<ReadonlySet<string>>(new Set());
 
   // The live session drives the panel when there is one. Coverage arrives as
   // the current summary rather than a diff, and each nudge replaces the
@@ -118,19 +126,9 @@ export function OperatorPanel({
   });
 
   const onAsked = (slot: CoverageSlot) => {
-    setState((current) =>
-      current.coverage === null
-        ? current
-        : {
-            ...current,
-            coverage: {
-              ...current.coverage,
-              slots: current.coverage.slots.map((existing) =>
-                existing.id === slot.id ? { ...existing, filled: true } : existing,
-              ),
-            },
-          },
-    );
+    // Recorded as the operator's own, not written back into the stream's
+    // copy: the next connect replaces that wholesale, and it did.
+    setAskedSlots((current) => new Set(current).add(slot.id));
 
     // Fire-and-forget: the operator's confirmation is the local mutation above,
     // not this round trip (FR-6.6). A dropped sync costs an analytics row, and
@@ -235,7 +233,32 @@ export function OperatorPanel({
     }));
   };
 
-  const liveCoverage = coverage ?? state.coverage;
+  /**
+   * What the meter shows: the stream's slots, with the operator's ticks on
+   * top.
+   *
+   * These are two different facts and were one piece of state. The stream
+   * knows which sections *exist* — it derives them from the meeting's bank —
+   * and re-sends every one of them unfilled on each connect, because nothing
+   * server-side marks a section covered. Which are covered is the operator's,
+   * recorded when they tap `Asked it`.
+   *
+   * Read as `coverage ?? state.coverage`, the stream's copy won whenever
+   * there was one, so in a live meeting the tick was invisible and the meter
+   * sat at 0 of however many for the whole meeting. Merged, it moves and it
+   * survives the reconnection that used to wipe it.
+   */
+  const liveCoverage = useMemo(() => {
+    const fromStream = coverage ?? state.coverage;
+    if (fromStream === null) return null;
+    if (askedSlots.size === 0) return fromStream;
+    return {
+      ...fromStream,
+      slots: fromStream.slots.map((slot) =>
+        askedSlots.has(slot.id) ? { ...slot, filled: true } : slot,
+      ),
+    };
+  }, [coverage, state.coverage, askedSlots]);
   const firstUnfilled = liveCoverage?.slots.find((slot) => !slot.filled) ?? null;
   // The live stream wins over the initial prop once a meeting is running:
   // the prop is what the panel was handed at mount, the stream is what the

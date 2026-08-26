@@ -394,6 +394,59 @@ describe('the live panel', () => {
     expect(screen.getByRole('button', { name: /missing/i })).toBeInTheDocument();
   });
 
+  it('moves the meter when a section is marked asked', async () => {
+    /* Reported: "it is always 0/8 in the status bar".
+
+       The meter read the stream's copy of coverage and `Asked it` wrote to
+       the panel's own — `coverage ?? state.coverage`, with the stream's
+       winning whenever there was one. So in a live meeting the tick was
+       invisible, and the scene test that covered this passed because a fixed
+       scene has no stream and falls through to the half that was written. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    stream().emit('coverage', {
+      slots: [
+        { id: 's-1', label: 'Volumes', filled: false },
+        { id: 's-2', label: 'Performance', filled: false },
+      ],
+      time_remaining_ms: null,
+    });
+    emitNudge(1);
+    await screen.findByText(/0 of 2/);
+
+    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
+
+    expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
+  });
+
+  it('does not lose that tick when the stream reconnects', async () => {
+    /* The stream re-sends every slot unfilled on each connect — nothing
+       server-side marks one covered — so a wholesale replace undid the
+       operator's work every few minutes. What the stream knows is which
+       slots exist; which are covered is the operator's. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    const frame = {
+      slots: [
+        { id: 's-1', label: 'Volumes', filled: false },
+        { id: 's-2', label: 'Performance', filled: false },
+      ],
+      time_remaining_ms: null,
+    };
+    stream().emit('coverage', frame);
+    emitNudge(1);
+    await screen.findByText(/0 of 2/);
+    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
+    await screen.findByText(/1 of 2/);
+
+    // The same frame again, as a reconnect delivers it.
+    stream().emit('coverage', frame);
+
+    await waitFor(() => expect(screen.getByText(/1 of 2/)).toBeInTheDocument());
+  });
+
   it('is short two of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage
