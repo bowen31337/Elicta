@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { DebriefScreen } from '../route';
+import { incompleteNotice } from '../useDebrief';
 
 /**
  * When the write-up does not happen, the screen has to say so like it means it.
@@ -56,5 +57,25 @@ describe('the debrief screen when something went wrong', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText(/No write-up has been produced yet/)).toBeInTheDocument();
+  });
+});
+
+describe('what the alert says about the kind of failure', () => {
+  it('never reports a network problem for a run that made no call', () => {
+    /* A real meeting stored `no audio held for meeting-3: nothing to
+       transcribe` and the screen said "The call it needed did not get
+       through." There was no call: the audio had been destroyed, which is
+       what the product is supposed to do to it. The remedy is different from
+       a network remedy, so the sentence has to be. */
+    const said = incompleteNotice({
+      complete: false,
+      stopped_at: 'diarization',
+      reason: 'no audio held for meeting-3: nothing to transcribe',
+      cause: 'input_gone',
+    });
+
+    expect(said).toMatch(/telling the voices apart/i);
+    expect(said).not.toMatch(/did not get through/i);
+    expect(said).toMatch(/recording it needed/i);
   });
 });

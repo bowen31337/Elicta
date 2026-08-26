@@ -21,7 +21,7 @@ import asyncio
 import importlib
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from functools import partial, wraps
 from types import SimpleNamespace
@@ -3633,6 +3633,15 @@ async def _run_debrief_when_record_path_completes(
         or session_id
     )
 
+    # §7.2 diarizes the retained audio and §7.3 destroys it (NFR-2.4), which
+    # works exactly once — on the run that fires when the second record-path
+    # engine finishes. Every later run has no audio, and a later run is what
+    # "Write it up now" exists for. Both record-path engines diarize as part
+    # of transcribing, so when the audio is gone the answer is already in the
+    # transcript; asking a model to derive it again from nothing is not
+    # caution, it is a stage that can only fail.
+    engines = _diarizer_for(backend, session_id, reference, engines)
+
     async def save_cleaning(record: Any) -> None:
         backend.transcript_cleanings[session_id] = record
 
@@ -3763,6 +3772,44 @@ async def _run_debrief_when_record_path_completes(
     _record_debrief_outcome(backend, session_id, run)
     _record_debrief_artifacts(backend, session_id, run)
     return run
+
+
+def _diarizer_for(
+    backend: Backend, session_id: str, reference: Any, engines: DebriefEngines
+) -> DebriefEngines:
+    """The engines to run with, given whether there is still audio to hear.
+
+    Substituted only when there is no audio *and* the reference transcript
+    carries speaker tags. With audio in hand the dedicated pass stays: it
+    hears the whole session, where this reads one engine's segmentation of
+    it, and the two are not equally good. With neither, nothing is
+    substituted and the stage fails saying what is missing — a fabricated
+    attribution is worse than an absent one, which is the same rule the
+    citation extractor follows.
+    """
+
+    if backend.session_audio.get(session_id) is not None:
+        return engines
+
+    segments = list(getattr(reference, "segments", None) or [])
+    turns = [
+        _pipeline_models.SpeakerTurn(
+            start_seconds=segment.start_seconds,
+            end_seconds=segment.end_seconds,
+            speaker_tag=segment.speaker,
+        )
+        for segment in segments
+        if getattr(segment, "speaker", None)
+    ]
+    if not turns:
+        return engines
+
+    engine_name = f"{getattr(reference, 'engine', 'record-path')} (from transcript)"
+
+    async def from_transcript(_session_id: str, _audio_ref: str) -> Any:
+        return _pipeline_models.DiarizationOutput(engine=engine_name, turns=turns)
+
+    return replace(engines, diarize=from_transcript)
 
 
 def _record_debrief_outcome(backend: Backend, session_id: str, run: Any) -> None:
@@ -4006,8 +4053,19 @@ def _stage_failure_cause(stopped_at: str | None, reason: str | None) -> str | No
         return "unknown"
     if UNCONFIGURED_MARKER in reason:
         return "not_configured"
+    if _INPUT_GONE_MARKER in reason:
+        return "input_gone"
     upstream = upstream_failure_in(reason)
     return upstream.value if upstream is not None else "failed"
+
+
+#: What a stage says when the thing it needed is no longer held.
+#:
+#: Unrecognised reasons degrade to `failed`, which the screen renders as "the
+#: call it needed did not get through" — a network diagnosis, and for this one
+#: an invented one: no call was made, the audio had been destroyed. The
+#: remedy is different too, so it cannot share a name.
+_INPUT_GONE_MARKER = "no audio held"
 
 
 #: Which stage record carries the reason the §7 debrief stopped at that stage.
