@@ -63,7 +63,7 @@ pub fn signing_status() -> SigningStatus {
         let output = Command::new("/usr/bin/codesign")
             .args(["-dv", "--verbose=4", &path])
             .output();
-        return match output {
+        match output {
             Err(_) => SigningStatus::unknown("codesign could not be run"),
             Ok(output) => {
                 let report = String::from_utf8_lossy(&output.stderr);
@@ -77,7 +77,7 @@ pub fn signing_status() -> SigningStatus {
                     source: "codesign".into(),
                 }
             }
-        };
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -92,7 +92,7 @@ pub fn signing_status() -> SigningStatus {
                 ),
             ])
             .output();
-        return match output {
+        match output {
             Err(_) => SigningStatus::unknown("Get-AuthenticodeSignature could not be run"),
             Ok(output) => {
                 let report = String::from_utf8_lossy(&output.stdout);
@@ -104,7 +104,7 @@ pub fn signing_status() -> SigningStatus {
                     source: "Get-AuthenticodeSignature".into(),
                 }
             }
-        };
+        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -122,7 +122,7 @@ pub fn install_status() -> InstallStatus {
     {
         // A managed Mac has at least one configuration profile installed;
         // `profiles -P` lists them and needs no elevation to do so.
-        return match Command::new("/usr/bin/profiles").args(["-P"]).output() {
+        match Command::new("/usr/bin/profiles").args(["-P"]).output() {
             Err(_) => InstallStatus { managed: None, source: "profiles could not be run".into() },
             Ok(output) => {
                 let report = String::from_utf8_lossy(&output.stdout);
@@ -131,12 +131,12 @@ pub fn install_status() -> InstallStatus {
                     source: "profiles -P".into(),
                 }
             }
-        };
+        }
     }
 
     #[cfg(target_os = "windows")]
     {
-        return match Command::new("powershell")
+        match Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
@@ -151,7 +151,7 @@ pub fn install_status() -> InstallStatus {
                     String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
                 InstallStatus { managed: Some(count > 0), source: "MDM enrollment registry".into() }
             }
-        };
+        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
