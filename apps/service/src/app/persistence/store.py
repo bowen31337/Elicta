@@ -1152,6 +1152,69 @@ class StateStore:
             lock=self._lock,
         )
 
+    def surfaced_nudges(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """What each meeting put in front of the operator, in order.
+
+        Keyed by meeting because that is how the panel reads it and how
+        `Park it` resolves a thread — the id alone was all the panel ever
+        sent, and in memory a restart left nothing to resolve it against.
+        """
+
+        table = metadata.tables["surfaced_nudges"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.meeting_id, r.ordinal)):
+            loaded.setdefault(row.meeting_id, []).append(
+                decode(
+                    {
+                        "id": row.id,
+                        "meeting_id": row.meeting_id,
+                        "stub": row.stub,
+                        "question": row.question,
+                        "trigger_reason": row.trigger_reason,
+                        "term": row.term,
+                        "category": row.category,
+                        "candidate_id": row.candidate_id,
+                        "created_at": row.created_at,
+                        "disposition": row.disposition,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            # Read off the entity rather than through `dump`, which is what
+            # the record-path transcripts beside this do: dumping renders the
+            # timestamp as a string, and a `DateTime` column refuses one.
+            rows = [
+                {
+                    "id": entry.id,
+                    "meeting_id": key,
+                    "stub": entry.stub,
+                    "question": entry.question,
+                    "trigger_reason": entry.trigger_reason,
+                    "term": entry.term,
+                    "category": entry.category,
+                    "candidate_id": entry.candidate_id,
+                    "created_at": entry.created_at,
+                    # Guarded: `_enum_text` renders None as the *string*
+                    # "None", and unanswered has to reload as unanswered.
+                    "disposition": (
+                        None if entry.disposition is None else _enum_text(entry.disposition)
+                    ),
+                    "ordinal": ordinal,
+                }
+                for ordinal, entry in enumerate(value)
+            ]
+            self._replace_children(table, "meeting_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "meeting_id", key),
+            lock=self._lock,
+        )
+
     def candidates(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, list[V]]:
         """The compiled candidate bank for an engagement (FR-4.8)."""
 

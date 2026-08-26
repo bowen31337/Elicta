@@ -196,6 +196,40 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class SurfacedNudgeRow(Base):
+    """A nudge the live panel surfaced in a meeting (FR-6.3, FR-6.8).
+
+    Not `nudges`, which is the analysis pipeline's record and cannot hold one
+    of these: its id is a generated UUID where the live path issues
+    `nudge-1`, its `candidate_id` is NOT NULL where a templated nudge has
+    none, and its `trigger_event_id` is a NOT NULL foreign key into a chain
+    the live path never writes.
+    """
+
+    __tablename__ = "surfaced_nudges"
+
+    id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(
+        sa.String(64),
+        sa.ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    stub: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    question: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    term: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    category: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    candidate_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    disposition: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    # The order the meeting produced them in, so the stream replays what the
+    # panel saw rather than whatever order rows return.
+    ordinal: Mapped[int] = mapped_column(
+        sa.Integer(), nullable=False, default=0, server_default="0"
+    )
+
+
 metadata = Base.metadata
 
 

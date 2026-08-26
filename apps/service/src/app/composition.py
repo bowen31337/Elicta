@@ -177,7 +177,11 @@ from app.modules.engagement.vocabulary.schemas import (
     VocabularyTermCreateRequest,
     VocabularyTermResponse,
 )
-from app.modules.nudges.models import NudgeDispositionRequest, NudgeDispositionResponse
+from app.modules.nudges.models import (
+    NudgeDispositionRequest,
+    NudgeDispositionResponse,
+    SurfacedNudge,
+)
 from app.modules.nudges.router import build_nudge_disposition_router
 from app.modules.replay.api.errors import ReplayRunNotFoundError
 from app.modules.replay.api.models import (
@@ -495,7 +499,21 @@ class Backend:
     #: next thirty seconds; restoring one after a restart would put a stale
     #: question in front of a client. What outlives the meeting is the
     #: operator's disposition of it, which is recorded on its own route.
-    live_events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
+    #: Every nudge a meeting has surfaced, in order, keyed by meeting.
+    #:
+    #: Durable, and the single record: `live_events` and `raised_nudges` were
+    #: two parallel copies of this, one for the stream and one for resolving
+    #: a thread id, and both died with the process. A restart took the
+    #: operator's whole history — their only route back to a question they
+    #: had not dealt with — and left `Park it` answering 404 for every nudge
+    #: raised before it, to a panel that was still showing them.
+    #:
+    #: The objection this replaces was that a nudge is worth asking in the
+    #: next thirty seconds and restoring a stale one would put it in front of
+    #: a client. That argues against *promoting* one, which is the panel's
+    #: decision and is where it is made — restored nudges land in history —
+    #: rather than against remembering it.
+    surfaced_nudges: dict[str, list[Any]] = field(default_factory=dict)
     #: When each meeting last had a nudge surfaced (FR-5.8).
     last_nudge_at: dict[str, datetime] = field(default_factory=dict)
     #: Which bank candidates a meeting has already used, so the same question
@@ -818,6 +836,47 @@ def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
     return read
 
 
+def _next_nudge_id(backend: Backend) -> str:
+    """The next id, never one already issued.
+
+    Counted off what is stored rather than off a field starting at zero. The
+    same trap the document and vocabulary ids were fixed for: after a restart
+    a counter beginning again hands the next nudge an id a stored one already
+    has, and `Park it` addresses a thread by id — so the operator would file
+    one question believing they had filed another.
+    """
+
+    highest = 0
+    for nudges in backend.surfaced_nudges.values():
+        for nudge in nudges:
+            _, _, ordinal = str(nudge.id).partition("-")
+            if ordinal.isdigit():
+                highest = max(highest, int(ordinal))
+    backend.next_nudge_id = max(backend.next_nudge_id, highest) + 1
+    return f"nudge-{backend.next_nudge_id}"
+
+
+def _raised_nudge(backend: Backend, thread_id: str) -> dict | None:
+    """The nudge a thread id names, in the shape the thread routes read.
+
+    Scanned rather than indexed: a meeting holds tens of these, the lookup
+    happens when an operator taps a chip, and an index would be a second
+    thing to keep in step with the record — which is what the two parallel
+    in-memory copies this replaced were.
+    """
+
+    for nudges in backend.surfaced_nudges.values():
+        for nudge in nudges:
+            if nudge.id == thread_id:
+                return {
+                    "meeting_id": nudge.meeting_id,
+                    "term": nudge.term,
+                    "category": nudge.category,
+                    "question": nudge.question,
+                }
+    return None
+
+
 def _coverage_slots_for_meeting(backend: Backend, meeting_id: str) -> list[dict]:
     """The sections this meeting is trying to fill, as the panel's slots.
 
@@ -1095,6 +1154,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # re-minted `doc-1` is a 500 on the screen rather than a silent overwrite.
     backend.next_document_id = store.highest_document_ordinal()
     backend.document_texts = store.document_texts()
+    # The panel's history, and what resolves a thread id. Held in memory a
+    # restart took both: the operator's route back to any question they had
+    # not dealt with, and `Park it`'s ability to say which meeting raised it.
+    backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
     )
@@ -2293,7 +2356,19 @@ def _include_operational_routers(
         # the panel as a comment frame and costs it nothing.
         delivered = 0
         while True:
-            produced = backend.live_events.get(meeting_id, ())
+            produced = [
+                (
+                    "nudge",
+                    {
+                        "id": nudge.id,
+                        "stub": nudge.stub,
+                        "question": nudge.question,
+                        "trigger_reason": nudge.trigger_reason,
+                        "created_at": int(nudge.created_at.timestamp() * 1000),
+                    },
+                )
+                for nudge in backend.surfaced_nudges.get(meeting_id, ())
+            ]
             if delivered < len(produced):
                 event = produced[delivered]
                 delivered += 1
@@ -2357,31 +2432,25 @@ def _include_operational_routers(
                 meeting_id=meeting_id, triggered=True, trigger_reason=hit.reason
             )
 
-        backend.next_nudge_id += 1
-        nudge_id = f"nudge-{backend.next_nudge_id}"
+        nudge_id = _next_nudge_id(backend)
         # Reassigned rather than appended in place: the collections here are
         # swapped for durable mappings that only persist through __setitem__,
         # and an in-place append against one of those writes to memory and
         # nowhere else.
-        backend.live_events[meeting_id] = [
-            *backend.live_events.get(meeting_id, []),
-            (
-                "nudge",
-                {
-                    "id": nudge_id,
-                    "stub": chosen.stub,
-                    "question": chosen.question,
-                    "trigger_reason": chosen.trigger_reason,
-                    "created_at": int(chosen.created_at.timestamp() * 1000),
-                },
+        backend.surfaced_nudges[meeting_id] = [
+            *backend.surfaced_nudges.get(meeting_id, []),
+            SurfacedNudge(
+                id=nudge_id,
+                meeting_id=meeting_id,
+                stub=chosen.stub,
+                question=chosen.question,
+                trigger_reason=chosen.trigger_reason,
+                created_at=chosen.created_at,
+                term=hit.term,
+                category=hit.category,
+                candidate_id=chosen.candidate_id,
             ),
         ]
-        backend.raised_nudges[nudge_id] = {
-            "meeting_id": meeting_id,
-            "term": hit.term,
-            "category": hit.category,
-            "question": chosen.question,
-        }
         backend.last_nudge_at[meeting_id] = now
         if chosen.candidate_id is not None:
             backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.candidate_id}
@@ -2405,7 +2474,7 @@ def _include_operational_routers(
         "not now" mean "next time" rather than "never".
         """
 
-        raised = backend.raised_nudges.get(thread_id)
+        raised = _raised_nudge(backend, thread_id)
         if raised is None:
             return None
 
@@ -2441,7 +2510,7 @@ def _include_operational_routers(
         model can be reached.
         """
 
-        raised = backend.raised_nudges.get(thread_id)
+        raised = _raised_nudge(backend, thread_id)
         if raised is None:
             return None
 
