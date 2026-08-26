@@ -132,6 +132,29 @@ export function OperatorPanel({
         disposition: 'taken',
       });
     }
+    retireActive();
+  };
+
+  /**
+   * Put the active nudge down, into history.
+   *
+   * Both chips that deal with a question end here. Parking says "not now"
+   * and asking says "done"; either way the operator has finished with it,
+   * and the panel went on showing it — with the next nudge up to a minute
+   * away, that left a card sitting there already dealt with and nothing to
+   * press to move past it.
+   *
+   * Into history rather than gone. That was not safe until history became
+   * reachable: putting a nudge down used to lose it for good. It is one
+   * press away now, which is what makes retiring it the right behaviour
+   * rather than a trade.
+   */
+  const retireActive = () => {
+    setState((current) =>
+      current.active === null
+        ? current
+        : { ...current, active: null, history: [current.active, ...current.history] },
+    );
   };
 
   /**
@@ -166,6 +189,40 @@ export function OperatorPanel({
         disposition: 'parked',
       });
     }
+    retireActive();
+  };
+
+  /**
+   * A question the operator typed rather than one the gate surfaced.
+   *
+   * It becomes the active nudge, because that is what they meant by typing
+   * it: they intend to ask it, and every chip acts on the active nudge. So
+   * the escape hatch produces a question the rest of the panel already knows
+   * how to handle — parking files it into the next meeting's bank, asking it
+   * ticks a section — rather than needing a second machinery of its own.
+   *
+   * It said nothing before. The handler was a no-op and the field cleared on
+   * Enter, which is the gesture that means "sent" — so it signalled success
+   * for work that never happened.
+   *
+   * Deliberately no model call: typing already costs an order of magnitude
+   * more attention than a tap (FR-6.6's rationale), and a wait on top of
+   * that is what the chips exist to avoid.
+   */
+  const onTypedQuestion = (query: { text: string; submittedAt: number }) => {
+    setState((current) => ({
+      ...current,
+      active: {
+        id: `typed-${query.submittedAt}`,
+        stub: 'Your question',
+        question: query.text,
+        // The reason line says why this is on screen, and "you typed it" is
+        // as true an answer as "somebody said several".
+        triggerReason: 'typed by you',
+        createdAt: query.submittedAt,
+      },
+      history: current.active ? [current.active, ...current.history] : current.history,
+    }));
   };
 
   const liveCoverage = coverage ?? state.coverage;
@@ -256,7 +313,7 @@ export function OperatorPanel({
             keyboard reaches it in source order after the chips, which are the
             primary input, and because the foot of the dock is where a thumb
             expects a field it has decided to type in. */}
-        <EscapeHatchInput onSubmit={() => undefined} />
+        <EscapeHatchInput onSubmit={onTypedQuestion} />
       </footer>
     </main>
   );

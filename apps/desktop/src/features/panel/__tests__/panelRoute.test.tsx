@@ -94,6 +94,10 @@ function stubService(table: Record<string, unknown>) {
 const BASE = {
   '/api/engagements': ENGAGEMENTS,
   '/api/engagements/eng-1/meetings': MEETINGS,
+  // The park endpoint, so a tap can succeed. Without it the request 404s and
+  // the chip correctly leaves the nudge alone — which is right, and makes a
+  // test about what happens *after* a successful park impossible to write.
+  '/api/threads/nudge-1/park': { open_question_id: 'open-question-1' },
 };
 
 beforeEach(() => {
@@ -229,6 +233,104 @@ describe('the live panel', () => {
 
     expect(screen.getAllByText(/^Question \d\?$/)).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: /Bring back/i })).toHaveLength(2);
+  });
+
+  function emitNudge(n: number) {
+    stream().emit('nudge', {
+      id: `nudge-${n}`,
+      stub: `Stub ${n}`,
+      question: `Question ${n}?`,
+      trigger_reason: `reason ${n}`,
+      created_at: n,
+    });
+  }
+
+  it('puts a parked nudge down, rather than leaving it where it was', async () => {
+    /* Reported: "after i park the nudge, it is still there". Parking is how
+       an operator says they are done with a question for now — and the panel
+       went on showing it, with the next nudge up to a minute away. So the
+       card sat there already dealt with, and there was nothing to press to
+       move past it.
+
+       Retiring it to history was not safe until history became reachable:
+       before that, putting a nudge down lost it for good. It is a press away
+       now, which is what makes this the right behaviour rather than a
+       trade. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    emitNudge(1);
+    await screen.findByText('Question 1?');
+
+    await userEvent.click(screen.getByRole('button', { name: /park it/i }));
+
+    // Only once the park has actually landed. A refused one leaves the nudge
+    // exactly where it was, because the operator's intent was not filed —
+    // retiring it there would lose it quietly, which is the failure this
+    // whole change is about.
+    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    // Put down, not thrown away.
+    expect(screen.getByRole('button', { name: /Bring back Stub 1/i })).toBeInTheDocument();
+  });
+
+  it('puts a nudge down once it has been asked, too', async () => {
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    stream().emit('coverage', {
+      slots: [{ id: 's-1', label: 'Performance', filled: false }],
+      time_remaining_ms: null,
+    });
+    emitNudge(1);
+    await screen.findByText('Question 1?');
+
+    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
+
+    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Bring back Stub 1/i })).toBeInTheDocument();
+  });
+
+  it('shows a typed question as the nudge, so the chips can act on it', async () => {
+    /* FR-6.9's escape hatch submitted to a handler that did nothing, and the
+       field cleared on Enter — which is the gesture that means "sent". It
+       signalled success for work that never happened. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    await userEvent.type(
+      screen.getByLabelText('Ask a question'),
+      'What happens on a bad day?{Enter}',
+    );
+
+    expect(await screen.findByText('What happens on a bad day?')).toBeInTheDocument();
+    // And it is a nudge like any other, so it can be parked.
+    expect(screen.getByRole('button', { name: /park it/i })).toBeInTheDocument();
+  });
+
+  it('says a typed question is on screen because it was typed', async () => {
+    /* The reason line's job is to say why this is here, and "you typed it"
+       is as legitimate an answer as "somebody said several". */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    await userEvent.type(screen.getByLabelText('Ask a question'), 'Anything?{Enter}');
+
+    expect(await screen.findByText(/typed by you/i)).toBeInTheDocument();
+  });
+
+  it('does not displace a typed question without keeping it', async () => {
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    await userEvent.type(screen.getByLabelText('Ask a question'), 'Mine?{Enter}');
+    await screen.findByText('Mine?');
+
+    emitNudge(9);
+
+    expect(await screen.findByText('Question 9?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Bring back Your question/i })).toBeInTheDocument();
   });
 
   it('is short two of the four responses when no coverage frame arrives', async () => {
