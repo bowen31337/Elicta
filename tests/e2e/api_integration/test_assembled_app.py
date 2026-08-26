@@ -72,6 +72,10 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/live/utterance", "post"),
     ("/api/threads/{thread_id}/park", "post"),
     ("/api/threads/{thread_id}/go-deeper", "post"),
+    # Which executable is answering. Asked by the desktop shell before it
+    # adopts a service already on its port — a bare TCP connect adopted
+    # anything, and an install two days old shadowed every rebuild.
+    ("/api/service/identity", "get"),
     ("/api/sessions/live", "get"),
     ("/api/meetings/{meeting_id}/slow-lane/tick", "post"),
     # One print per operator, so one resource: read its status, replace it,

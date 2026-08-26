@@ -19,6 +19,15 @@ pub fn run() {
             use tauri::Manager;
             if let Err(reason) = service::start(app.state::<service::ServiceProcess>().inner()) {
                 eprintln!("elicta: {reason}");
+                // Kept, not only logged. `eprintln!` goes to a stderr nobody
+                // opening a `.dmg` will ever see, and the failure it reports —
+                // most often another copy of this app holding the port —
+                // otherwise leaves every screen empty with no account of why.
+                //
+                // Kept rather than emitted, because `setup` runs before the
+                // page exists: an event sent here has no listener and is
+                // simply lost. The page asks instead, when it is ready.
+                service::remember_fault(app.state::<service::ServiceProcess>().inner(), reason);
                 return Ok(());
             }
             // Watched on a thread rather than waited for here. A frozen Python
@@ -53,6 +62,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            service::service_fault,
             capture::list_audio_sources,
             capture::start_capture,
             capture::pause_capture,
