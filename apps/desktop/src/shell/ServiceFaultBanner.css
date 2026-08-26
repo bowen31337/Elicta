@@ -1,0 +1,21 @@
+/* The service-is-missing banner.
+ *
+ * Above every screen rather than inside one, because the fault is not about
+ * any of them: it is the reason all of them are empty.
+ *
+ * Red ink on a red wash with a border, so it reads as trouble with colour
+ * unavailable as well as with it. Text ink rather than the vivid fill, solved
+ * against the card ground.
+ */
+.service-fault {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  border-block-end: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  color: var(--label);
+  text-wrap: pretty;
+}
+
+@media (prefers-contrast: more) {
+  .service-fault { border-block-end-color: var(--red-ink); }
+}

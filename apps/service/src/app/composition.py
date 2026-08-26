@@ -288,6 +288,7 @@ DESKTOP_SHELL_ORIGINS = (
 
 
 _pipeline_models = importlib.import_module("app.modules.debrief.pipeline.models")
+_identity_router = importlib.import_module("app.modules.identity.router")
 _artifacts_models = importlib.import_module("app.modules.debrief.artifacts.models")
 _extraction_models = importlib.import_module("app.modules.compiler.citations.models")
 _agent_models = importlib.import_module("app.modules.compiler.agent.models")
@@ -2016,6 +2017,13 @@ def build_app(
         )
 
     app.include_router(build_debrief_completion_router(get_debrief_completion))
+
+    # Which executable is answering here. Asked by the desktop shell before it
+    # decides whether the service already on its port is its own — a bare TCP
+    # connect adopted anything at all, and an install two days old shadowed
+    # every rebuild. Mounted with the rest rather than through
+    # `module_loader`, so one router is served once.
+    app.include_router(_identity_router.router)
 
     async def get_meeting_artifacts(meeting_id: str) -> list[ArtifactSummary]:
         return backend.meeting_artifacts.get(meeting_id, [])

@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType } from "react";
 
 import { AppShell } from "./shell/AppShell";
+import { ServiceFaultBanner } from "./shell/ServiceFaultBanner";
 import { SelectionPicker } from "./shell/SelectionPicker";
 import { buildDestinations } from "./shell/destinations";
 
@@ -31,18 +32,23 @@ export function AppRouter() {
   }
 
   return (
-    <AppShell
-      destinations={destinations}
-      selector={<SelectionPicker />}
-      renderScreen={(destination) => {
-        const Screen = screens.get(destination.feature);
-        if (Screen === undefined) return null;
-        return (
-          <Suspense fallback={null}>
-            <Screen />
-          </Suspense>
-        );
-      }}
-    />
+    <>
+      {/* Above the shell, not inside a screen: the fault is the reason every
+          screen is empty, and saying it on each of them says it nowhere. */}
+      <ServiceFaultBanner />
+      <AppShell
+        destinations={destinations}
+        selector={<SelectionPicker />}
+        renderScreen={(destination) => {
+          const Screen = screens.get(destination.feature);
+          if (Screen === undefined) return null;
+          return (
+            <Suspense fallback={null}>
+              <Screen />
+            </Suspense>
+          );
+        }}
+      />
+    </>
   );
 }
