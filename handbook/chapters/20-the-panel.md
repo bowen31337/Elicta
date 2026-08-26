@@ -32,6 +32,18 @@ A near-empty panel is the correct resting state. Anything more would pull your
 eyes to a screen during the part of the meeting where you are establishing
 rapport.
 
+Where a suggestion would be, it says it is listening. That is the same thing
+this page said a paragraph ago — quiet is not broken — and for a while the
+screen did not say it: it reported that there was no suggestion, which
+describes what is absent rather than what is happening, and left you unable to
+tell a working panel from a stalled one at the exact moment you have no time
+to check.
+
+The counter beside it reads as a sentence for the same reason. "1 of 4
+covered" needs no explaining; a bare pair of numbers did, and there is nowhere
+to go and ask mid-meeting. Resting on it names the sections still open, for
+when you have a moment to look properly.
+
 ## Something vague lands
 
 The client says *"the dashboard has to be fast."* That is not a requirement, it
