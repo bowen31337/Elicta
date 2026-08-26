@@ -35,3 +35,23 @@
   .notice--error { border-color: var(--red-ink); }
   .notice--working { border-color: var(--accent-ink); }
 }
+
+/* The "there is nothing here, and here is what to do" block.
+ *
+ * Styled here because it never was anywhere: `.debrief-empty` was a class
+ * name with no rule behind it, so the sentence and the button stacked as bare
+ * block elements with no spacing between them — the same gap `.degraded-note`
+ * had, and for the same reason. This screen imports one stylesheet and the
+ * class was defined in none.
+ */
+.debrief-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-block-end: var(--space-5);
+}
+
+.debrief-empty .hint {
+  margin: 0;
+}
