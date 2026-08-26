@@ -52,7 +52,7 @@ interface WireCompletion {
   readonly stopped_at: string | null;
   /** Written for whoever is debugging the pipeline. Never rendered. */
   readonly reason: string | null;
-  readonly cause: 'not_configured' | 'failed' | 'unknown' | null;
+  readonly cause: 'not_configured' | 'failed' | 'input_gone' | 'unknown' | null;
   /** Whether the pipeline is working on it right now. */
   readonly running?: boolean;
 }
@@ -121,12 +121,19 @@ export function incompleteNotice(
   // (architecture §3.3, ADR-011)" — which is true, and is addressed to
   // somebody else. The service classifies the kind of failure; the sentence is
   // composed here, where the reader is.
+  // `input_gone` had no case, so it fell to `failed` and the screen told an
+  // operator their connection had dropped. Nothing had: the recording is
+  // destroyed once it has been transcribed, which is what NFR-2.4 asks for,
+  // and the stage wanted it back. A remedy in the wrong place is worse than
+  // no remedy — the two are not the same problem and must not read alike.
   const because =
     completion.cause === 'not_configured'
       ? ' Something it needs is not set up yet.'
-      : completion.cause === 'failed'
-        ? ' The call it needed did not get through.'
-        : '';
+      : completion.cause === 'input_gone'
+        ? ' The recording it needed had already been destroyed, as it is once a meeting has been transcribed.'
+        : completion.cause === 'failed'
+          ? ' The call it needed did not get through.'
+          : '';
   return `The write-up stopped while ${stage}.${because} Nothing below is missing on purpose.`;
 }
 
