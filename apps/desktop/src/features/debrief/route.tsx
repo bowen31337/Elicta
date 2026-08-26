@@ -28,6 +28,9 @@ export interface DebriefScreenProps {
   readonly incomplete?: string | null;
   /** Why there is nothing here at all, when there is nothing. See `emptyNotice`. */
   readonly empty?: string | null;
+  /** Produce the write-up for a meeting that is owed one. */
+  readonly onProduce?: () => Promise<void>;
+  readonly producing?: boolean;
 }
 
 function ClaimRow({ claim }: { claim: Claim }) {
@@ -55,6 +58,8 @@ export function DebriefScreen({
   brief,
   incomplete = null,
   empty = null,
+  onProduce,
+  producing = false,
 }: DebriefScreenProps) {
   return (
     <main className="screen" aria-labelledby="debrief-title">
@@ -79,7 +84,26 @@ export function DebriefScreen({
           is simply still to come would otherwise raise an alert on every
           visit. The headings below stay, so it reads as "these are not filled
           in yet" rather than "these came back empty". */}
-      {empty ? <p className="t-footnote hint">{empty}</p> : null}
+      {empty ? (
+        <div className="debrief-empty">
+          <p className="t-footnote hint">{empty}</p>
+          {onProduce ? (
+            /* The sentence above explains the absence; this is what does
+               something about it. The pipeline runs itself once, when the
+               second record-path engine finishes, and a run lost to a
+               restart left a meeting with a transcript, nothing to show and
+               nothing to press. */
+            <button
+              type="button"
+              className="btn"
+              disabled={producing}
+              onClick={() => void onProduce()}
+            >
+              {producing ? 'Writing it up…' : 'Write it up now'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {brief ? (
         <section aria-labelledby="brief-title">
@@ -150,6 +174,8 @@ export default function DebriefRoute() {
       brief={debrief.brief}
       incomplete={debrief.incomplete}
       empty={debrief.empty}
+      onProduce={debrief.onProduce}
+      producing={debrief.producing}
     />
   );
 }

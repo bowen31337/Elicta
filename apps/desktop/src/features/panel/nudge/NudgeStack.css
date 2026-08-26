@@ -108,3 +108,12 @@
 @media (prefers-reduced-motion: reduce) {
   .nudge-stack__history-button { transition: none; }
 }
+
+/* The heading that says the list below is something to press.
+ *
+ * Quiet — it is chrome, not content — but present, which the accessible
+ * name alone was not. */
+.nudge-stack__history-heading {
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--label-supporting);
+}

@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DebriefRoute from '../route';
@@ -75,14 +76,21 @@ const ARTIFACTS: Record<string, unknown> = {
 };
 
 function stubService(table: Record<string, unknown>) {
+  const written: { path: string; method: string }[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (path: string) => {
+    vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      if (method !== 'GET') {
+        written.push({ path, method });
+        return { ok: true, status: 202, json: async () => ({ started: true }) } as Response;
+      }
       const body = table[path];
       if (body === undefined) return { ok: false, status: 404, json: async () => null } as Response;
       return { ok: true, status: 200, json: async () => body } as Response;
     }),
   );
+  return written;
 }
 
 beforeEach(() => window.localStorage.clear());
@@ -316,6 +324,38 @@ describe('a debrief that could not finish', () => {
 
     expect(await screen.findByText(/finished without producing/i)).toBeInTheDocument();
     expect(screen.queryByText(/no write-up has been produced/i)).not.toBeInTheDocument();
+  });
+
+  it('offers to produce the write-up rather than only explaining its absence', async () => {
+    /* The reported state: a meeting with a transcript, no write-up, and a
+       screen saying one "runs on its own once the recording has been
+       transcribed" — which had already happened. The sentence was true of
+       the mechanism and false of this meeting, and there was nothing to
+       press.
+
+       The pipeline runs itself once, when the second record-path engine
+       finishes. A run lost to a restart, or one whose engines were
+       misconfigured at the time, leaves a meeting owed a write-up with no
+       way to ask for it. */
+    stubService(BASE);
+    render(<DebriefRoute />);
+    await screen.findByText(/no write-up has been produced/i);
+
+    expect(
+      screen.getByRole('button', { name: /write it up/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('asks the service for it when that is pressed', async () => {
+    const written = stubService(BASE);
+    render(<DebriefRoute />);
+    await screen.findByText(/no write-up has been produced/i);
+
+    await userEvent.click(screen.getByRole('button', { name: /write it up/i }));
+
+    await waitFor(() =>
+      expect(written.some((w) => w.path.endsWith('/debrief/run'))).toBe(true),
+    );
   });
 
   it('says it once: a stopped run explains itself without a second notice', async () => {

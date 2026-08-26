@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 import {
   meetingIdleHint,
@@ -181,6 +181,7 @@ export function useDebrief(): DebriefData {
   const scoped = (suffix: string) =>
     id === null ? null : apiUrl(`/api/sessions/${encodeURIComponent(id)}/${suffix}`);
 
+  const [producing, setProducing] = useState(false);
   const questions = useResource<readonly WireOpenQuestion[]>(scoped('open-questions'));
   const decisions = useResource<readonly WireDecision[]>(scoped('decision-log'));
   const brief = useResource<WireBrief>(scoped('project-brief'));
@@ -231,9 +232,31 @@ export function useDebrief(): DebriefData {
     settledStatus(brief.status) &&
     settledStatus(completion.status);
 
+  const produce = async () => {
+    if (id === null) return;
+    setProducing(true);
+    try {
+      await fetch(apiUrl(`/api/meetings/${encodeURIComponent(id)}/debrief/run`), {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
+      // Re-read rather than assume: the pipeline is several model stages and
+      // what it produced is the service's to report, not this hook's to
+      // predict.
+      brief.reload();
+      decisions.reload();
+      questions.reload();
+      completion.reload();
+    } finally {
+      setProducing(false);
+    }
+  };
+
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
     incomplete,
+    onProduce: produce,
+    producing,
     empty: emptyNotice(
       brief_ !== null || openQuestions.length > 0 || decisions_.length > 0,
       incomplete,

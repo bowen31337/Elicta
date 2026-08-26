@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -1965,6 +1965,47 @@ def build_app(
     async def get_bmad_chain(session_id: str) -> SessionBmadAnalystChain | None:
         return backend.bmad_chains.get(session_id)
 
+    # Its own router rather than a factory, because it needs the backend,
+    # the audio lifecycle and the engines together — the three things the
+    # automatic trigger is handed — and a factory taking all three would be
+    # a seam with exactly one caller.
+    debrief_run_router = APIRouter(prefix="/api/meetings", tags=["debrief-pipeline"])
+
+    @debrief_run_router.post("/{meeting_id}/debrief/run", status_code=202)
+    async def run_debrief_now(meeting_id: str) -> dict:
+        """Produce the write-up for a meeting that is owed one.
+
+        The pipeline otherwise runs itself once, when the second record-path
+        engine finishes, and there is no other way to reach it —
+        `/debrief/start` opens the conversation rather than producing the
+        artifacts. So a meeting whose run was lost, or whose engines were
+        misconfigured at the time, had transcripts, nothing to show, and
+        nothing to press.
+
+        Refused rather than run when nothing has been transcribed: the
+        pipeline over no transcript produces an empty write-up, which reads
+        as a meeting where nothing was said.
+        """
+
+        transcripts = current_recording_transcripts(backend, meeting_id)
+        if not any(t.status is TranscriptionStatus.COMPLETE for t in transcripts):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This meeting has no completed transcript to write up. "
+                    "Transcribe the recording first."
+                ),
+            )
+        # Asked for explicitly, so the once-only guard is stepped past: it
+        # exists to stop the automatic trigger firing twice per engine, not
+        # to stop an operator asking again.
+        backend.debrief_runs.pop(meeting_id, None)
+        await _run_debrief_when_record_path_completes(
+            backend, meeting_id, audio_lifecycle, debrief_engines
+        )
+        return {"meeting_id": meeting_id, "started": True}
+
+    app.include_router(debrief_run_router)
     app.include_router(build_project_brief_router(get_bmad_chain))
     app.include_router(build_decision_log_router(get_bmad_chain))
     app.include_router(build_open_questions_router(get_bmad_chain))

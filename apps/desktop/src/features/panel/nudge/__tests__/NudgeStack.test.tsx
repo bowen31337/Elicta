@@ -202,6 +202,19 @@ describe('reaching a nudge that has receded', () => {
     createdAt: 3,
   };
 
+  it('says the list is there and what pressing it does', async () => {
+    /* Reported as "when one nudge is parked, there is no way to view other
+       nudges" — and mechanically there was: every entry is a button. What
+       there was not was any sign of it. The list carried an accessible name
+       and nothing visible, so a sighted operator saw a dim column of
+       near-identical stubs under an empty state, with no heading and no
+       affordance. A way that cannot be found is not a way. */
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.getByText(/earlier/i)).toBeInTheDocument();
+    expect(screen.getByText(/bring (one )?back|tap/i)).toBeInTheDocument();
+  });
+
   it('offers each past nudge as something that can be pressed', () => {
     render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
 

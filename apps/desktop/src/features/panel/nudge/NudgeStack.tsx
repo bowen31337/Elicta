@@ -91,7 +91,16 @@ export function NudgeStack({
       )}
 
       {history.length > 0 ? (
-        <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
+        <>
+          {/* Visible, not only an accessible name. Every entry is a button
+              and nothing said so: a sighted operator saw a dim column of
+              near-identical stubs under an empty state, with no heading and
+              no affordance, and reported that there was no way to reach
+              them. There was. A way that cannot be found is not a way. */}
+          <p className="nudge-stack__history-heading t-caption">
+            {onSelect ? chrome.historyHint : chrome.historyLabel}
+          </p>
+          <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
           {history.map((nudge, index) => (
             <li
               key={nudge.id}
@@ -119,7 +128,8 @@ export function NudgeStack({
               )}
             </li>
           ))}
-        </ol>
+          </ol>
+        </>
       ) : null}
     </div>
   );

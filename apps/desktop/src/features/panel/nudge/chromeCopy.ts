@@ -18,6 +18,12 @@ export interface NudgeChromeCopy {
   readonly emptyState: string;
   /** Accessible label for the receded-nudge history list. */
   readonly historyLabel: string;
+  /**
+   * The same list, said out loud on the screen, when the entries can be
+   * pressed. The label alone was accessible-only, so nothing visible marked
+   * a column of dimmed stubs as anything an operator could act on.
+   */
+  readonly historyHint: string;
 }
 
 const EN: NudgeChromeCopy = {
@@ -28,6 +34,7 @@ const EN: NudgeChromeCopy = {
      is doing its job. */
   emptyState: 'Listening — nothing worth asking yet',
   historyLabel: 'Prior nudges',
+  historyHint: 'Earlier — tap one to bring it back',
 };
 
 /**
@@ -40,6 +47,7 @@ const NUDGE_CHROME_COPY: Record<string, NudgeChromeCopy> = {
   zh: {
     emptyState: '正在聆听，暂无提示',
     historyLabel: '历史提示',
+    historyHint: '之前的提示 — 点按可重新显示',
   },
 };
 
