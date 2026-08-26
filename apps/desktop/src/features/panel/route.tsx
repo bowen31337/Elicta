@@ -100,11 +100,21 @@ export function OperatorPanel({
   } = useSessionStream(state.meetingId ?? null, {
     createSource,
     onNudge: (nudge) =>
-      setState((current) => ({
-        ...current,
-        active: nudge,
-        history: current.active ? [current.active, ...current.history] : current.history,
-      })),
+      setState((current) => {
+        // Already seen. The stream replays its whole backlog on every
+        // connect — that is how a panel opened mid-meeting catches up — and
+        // `EventSource` reconnects on its own schedule every few minutes.
+        // Nothing deduped, so each reconnection appended the meeting's
+        // entire history to itself: an operator who had seen three nudges
+        // found six, then nine, all of them real and none of them new.
+        if (current.active?.id === nudge.id) return current;
+        if (current.history.some((held) => held.id === nudge.id)) return current;
+        return {
+          ...current,
+          active: nudge,
+          history: current.active ? [current.active, ...current.history] : current.history,
+        };
+      }),
   });
 
   const onAsked = (slot: CoverageSlot) => {

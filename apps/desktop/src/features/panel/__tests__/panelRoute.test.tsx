@@ -333,6 +333,33 @@ describe('the live panel', () => {
     expect(screen.getByRole('button', { name: /Bring back Your question/i })).toBeInTheDocument();
   });
 
+  it('does not stack up a second copy when the stream reconnects', async () => {
+    /* The stream replays its whole backlog on every connect — that is how a
+       panel opened mid-meeting catches up — and `EventSource` reconnects on
+       its own schedule, every few minutes. Nothing deduped by id, so each
+       reconnection appended the meeting's entire history to itself again.
+       An operator who had seen three nudges would find six, then nine, all
+       of them real and none of them new. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+
+    emitNudge(1);
+    emitNudge(2);
+    await screen.findByText('Question 2?');
+
+    // The same two arriving again, as a reconnect delivers them.
+    emitNudge(1);
+    emitNudge(2);
+
+    // Settled first, then counted. Counting inside `waitFor` let the
+    // assertion pass on the first check — before React had rendered the
+    // duplicates — which is a test that reports the bug as fixed.
+    await waitFor(() => expect(screen.getByText('Question 2?')).toBeInTheDocument());
+
+    expect(screen.queryAllByRole('button', { name: /Bring back/i })).toHaveLength(1);
+  });
+
   it('is short two of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage
