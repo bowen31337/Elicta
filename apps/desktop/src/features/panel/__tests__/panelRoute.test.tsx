@@ -135,7 +135,7 @@ describe('the live panel', () => {
 
     // The placeholder chrome renders "— / —", which is a non-empty string: a
     // length check would pass while proving nothing arrived.
-    expect(await screen.findByText(/1\s*\/\s*3/)).toBeInTheDocument();
+    expect(await screen.findByText(/1 of 3/)).toBeInTheDocument();
   });
 
   it('surfaces a nudge from the live session', async () => {
@@ -268,7 +268,7 @@ describe('the live panel', () => {
     // exactly where it was, because the operator's intent was not filed —
     // retiring it there would lose it quietly, which is the failure this
     // whole change is about.
-    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Listening/)).toBeInTheDocument());
     // Put down, not thrown away.
     expect(screen.getByRole('button', { name: /Bring back Stub 1/i })).toBeInTheDocument();
   });
@@ -286,7 +286,7 @@ describe('the live panel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
 
-    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Listening/)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Bring back Stub 1/i })).toBeInTheDocument();
   });
 
@@ -387,7 +387,7 @@ describe('the live panel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /park it/i }));
 
-    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Listening/)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /asked it/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /park it/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /deeper/i })).not.toBeInTheDocument();

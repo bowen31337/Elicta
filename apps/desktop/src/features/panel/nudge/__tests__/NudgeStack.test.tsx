@@ -84,7 +84,7 @@ describe('NudgeStack', () => {
 
   it('shows an empty state when there is no active nudge', () => {
     render(<NudgeStack active={null} history={[]} />);
-    expect(screen.getByText(/no active nudge/i)).toBeInTheDocument();
+    expect(screen.getByText(/listening/i)).toBeInTheDocument();
   });
 
   describe('interface chrome in the operator language (PRD FR-2.25)', () => {
@@ -92,7 +92,7 @@ describe('NudgeStack', () => {
       render(
         <NudgeStack active={null} history={[makeNudge('a'), makeNudge('b')]} />,
       );
-      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByText(/Listening/)).toBeInTheDocument();
       expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
     });
 
@@ -104,7 +104,7 @@ describe('NudgeStack', () => {
           operatorLanguage="zh"
         />,
       );
-      expect(screen.getByText('当前没有提示')).toBeInTheDocument();
+      expect(screen.getByText('正在聆听，暂无提示')).toBeInTheDocument();
       expect(screen.getByLabelText('历史提示')).toBeInTheDocument();
     });
 
@@ -123,7 +123,7 @@ describe('NudgeStack', () => {
           operatorLanguage="fr"
         />,
       );
-      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByText(/Listening/)).toBeInTheDocument();
       expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
     });
   });

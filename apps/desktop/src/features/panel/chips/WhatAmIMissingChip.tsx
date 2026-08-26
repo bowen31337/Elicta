@@ -33,7 +33,12 @@ export function WhatAmIMissingChip({
 
   return (
     <div className="what-am-i-missing-chip">
-      <button type="button" className="what-am-i-missing-chip__button" onClick={tap}>
+      <button
+        type="button"
+        className="what-am-i-missing-chip__button"
+        title="Show the section with the most still to find out, of those not yet covered."
+        onClick={tap}
+      >
         {label}
       </button>
       {result !== null ? (

@@ -25,15 +25,32 @@ export function CoverageIndicator({ summary }: CoverageIndicatorProps) {
   }
 
   const { filled, total } = countFilledSlots(summary);
+  const unfilled = summary.slots.filter((slot) => !slot.filled);
 
   return (
-    <div className="coverage-indicator">
-      <span className="coverage-indicator__count" aria-label="Sections filled">
-        {filled} / {total}
+    <div
+      className="coverage-indicator"
+      role="group"
+      aria-label={`${filled} of ${total} sections covered`}
+      /* The tooltip carries what will not fit on one line of a 420px panel:
+         which sections are still open. It is the second answer, not the
+         first — an operator glancing away from a client for half a second
+         cannot hover, so the line itself has to read without it. */
+      title={
+        unfilled.length === 0
+          ? 'Every section has been covered.'
+          : `Still to cover: ${unfilled.map((slot) => slot.label).join(', ')}`
+      }
+    >
+      <span className="coverage-indicator__count">
+        {filled} of {total}
       </span>
+      {/* The word is the whole fix. Two bare numbers and a row of dashes
+          said the same thing twice and neither said what it counted. */}
+      <span className="coverage-indicator__unit">covered</span>
       {summary.timeRemainingMs !== null ? (
-        <span className="coverage-indicator__time" aria-label="Time remaining">
-          {formatTimeRemaining(summary.timeRemainingMs)}
+        <span className="coverage-indicator__time">
+          {formatTimeRemaining(summary.timeRemainingMs)} left
         </span>
       ) : null}
     </div>

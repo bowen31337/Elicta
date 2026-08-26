@@ -21,7 +21,7 @@ describe('journey scenes', () => {
   it('before the meeting: coverage is visible and no nudge is shown', () => {
     render(<OperatorPanel initial={BEFORE_MEETING} />);
 
-    expect(screen.getByText('0 / 4')).toBeInTheDocument();
+    expect(screen.getByText('0 of 4')).toBeInTheDocument();
     expect(screen.queryByText(/How fast is fast/)).not.toBeInTheDocument();
   });
 
@@ -45,11 +45,11 @@ describe('journey scenes', () => {
 
   it('tapping Asked it advances coverage in the same render pass', async () => {
     render(<OperatorPanel initial={NUDGE_SURFACED} />);
-    expect(screen.getByText('1 / 4')).toBeInTheDocument();
+    expect(screen.getByText('1 of 4')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Asked it/ }));
 
-    await waitFor(() => expect(screen.getByText('2 / 4')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('2 of 4')).toBeInTheDocument());
   });
 
   it('a code-switched meeting tags both languages', () => {

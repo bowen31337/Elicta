@@ -4,14 +4,14 @@ import { getNudgeChromeCopy } from '../chromeCopy';
 describe('getNudgeChromeCopy', () => {
   it('defaults to English when no operator language is given', () => {
     expect(getNudgeChromeCopy()).toEqual({
-      emptyState: 'No active nudge',
+      emptyState: 'Listening — nothing worth asking yet',
       historyLabel: 'Prior nudges',
     });
   });
 
   it('resolves Mandarin chrome copy for "zh"', () => {
     expect(getNudgeChromeCopy('zh')).toEqual({
-      emptyState: '当前没有提示',
+      emptyState: '正在聆听，暂无提示',
       historyLabel: '历史提示',
     });
   });

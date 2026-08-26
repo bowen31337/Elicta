@@ -21,7 +21,12 @@ export interface NudgeChromeCopy {
 }
 
 const EN: NudgeChromeCopy = {
-  emptyState: 'No active nudge',
+  /* "No active nudge" is accurate and reads as a fault — it describes what
+     is absent rather than what is happening, and an operator who has just
+     parked a question cannot tell a working panel from a broken one. This
+     is the resting state for most of a meeting, so it should say the system
+     is doing its job. */
+  emptyState: 'Listening — nothing worth asking yet',
   historyLabel: 'Prior nudges',
 };
 
@@ -33,7 +38,7 @@ const EN: NudgeChromeCopy = {
 const NUDGE_CHROME_COPY: Record<string, NudgeChromeCopy> = {
   en: EN,
   zh: {
-    emptyState: '当前没有提示',
+    emptyState: '正在聆听，暂无提示',
     historyLabel: '历史提示',
   },
 };

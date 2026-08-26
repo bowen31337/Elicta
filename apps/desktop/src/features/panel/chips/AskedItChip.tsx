@@ -36,6 +36,7 @@ export function AskedItChip({
     <button
       type="button"
       className={`asked-it-chip${asked ? ' asked-it-chip--confirmed' : ''}`}
+      title={`Mark "${slot.label}" covered and stop suggesting it. The nudge is put down.`}
       onClick={tap}
       disabled={asked}
       aria-pressed={asked}
