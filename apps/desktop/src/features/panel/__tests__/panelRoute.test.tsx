@@ -447,6 +447,49 @@ describe('the live panel', () => {
     await waitFor(() => expect(screen.getByText(/1 of 2/)).toBeInTheDocument());
   });
 
+  it('keeps the coverage ticks when the operator visits another screen', async () => {
+    /* Reported: "when page switches, the nudge progress bar status is
+       reset". The router mounts a different component per destination, so
+       leaving the panel unmounts it and every piece of its own state goes —
+       including which sections the operator had marked asked. They come
+       back to 0 of 8 and no record that they had been anywhere.
+
+       The nudges themselves survive it, because the stream replays them.
+       The ticks had nothing replaying them: they are the operator's, and
+       nowhere but this component held them. */
+    stubService(BASE);
+    const first = render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    stream().emit('coverage', {
+      slots: [
+        { id: 's-1', label: 'Volumes', filled: false },
+        { id: 's-2', label: 'Performance', filled: false },
+      ],
+      time_remaining_ms: null,
+    });
+    emitNudge(1);
+    await screen.findByText(/0 of 2/);
+    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
+    await screen.findByText(/1 of 2/);
+
+    // Away to another screen, and back.
+    first.unmount();
+    const opened = FakeEventSource.live.length;
+    render(<PanelRoute />);
+    // The *new* connection. `stream()` is `live[0]`, which after a remount is
+    // the one that was just closed — emitting there proves nothing.
+    await waitFor(() => expect(FakeEventSource.live.length).toBeGreaterThan(opened));
+    FakeEventSource.live[FakeEventSource.live.length - 1].emit('coverage', {
+      slots: [
+        { id: 's-1', label: 'Volumes', filled: false },
+        { id: 's-2', label: 'Performance', filled: false },
+      ],
+      time_remaining_ms: null,
+    });
+
+    expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
+  });
+
   it('is short two of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage

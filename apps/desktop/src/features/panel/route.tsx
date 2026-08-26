@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 
 import './route.css';
+import { askedSlotsOf, markSlotAsked, subscribeAskedSlots } from './coverage/askedSlots';
 import {
   AskedItChip,
   EscapeHatchInput,
@@ -92,9 +93,15 @@ export function OperatorPanel({
    *
    * Kept apart from the stream's coverage because the two are different
    * facts with different owners, and holding them in one place meant the
-   * stream's next frame silently discarded the operator's.
+   * stream's next frame silently discarded the operator's. Kept outside this
+   * component because the router unmounts it on every page switch, and these
+   * are the one thing on the panel with nothing to replay them.
    */
-  const [askedSlots, setAskedSlots] = useState<ReadonlySet<string>>(new Set());
+  const askedSlots = useSyncExternalStore(
+    subscribeAskedSlots,
+    () => askedSlotsOf(state.meetingId ?? null),
+    () => askedSlotsOf(state.meetingId ?? null),
+  );
 
   // The live session drives the panel when there is one. Coverage arrives as
   // the current summary rather than a diff, and each nudge replaces the
@@ -128,7 +135,7 @@ export function OperatorPanel({
   const onAsked = (slot: CoverageSlot) => {
     // Recorded as the operator's own, not written back into the stream's
     // copy: the next connect replaces that wholesale, and it did.
-    setAskedSlots((current) => new Set(current).add(slot.id));
+    markSlotAsked(state.meetingId ?? null, slot.id);
 
     // Fire-and-forget: the operator's confirmation is the local mutation above,
     // not this round trip (FR-6.6). A dropped sync costs an analytics row, and
@@ -251,11 +258,11 @@ export function OperatorPanel({
   const liveCoverage = useMemo(() => {
     const fromStream = coverage ?? state.coverage;
     if (fromStream === null) return null;
-    if (askedSlots.size === 0) return fromStream;
+    if (askedSlots.length === 0) return fromStream;
     return {
       ...fromStream,
       slots: fromStream.slots.map((slot) =>
-        askedSlots.has(slot.id) ? { ...slot, filled: true } : slot,
+        askedSlots.includes(slot.id) ? { ...slot, filled: true } : slot,
       ),
     };
   }, [coverage, state.coverage, askedSlots]);
