@@ -885,11 +885,18 @@ def _coverage_slots_for_meeting(backend: Backend, meeting_id: str) -> list[dict]
     meeting is *for*. A meter counting anything else would be measuring
     against something nobody is working from.
 
-    `filled` is false for all of them, and that is the honest starting state
-    rather than a placeholder — nothing has been asked yet. The operator's
-    taps fill them in the panel, which is what `useAskedItChip` already
-    documents: the confirmation is the local mutation, and durable
-    satisfaction is tracked separately from what the chip shows.
+    `filled` is derived from the meeting's own nudges: a section counts as
+    asked about once a nudge belonging to it was marked `taken`. That is a
+    weaker claim than "the client answered", and the panel labels it as the
+    weaker claim — but it is a claim something durable actually supports.
+
+    It used to be hardcoded `False`, with the truth delegated to the panel,
+    which kept it in `localStorage` and attributed each tap to whichever
+    section happened to be first unticked. Eight questions about "a lot" and
+    "some" ticked off Volumes, Performance and Integrations in list order,
+    and the meter read eight of eight on evidence of nothing. Deriving it
+    here means one answer, in one place, that a restart and a second screen
+    both see.
     """
 
     engagement_id = _engagement_of_meeting(backend, meeting_id)
@@ -907,7 +914,38 @@ def _coverage_slots_for_meeting(backend: Backend, meeting_id: str) -> list[dict]
     # before the compile finished still needs a meter. The compiler's own
     # taxonomy is what it would have drafted against.
     sections = seen or list(_agent_models.DEFAULT_TEMPLATE_SECTIONS)
-    return [{"id": section, "label": section, "filled": False} for section in sections]
+
+    # Only `taken`. Parking defers a thread — nothing about it was asked, so
+    # nothing about it is covered.
+    asked = {
+        section
+        for nudge in backend.surfaced_nudges.get(meeting_id, ())
+        if getattr(nudge.disposition, "value", nudge.disposition) == "taken"
+        for section in (_section_of_nudge(backend, engagement_id, nudge),)
+        if section is not None
+    }
+    return [
+        {"id": section, "label": section, "filled": section in asked} for section in sections
+    ]
+
+
+def _section_of_nudge(backend: Backend, engagement_id: str, nudge: Any) -> str | None:
+    """Which template section this nudge is about, if anything knows.
+
+    The candidate it was drawn from is what knows. A nudge with no candidate
+    behind it — the template fallback, which fires on the phrase alone — is
+    about no section, and says `None` rather than being attributed to one:
+    guessing here is the same fabrication as guessing a citation, in a
+    smaller place where nobody would look for it.
+    """
+
+    candidate_id = getattr(nudge, "candidate_id", None)
+    if not candidate_id:
+        return None
+    for candidate in backend.compiled_candidates.get(engagement_id, []):
+        if getattr(candidate, "id", None) == candidate_id:
+            return getattr(candidate, "template_section", None) or None
+    return None
 
 
 def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
@@ -2394,13 +2432,14 @@ def _include_operational_routers(
         # `nudge`. Observed on a real recording as five nudges with two chips
         # under them, the two missing being the ones that mark a section
         # covered and say what is left.
-        yield "coverage", {
+        opening_coverage = {
             "slots": _coverage_slots_for_meeting(backend, meeting_id),
             # Not tracked yet. `null` is what the panel reads as "no clock",
             # and inventing a number here would put a countdown on screen that
             # nothing is counting.
             "time_remaining_ms": None,
         }
+        yield "coverage", opening_coverage
 
         for name, payload in backend.session_stream_events.get(meeting_id, []):
             yield name, payload
@@ -2416,7 +2455,23 @@ def _include_operational_routers(
         # blank. `yield None` is "still here, nothing to say", which reaches
         # the panel as a comment frame and costs it nothing.
         delivered = 0
+        # What the meter last showed this connection. Coverage used to be a
+        # single frame at stream open, which was adequate while nothing
+        # server-side ever moved it — the panel kept its own count. Now that
+        # the count is derived here, a frame sent only at open leaves the
+        # operator reading a stale meter for as long as the connection lasts,
+        # which mid-meeting is the whole time it matters.
+        last_coverage = opening_coverage
         while True:
+            current_coverage = {
+                "slots": _coverage_slots_for_meeting(backend, meeting_id),
+                "time_remaining_ms": None,
+            }
+            if current_coverage != last_coverage:
+                last_coverage = current_coverage
+                yield "coverage", current_coverage
+                continue
+
             produced = [
                 (
                     "nudge",
@@ -2432,6 +2487,15 @@ def _include_operational_routers(
                         # is not one that was ignored.
                         "disposition": getattr(
                             nudge.disposition, "value", nudge.disposition
+                        ),
+                        # Which section a tap on this nudge attributes to.
+                        # `None` for a template fallback, which is about a
+                        # phrase rather than a section — the panel must then
+                        # move no part of the meter.
+                        "template_section": _section_of_nudge(
+                            backend,
+                            _engagement_of_meeting(backend, meeting_id) or "",
+                            nudge,
                         ),
                     },
                 )

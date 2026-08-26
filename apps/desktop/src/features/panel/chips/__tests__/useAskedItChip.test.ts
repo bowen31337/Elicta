@@ -1,54 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useAskedItChip } from '../useAskedItChip';
-import type { CoverageSlot } from '../../coverage/types';
 
-const unfilledSlot: CoverageSlot = { id: 'budget', label: 'Budget', filled: false };
-
+/**
+ * The hook used to own a `CoverageSlot` and flip it to `filled`, which made
+ * the coverage meter a record of taps rather than a measurement. What a tap
+ * means for coverage is the service's to decide now; what is left here is
+ * making the tap idempotent within one nudge.
+ */
 describe('useAskedItChip', () => {
-  it('starts reflecting the slot passed in', () => {
-    const { result } = renderHook(() => useAskedItChip(unfilledSlot));
+  it('starts un-asked', () => {
+    const { result } = renderHook(() => useAskedItChip());
     expect(result.current.asked).toBe(false);
-    expect(result.current.slot).toEqual(unfilledSlot);
   });
 
-  it('marks the slot filled locally on tap, synchronously', () => {
-    const { result } = renderHook(() => useAskedItChip(unfilledSlot));
+  it('confirms on tap, synchronously', () => {
+    const { result } = renderHook(() => useAskedItChip());
 
     act(() => result.current.tap());
 
     expect(result.current.asked).toBe(true);
-    expect(result.current.slot).toEqual({ ...unfilledSlot, filled: true });
   });
 
-  it('calls onAsked with the mutated slot, without needing to be awaited', () => {
+  it('calls onAsked without needing to be awaited', () => {
     const onAsked = vi.fn();
-    const { result } = renderHook(() => useAskedItChip(unfilledSlot, { onAsked }));
+    const { result } = renderHook(() => useAskedItChip({ onAsked }));
 
     act(() => result.current.tap());
 
-    expect(onAsked).toHaveBeenCalledWith({ ...unfilledSlot, filled: true });
+    expect(onAsked).toHaveBeenCalledTimes(1);
   });
 
   it('is a no-op on a second tap once already asked', () => {
     const onAsked = vi.fn();
-    const { result } = renderHook(() => useAskedItChip(unfilledSlot, { onAsked }));
+    const { result } = renderHook(() => useAskedItChip({ onAsked }));
 
     act(() => result.current.tap());
     act(() => result.current.tap());
 
     expect(onAsked).toHaveBeenCalledTimes(1);
     expect(result.current.asked).toBe(true);
-  });
-
-  it('starts already-asked when given a slot that is already filled', () => {
-    const filledSlot: CoverageSlot = { id: 'timeline', label: 'Timeline', filled: true };
-    const onAsked = vi.fn();
-    const { result } = renderHook(() => useAskedItChip(filledSlot, { onAsked }));
-
-    expect(result.current.asked).toBe(true);
-
-    act(() => result.current.tap());
-    expect(onAsked).not.toHaveBeenCalled();
   });
 });

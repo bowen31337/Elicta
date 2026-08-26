@@ -24,6 +24,7 @@ interface WireSessionStreamNudge {
   trigger_reason: string;
   created_at: number;
   disposition?: 'taken' | 'parked' | null;
+  template_section?: string | null;
 }
 
 /**
@@ -80,6 +81,7 @@ function parseSessionStreamNudge(rawData: string): SessionStreamNudge {
     // reconnect or a restart — which is exactly when the operator is least
     // able to remember what they already asked.
     disposition: payload.disposition ?? null,
+    templateSection: payload.template_section ?? null,
   };
 }
 

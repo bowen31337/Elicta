@@ -43,13 +43,21 @@ describe('journey scenes', () => {
     expect(screen.getByRole('button', { name: /What am I missing/ })).toBeInTheDocument();
   });
 
-  it('tapping Asked it advances coverage in the same render pass', async () => {
+  it('tapping Asked it puts the question down in the same render pass', async () => {
+    /* It used to advance the meter here, and that was the bug: the tap wrote
+       a slot the panel then merged over the service's coverage, so the count
+       became a record of taps rather than a measurement — and the slot it
+       credited was whichever one happened to be first unfilled, unrelated to
+       the nudge. What the operator is owed immediately is the card receding
+       and the mark on it. The count is the service's answer, and a fixed
+       scene has no service. */
     render(<OperatorPanel initial={NUDGE_SURFACED} />);
     expect(screen.getByText('1 of 4')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /Asked it/ }));
 
-    await waitFor(() => expect(screen.getByText('2 of 4')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Asked')).toBeInTheDocument());
+    expect(screen.getByText('1 of 4')).toBeInTheDocument();
   });
 
   it('a code-switched meeting tags both languages', () => {

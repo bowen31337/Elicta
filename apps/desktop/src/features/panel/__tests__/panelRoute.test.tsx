@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import PanelRoute from '../route';
+import { setApiClient } from '../../../services/apiClient';
+import { createApiClient } from 'api-client';
 
 /**
  * The panel, connected.
@@ -79,16 +81,33 @@ class FakeEventSource {
   }
 }
 
+/** Every request the panel made, so a test can assert one was made at all. */
+let fetchMock: ReturnType<typeof vi.fn>;
+
 function stubService(table: Record<string, unknown>) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (path: string) => {
-      const body = table[path];
-      if (body === undefined) return { ok: false, status: 404, json: async () => null } as Response;
-      return { ok: true, status: 200, json: async () => body } as Response;
-    }),
-  );
+  fetchMock = vi.fn(async (path: string) => {
+    const body = table[path];
+    if (body === undefined) return { ok: false, status: 404, json: async () => null } as Response;
+    return { ok: true, status: 200, json: async () => body } as Response;
+  });
+  vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('EventSource', FakeEventSource);
+
+  /* Built here, after the stub, and given an absolute base.
+
+     `openapi-fetch` binds `globalThis.fetch` when the client is created, and
+     the client is a module-level singleton — so one built before this line,
+     or left over from another test, keeps calling a fetch nobody is
+     watching.
+
+     The base matters just as much. In the app it is either the page's own
+     origin (a browser resolves a relative url against it) or the service's
+     address (the packaged shell). Under jsdom neither applies: `Request`
+     refuses a relative url outright, `recordNudgeDisposition` catches that
+     and returns `false`, and every chip reporting through the client
+     no-opped silently — so no test in this file could have caught a POST
+     that never happened. */
+  setApiClient(createApiClient('http://service.test'));
 }
 
 const BASE = {
@@ -394,14 +413,14 @@ describe('the live panel', () => {
     expect(screen.getByRole('button', { name: /missing/i })).toBeInTheDocument();
   });
 
-  it('moves the meter when a section is marked asked', async () => {
-    /* Reported: "it is always 0/8 in the status bar".
-
-       The meter read the stream's copy of coverage and `Asked it` wrote to
-       the panel's own — `coverage ?? state.coverage`, with the stream's
-       winning whenever there was one. So in a live meeting the tick was
-       invisible, and the scene test that covered this passed because a fixed
-       scene has no stream and falls through to the half that was written. */
+  it('records the tap on the service and leaves the meter to it', async () => {
+    /* The meter used to move on the tap, from a `localStorage` record the
+       panel merged over the stream's coverage. Two things were wrong with
+       that and the second is worse: the count was a record of taps wearing
+       the clothes of a measurement, and the slot it credited was whichever
+       one happened to be first unfilled — nothing to do with the nudge. A
+       live meeting reported eight of eight covered after eight questions
+       about "a lot" and "some". */
     stubService(BASE);
     render(<PanelRoute />);
     await waitFor(() => expect(stream()).toBeDefined());
@@ -417,59 +436,66 @@ describe('the live panel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
 
-    expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        // The client builds a `Request`, so the url is read off whichever
+        // argument carries it rather than assumed to be the first.
+        fetchMock.mock.calls.some(([target]) =>
+          String((target as Request)?.url ?? target).includes('/disposition'),
+        ),
+      ).toBe(true),
+    );
+    // And the meter has not budged on the panel's own authority.
+    expect(screen.getByText(/0 of 2/)).toBeInTheDocument();
   });
 
-  it('does not lose that tick when the stream reconnects', async () => {
-    /* The stream re-sends every slot unfilled on each connect — nothing
-       server-side marks one covered — so a wholesale replace undid the
-       operator's work every few minutes. What the stream knows is which
-       slots exist; which are covered is the operator's. */
+  it('shows the meter the service sends, including after a reconnect', async () => {
+    /* One answer, in one place. The panel holding a second copy is what made
+       a reconnect either wipe the operator's work or preserve a number the
+       service disagreed with, depending on which half won. */
     stubService(BASE);
     render(<PanelRoute />);
     await waitFor(() => expect(stream()).toBeDefined());
+    const slots = (filled: readonly string[]) => ({
+      slots: [
+        { id: 's-1', label: 'Volumes', filled: filled.includes('s-1') },
+        { id: 's-2', label: 'Performance', filled: filled.includes('s-2') },
+      ],
+      time_remaining_ms: null,
+    });
+    stream().emit('coverage', slots([]));
+    await screen.findByText(/0 of 2/);
+
+    // The service says one is now asked about — which is what a recorded
+    // disposition looks like arriving back.
+    stream().emit('coverage', slots(['s-1']));
+    expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
+
+    // A reconnect re-sends the same truth, so nothing flickers back.
+    stream().emit('coverage', slots(['s-1']));
+    await waitFor(() => expect(screen.getByText(/1 of 2/)).toBeInTheDocument());
+  });
+
+  it('keeps what the operator marked when they visit another screen', async () => {
+    /* Reported: "when page switches, the nudge progress bar status is
+       reset". The router mounts a different component per destination, so
+       leaving the panel unmounted every piece of its own state — including
+       which sections had been marked.
+
+       It survives now for a duller and better reason than the module store
+       that used to hold it: the mark is in the database, so the new
+       connection is simply told the same thing the old one was. */
+    stubService(BASE);
+    const first = render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
     const frame = {
       slots: [
-        { id: 's-1', label: 'Volumes', filled: false },
+        { id: 's-1', label: 'Volumes', filled: true },
         { id: 's-2', label: 'Performance', filled: false },
       ],
       time_remaining_ms: null,
     };
     stream().emit('coverage', frame);
-    emitNudge(1);
-    await screen.findByText(/0 of 2/);
-    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
-    await screen.findByText(/1 of 2/);
-
-    // The same frame again, as a reconnect delivers it.
-    stream().emit('coverage', frame);
-
-    await waitFor(() => expect(screen.getByText(/1 of 2/)).toBeInTheDocument());
-  });
-
-  it('keeps the coverage ticks when the operator visits another screen', async () => {
-    /* Reported: "when page switches, the nudge progress bar status is
-       reset". The router mounts a different component per destination, so
-       leaving the panel unmounts it and every piece of its own state goes —
-       including which sections the operator had marked asked. They come
-       back to 0 of 8 and no record that they had been anywhere.
-
-       The nudges themselves survive it, because the stream replays them.
-       The ticks had nothing replaying them: they are the operator's, and
-       nowhere but this component held them. */
-    stubService(BASE);
-    const first = render(<PanelRoute />);
-    await waitFor(() => expect(stream()).toBeDefined());
-    stream().emit('coverage', {
-      slots: [
-        { id: 's-1', label: 'Volumes', filled: false },
-        { id: 's-2', label: 'Performance', filled: false },
-      ],
-      time_remaining_ms: null,
-    });
-    emitNudge(1);
-    await screen.findByText(/0 of 2/);
-    await userEvent.click(screen.getByRole('button', { name: /asked it/i }));
     await screen.findByText(/1 of 2/);
 
     // Away to another screen, and back.
@@ -479,13 +505,7 @@ describe('the live panel', () => {
     // The *new* connection. `stream()` is `live[0]`, which after a remount is
     // the one that was just closed — emitting there proves nothing.
     await waitFor(() => expect(FakeEventSource.live.length).toBeGreaterThan(opened));
-    FakeEventSource.live[FakeEventSource.live.length - 1].emit('coverage', {
-      slots: [
-        { id: 's-1', label: 'Volumes', filled: false },
-        { id: 's-2', label: 'Performance', filled: false },
-      ],
-      time_remaining_ms: null,
-    });
+    FakeEventSource.live[FakeEventSource.live.length - 1].emit('coverage', frame);
 
     expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
   });
@@ -513,16 +533,21 @@ describe('the live panel', () => {
     expect(screen.queryByRole('button', { name: /Bring back Stub 1/i })).toBeNull();
   });
 
-  it('is short two of the four responses when no coverage frame arrives', async () => {
+  it('is short one of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage
        frame, and nothing proved the service sends one. It did not — the only
-       frame kind ever queued was `nudge` — so `Asked it` and `What am I
-       missing?` never rendered, and the operator had two chips where FR-6.6
-       says four.
+       frame kind ever queued was `nudge` — so `What am I missing?` never
+       rendered, and the operator was short of the four FR-6.6 asks for.
+
+       `Asked it` used to be gated on coverage too, and that gating is what
+       made it vanish for good once every section had been marked: with no
+       chip there was no way to record a disposition, so nothing was ever
+       marked "Asked" again. It is about the nudge, and it is offered
+       whenever there is one.
 
        Asserted rather than left implicit so the frame cannot be removed as
-       cosmetic: it is what half the primary input is gated on. */
+       cosmetic: the summary is what `What am I missing?` reads. */
     stubService(BASE);
     render(<PanelRoute />);
     await waitFor(() => expect(stream()).toBeDefined());
@@ -535,11 +560,11 @@ describe('the live panel', () => {
       created_at: 1,
     });
 
-    // The two that need only a nudge are there.
+    // The three that need only a nudge are there.
     expect(await screen.findByRole('button', { name: /park it/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /deeper/i })).toBeInTheDocument();
-    // The two that need coverage are not.
-    expect(screen.queryByRole('button', { name: /asked it/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /asked it/i })).toBeInTheDocument();
+    // The one that needs a coverage summary to read is not.
     expect(screen.queryByRole('button', { name: /missing/i })).not.toBeInTheDocument();
   });
 

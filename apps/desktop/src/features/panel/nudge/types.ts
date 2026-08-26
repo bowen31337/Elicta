@@ -26,4 +26,10 @@ export interface Nudge {
    * which matters most where several carry near-identical wording.
    */
   disposition?: NudgeDisposition | null;
+  /**
+   * Which template section a tap on this one counts towards, or `null` when
+   * it counts towards none. The panel does not move the meter itself — this
+   * is only so the chip can say what the tap will do.
+   */
+  templateSection?: string | null;
 }

@@ -1,7 +1,6 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 
 import './route.css';
-import { askedSlotsOf, markSlotAsked, subscribeAskedSlots } from './coverage/askedSlots';
 import {
   AskedItChip,
   EscapeHatchInput,
@@ -9,7 +8,7 @@ import {
   ParkItChip,
   WhatAmIMissingChip,
 } from './chips';
-import type { CoverageSlot, CoverageSummary } from './coverage';
+import type { CoverageSummary } from './coverage';
 import { CoverageIndicator, useSessionStream } from './coverage';
 import type { DetectedLanguage } from './language';
 import { LanguageChrome } from './language';
@@ -88,21 +87,6 @@ export function OperatorPanel({
     : never;
 }) {
   const [state, setState] = useState<PanelState>(initial);
-  /**
-   * Sections the operator has marked asked, by slot id.
-   *
-   * Kept apart from the stream's coverage because the two are different
-   * facts with different owners, and holding them in one place meant the
-   * stream's next frame silently discarded the operator's. Kept outside this
-   * component because the router unmounts it on every page switch, and these
-   * are the one thing on the panel with nothing to replay them.
-   */
-  const askedSlots = useSyncExternalStore(
-    subscribeAskedSlots,
-    () => askedSlotsOf(state.meetingId ?? null),
-    () => askedSlotsOf(state.meetingId ?? null),
-  );
-
   // The live session drives the panel when there is one. Coverage arrives as
   // the current summary rather than a diff, and each nudge replaces the
   // active one — the previous nudge recedes into history rather than being
@@ -141,14 +125,24 @@ export function OperatorPanel({
       }),
   });
 
-  const onAsked = (slot: CoverageSlot) => {
-    // Recorded as the operator's own, not written back into the stream's
-    // copy: the next connect replaces that wholesale, and it did.
-    markSlotAsked(state.meetingId ?? null, slot.id);
-
-    // Fire-and-forget: the operator's confirmation is the local mutation above,
-    // not this round trip (FR-6.6). A dropped sync costs an analytics row, and
-    // must never hold up a panel mid-meeting.
+  /**
+   * Mark the live nudge asked.
+   *
+   * The meter is deliberately not touched here. It used to be: the tap wrote
+   * the slot into `localStorage` and the panel merged that over the stream's
+   * coverage, so the count was a record of taps wearing the clothes of a
+   * measurement. Worse, the slot it wrote was whichever one happened to be
+   * first unfilled — unrelated to the nudge — so eight questions about "a
+   * lot" and "some" reported eight of eight covered.
+   *
+   * The disposition goes to the service, which owns what a section being
+   * asked about means and says so on the next coverage frame. One answer, in
+   * one place, that a restart and a second screen both see.
+   */
+  const onAsked = () => {
+    // Fire-and-forget: the operator's confirmation is the card receding in
+    // the same render pass (FR-6.6), not this round trip. A dropped sync must
+    // never hold up a panel mid-meeting.
     if (state.meetingId && state.active) {
       void recordNudgeDisposition({
         meetingId: state.meetingId,
@@ -282,18 +276,9 @@ export function OperatorPanel({
    * sat at 0 of however many for the whole meeting. Merged, it moves and it
    * survives the reconnection that used to wipe it.
    */
-  const liveCoverage = useMemo(() => {
-    const fromStream = coverage ?? state.coverage;
-    if (fromStream === null) return null;
-    if (askedSlots.length === 0) return fromStream;
-    return {
-      ...fromStream,
-      slots: fromStream.slots.map((slot) =>
-        askedSlots.includes(slot.id) ? { ...slot, filled: true } : slot,
-      ),
-    };
-  }, [coverage, state.coverage, askedSlots]);
-  const firstUnfilled = liveCoverage?.slots.find((slot) => !slot.filled) ?? null;
+  // Whatever the service last said, unedited. The panel used to merge the
+  // operator's own taps in over the top; see `onAsked`.
+  const liveCoverage = coverage ?? state.coverage;
   // The live stream wins over the initial prop once a meeting is running:
   // the prop is what the panel was handed at mount, the stream is what the
   // service knows now. Without a meeting there is no stream, so the prop is
@@ -359,8 +344,14 @@ export function OperatorPanel({
               referred to had been dealt with. FR-6.7 settles which it is:
               it suppresses re-suggestion, and there is nothing to
               re-suggest without a question that was suggested. */}
-          {state.active && firstUnfilled ? (
-            <AskedItChip slot={firstUnfilled} onAsked={onAsked} />
+          {/* Gated on the live nudge alone. It used to be gated on there
+              being an unfilled section left as well, which made it remove
+              itself the moment the operator had marked them all — and with
+              no chip there was no way to record another disposition, so
+              nothing was ever marked "Asked" again. The chip is about the
+              nudge; the meter is the service's business. */}
+          {state.active ? (
+            <AskedItChip section={state.active.templateSection ?? null} onAsked={onAsked} />
           ) : null}
           {state.active ? (
             <ParkItChip

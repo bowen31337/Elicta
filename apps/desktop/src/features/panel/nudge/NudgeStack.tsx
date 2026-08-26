@@ -86,7 +86,11 @@ const DISPOSITION_MARK: Record<NonNullable<Nudge['disposition']>, string> = {
  */
 function DispositionMark({ nudge }: { nudge: Nudge }) {
   if (!nudge.disposition) return null;
-  return <span className="nudge-stack__history-mark">{DISPOSITION_MARK[nudge.disposition]}</span>;
+  return (
+    <span className={`nudge-stack__history-mark nudge-stack__history-mark--${nudge.disposition}`}>
+      {DISPOSITION_MARK[nudge.disposition]}
+    </span>
+  );
 }
 
 export function NudgeStack({

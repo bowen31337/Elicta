@@ -61,6 +61,25 @@ describe('a nudge the operator has already dealt with', () => {
     expect(screen.queryByText('Question n-1?')).not.toBeInTheDocument();
   });
 
+  it('tells the two marks apart by colour, not by reading them', async () => {
+    // The history is a dim column of near-identical stubs an operator scans
+    // while a client is talking. Two words that differ only in their letters
+    // are two words nobody reads at that moment.
+    const source = new FakeSource();
+    render(
+      <OperatorPanel
+        initial={{ active: null, history: [], coverage: null, languages: [], meetingId: 'meeting-1' }}
+        createSource={() => source as never}
+      />,
+    );
+
+    source.emit('nudge', nudgeFrame('n-1', 'taken'));
+    source.emit('nudge', nudgeFrame('n-2', 'parked'));
+
+    expect(await screen.findByText('Asked')).toHaveClass('nudge-stack__history-mark--taken');
+    expect(screen.getByText('Parked')).toHaveClass('nudge-stack__history-mark--parked');
+  });
+
   it('marks the card the moment "Asked it" is pressed, not on the next connect', async () => {
     const source = new FakeSource();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));

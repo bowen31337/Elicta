@@ -50,6 +50,7 @@ describe('parseSessionStreamEvent', () => {
         triggerReason: 'vague adjective: fast',
         createdAt: 1_700_000_000_000,
         disposition: null,
+        templateSection: null,
       },
     });
   });

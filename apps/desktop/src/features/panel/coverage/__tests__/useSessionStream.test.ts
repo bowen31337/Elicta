@@ -103,6 +103,7 @@ describe('useSessionStream', () => {
       triggerReason: 'vague adjective',
       createdAt: 1,
       disposition: null,
+      templateSection: null,
     });
     expect(result.current.coverage).toBeNull();
   });

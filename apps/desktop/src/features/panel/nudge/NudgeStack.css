@@ -120,9 +120,17 @@
 
 /* What became of a nudge, beside its headline.
  *
- * `--label-supporting` rather than a colour: this is a fact about the row,
- * not a status to react to, and a green tick on half a list would pull the
- * eye to the ones already dealt with rather than the ones still waiting. */
+ * The two marks say different things and are told apart at a glance, which
+   is the only way they get read: the history is a dim column of stubs an
+   operator scans while a client is talking. Green for dealt with, orange for
+   deferred — the same pairing the rest of the app uses for done and
+   waiting.
+
+   `--green-ink` / `--orange-ink` rather than the vivid system colours: these
+   are text, and the vivid fills fail AA at caption size. Solved against
+   glass, which composites darker than a card. The row carries a reduced
+   `opacity` for depth, and dimming already-reduced ink is what produced real
+   AA failures here — so the mark opts out of it. */
 .nudge-stack__history-mark {
   margin-inline-start: var(--space-3);
   font-size: var(--text-caption-2);
@@ -130,4 +138,13 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--label-supporting);
+  opacity: 1;
+}
+
+.nudge-stack__history-mark--taken {
+  color: var(--green-ink);
+}
+
+.nudge-stack__history-mark--parked {
+  color: var(--orange-ink);
 }

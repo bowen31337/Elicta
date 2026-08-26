@@ -4,7 +4,7 @@ import { CoverageIndicator } from '../CoverageIndicator';
 import type { CoverageSummary } from '../types';
 
 describe('CoverageIndicator', () => {
-  it('renders sections filled versus the template total', () => {
+  it('renders sections asked about versus the template total', () => {
     const summary: CoverageSummary = {
       slots: [
         { id: 'a', label: 'A', filled: true },
@@ -17,7 +17,7 @@ describe('CoverageIndicator', () => {
     // Asserted on what is on screen rather than on an accessible name: the
     // change this guards is that the reading no longer needs one to make
     // sense.
-    expect(screen.getByRole('group', { name: /1 of 2 sections covered/i })).toHaveTextContent(
+    expect(screen.getByRole('group', { name: /1 of 2 sections asked about/i })).toHaveTextContent(
       '1 of 2',
     );
   });
@@ -65,7 +65,7 @@ describe('reading the indicator without being told what it is', () => {
       />,
     );
 
-    expect(screen.getByText(/covered/i)).toBeInTheDocument();
+    expect(screen.getByText(/asked about/i)).toBeInTheDocument();
   });
 
   it('says what the clock is measuring', () => {
@@ -93,7 +93,7 @@ describe('reading the indicator without being told what it is', () => {
       />,
     );
 
-    expect(screen.getByRole('group', { name: /covered/i })).toHaveAttribute('title');
+    expect(screen.getByRole('group', { name: /asked about/i })).toHaveAttribute('title');
   });
 
   it('still says nothing it does not know', () => {
