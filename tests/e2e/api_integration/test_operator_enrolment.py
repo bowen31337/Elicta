@@ -225,7 +225,9 @@ def _nudges_from_one_window(
     # reasons that have nothing to do with who was speaking.
     assert heard == [meeting_id]
 
-    return len([name for name, _ in backend.live_events.get(meeting_id, []) if name == "nudge"])
+    # `live_events` was one of two parallel copies of this; the record it
+    # duplicated is now the only one, and durable.
+    return len(backend.surfaced_nudges.get(meeting_id, []))
 
 
 def test_uploaded_audio_is_verified_against_the_enrolled_print(settings_store) -> None:

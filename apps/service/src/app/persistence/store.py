@@ -1152,6 +1152,163 @@ class StateStore:
             lock=self._lock,
         )
 
+    def debrief_outcomes(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """What became of each session's debrief run.
+
+        One value per session, because a session has one outcome: asking for
+        the write-up again replaces what is known about it.
+        """
+
+        table = metadata.tables["debrief_outcomes"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.session_id] = decode(
+                {
+                    "session_id": row.session_id,
+                    "stopped_at": row.stopped_at,
+                    "reason": row.reason,
+                    "stages_completed": row.stages_completed or [],
+                    "recorded_at": row.recorded_at,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "session_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "stopped_at": value.stopped_at,
+                    "reason": value.reason,
+                    "stages_completed": list(value.stages_completed or []),
+                    "recorded_at": value.recorded_at,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
+    def bmad_chains(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
+        """One debrief run per session — the brief and its three siblings.
+
+        A single value per key rather than a list, because a session has one
+        chain: running the debrief again replaces it.
+        """
+
+        table = metadata.tables["bmad_chains"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.session_id] = decode(
+                {
+                    "session_id": row.session_id,
+                    "status": row.status,
+                    "engine": row.engine,
+                    "artifacts": row.artifacts,
+                    "requested_at": row.requested_at,
+                    "completed_at": row.completed_at,
+                    "error": row.error,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "session_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "status": _enum_text(value.status),
+                    "engine": value.engine,
+                    # Dumped rather than handed over whole: a JSON column
+                    # takes a dict, and the artifact set is a model.
+                    "artifacts": (
+                        None
+                        if value.artifacts is None
+                        else value.artifacts.model_dump(mode="json")
+                    ),
+                    "requested_at": value.requested_at,
+                    "completed_at": value.completed_at,
+                    "error": value.error,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
+    def surfaced_nudges(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, list[V]]:
+        """What each meeting put in front of the operator, in order.
+
+        Keyed by meeting because that is how the panel reads it and how
+        `Park it` resolves a thread — the id alone was all the panel ever
+        sent, and in memory a restart left nothing to resolve it against.
+        """
+
+        table = metadata.tables["surfaced_nudges"]
+        loaded: dict[str, list[V]] = {}
+        for row in sorted(self._rows(table), key=lambda r: (r.meeting_id, r.ordinal)):
+            loaded.setdefault(row.meeting_id, []).append(
+                decode(
+                    {
+                        "id": row.id,
+                        "meeting_id": row.meeting_id,
+                        "stub": row.stub,
+                        "question": row.question,
+                        "trigger_reason": row.trigger_reason,
+                        "term": row.term,
+                        "category": row.category,
+                        "candidate_id": row.candidate_id,
+                        "created_at": row.created_at,
+                        "disposition": row.disposition,
+                    }
+                )
+            )
+
+        def persist(key: str, value: Any) -> None:
+            # Read off the entity rather than through `dump`, which is what
+            # the record-path transcripts beside this do: dumping renders the
+            # timestamp as a string, and a `DateTime` column refuses one.
+            rows = [
+                {
+                    "id": entry.id,
+                    "meeting_id": key,
+                    "stub": entry.stub,
+                    "question": entry.question,
+                    "trigger_reason": entry.trigger_reason,
+                    "term": entry.term,
+                    "category": entry.category,
+                    "candidate_id": entry.candidate_id,
+                    "created_at": entry.created_at,
+                    # Guarded: `_enum_text` renders None as the *string*
+                    # "None", and unanswered has to reload as unanswered.
+                    "disposition": (
+                        None if entry.disposition is None else _enum_text(entry.disposition)
+                    ),
+                    "ordinal": ordinal,
+                }
+                for ordinal, entry in enumerate(value)
+            ]
+            self._replace_children(table, "meeting_id", key, rows)
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "meeting_id", key),
+            lock=self._lock,
+        )
+
     def candidates(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, list[V]]:
         """The compiled candidate bank for an engagement (FR-4.8)."""
 

@@ -49,6 +49,8 @@ describe('parseSessionStreamEvent', () => {
         question: 'What does "fast" mean in milliseconds?',
         triggerReason: 'vague adjective: fast',
         createdAt: 1_700_000_000_000,
+        disposition: null,
+        templateSection: null,
       },
     });
   });

@@ -41,6 +41,7 @@ export function GoDeeperChip({
       <button
         type="button"
         className="go-deeper-chip__button"
+        title="Ask for another question on the same thread. Taken from the bank, not drafted — it answers in the moment rather than making you wait."
         onClick={() => void tap()}
         disabled={pending}
         aria-busy={pending}

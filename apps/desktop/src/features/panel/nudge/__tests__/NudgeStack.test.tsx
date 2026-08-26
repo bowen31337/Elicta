@@ -84,7 +84,7 @@ describe('NudgeStack', () => {
 
   it('shows an empty state when there is no active nudge', () => {
     render(<NudgeStack active={null} history={[]} />);
-    expect(screen.getByText(/no active nudge/i)).toBeInTheDocument();
+    expect(screen.getByText(/listening/i)).toBeInTheDocument();
   });
 
   describe('interface chrome in the operator language (PRD FR-2.25)', () => {
@@ -92,7 +92,7 @@ describe('NudgeStack', () => {
       render(
         <NudgeStack active={null} history={[makeNudge('a'), makeNudge('b')]} />,
       );
-      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByText(/Listening/)).toBeInTheDocument();
       expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
     });
 
@@ -104,7 +104,7 @@ describe('NudgeStack', () => {
           operatorLanguage="zh"
         />,
       );
-      expect(screen.getByText('当前没有提示')).toBeInTheDocument();
+      expect(screen.getByText('正在聆听，暂无提示')).toBeInTheDocument();
       expect(screen.getByLabelText('历史提示')).toBeInTheDocument();
     });
 
@@ -123,7 +123,7 @@ describe('NudgeStack', () => {
           operatorLanguage="fr"
         />,
       );
-      expect(screen.getByText('No active nudge')).toBeInTheDocument();
+      expect(screen.getByText(/Listening/)).toBeInTheDocument();
       expect(screen.getByLabelText('Prior nudges')).toBeInTheDocument();
     });
   });
@@ -175,5 +175,105 @@ describe('NudgeStack', () => {
       expect(screen.getByText('reason-b')).toBeInTheDocument();
       expect(screen.queryByText('question a?')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('reaching a nudge that has receded', () => {
+  /**
+   * Reported with eight on screen: "there is no way to navigate to any of
+   * it". Every chip acts on the active nudge, and a history entry was two
+   * spans in a list item — not focusable, not pressable. So the moment a
+   * second nudge arrived the first became unactionable for good, and in a
+   * meeting where one can arrive every minute that is most of them.
+   *
+   * FR-6.3 constrains *prominence* — one shown prominently at a time — not
+   * reachability. Bringing one forward keeps exactly one prominent; it just
+   * lets the operator choose which.
+   */
+  const HISTORY: Nudge[] = [
+    { id: 'n-2', stub: 'Second', question: 'The second question?', triggerReason: 'r2', createdAt: 2 },
+    { id: 'n-1', stub: 'First', question: 'The first question?', triggerReason: 'r1', createdAt: 1 },
+  ];
+  const ACTIVE: Nudge = {
+    id: 'n-3',
+    stub: 'Third',
+    question: 'The third question?',
+    triggerReason: 'r3',
+    createdAt: 3,
+  };
+
+  it('says the list is there and what pressing it does', async () => {
+    /* Reported as "when one nudge is parked, there is no way to view other
+       nudges" — and mechanically there was: every entry is a button. What
+       there was not was any sign of it. The list carried an accessible name
+       and nothing visible, so a sighted operator saw a dim column of
+       near-identical stubs under an empty state, with no heading and no
+       affordance. A way that cannot be found is not a way. */
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.getByText(/earlier/i)).toBeInTheDocument();
+    expect(screen.getByText(/bring (one )?back|tap/i)).toBeInTheDocument();
+  });
+
+  it('marks a nudge that has been dealt with, so it is not asked twice', () => {
+    /* A history entry for a question already asked looked exactly like one
+       still waiting — same stub, same reason, same weight. With several of
+       them carrying near-identical wording, the operator has no way to tell
+       which they have used. */
+    const dealt = [
+      { ...HISTORY[0], disposition: 'taken' as const },
+      { ...HISTORY[1], disposition: 'parked' as const },
+    ];
+    render(<NudgeStack active={ACTIVE} history={dealt} onSelect={() => {}} />);
+
+    expect(screen.getByText(/asked/i)).toBeInTheDocument();
+    expect(screen.getByText(/parked/i)).toBeInTheDocument();
+  });
+
+  it('says nothing about one nobody has answered', () => {
+    /* Silence is right here and only here: unanswered is the resting state,
+       and a badge on every row would make the marked ones invisible. */
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.queryByText(/^asked$/i)).toBeNull();
+  });
+
+  it('offers each past nudge as something that can be pressed', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.getAllByRole('button', { name: /Second|First/ })).toHaveLength(2);
+  });
+
+  it('says which nudge pressing one would bring forward', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(
+      screen.getByRole('button', { name: /Bring back Second/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('hands the whole nudge back, not just its id', () => {
+    /* The caller has to put the displaced one somewhere, and it needs the
+       nudge to do it — an id would make it look the demoted one up in a list
+       it is in the middle of rewriting. */
+    const onSelect = vi.fn();
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={onSelect} />);
+
+    screen.getByRole('button', { name: /Bring back First/i }).click();
+
+    expect(onSelect).toHaveBeenCalledWith(HISTORY[1]);
+  });
+
+  it('leaves the active nudge unpressable, since it is already here', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.queryByRole('button', { name: /Bring back Third/i })).toBeNull();
+  });
+
+  it('still renders without a handler, for a screenshot that cannot press anything', () => {
+    render(<NudgeStack active={ACTIVE} history={HISTORY} />);
+
+    expect(screen.getByText('Second')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Bring back/i })).toBeNull();
   });
 });

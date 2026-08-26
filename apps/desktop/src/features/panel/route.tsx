@@ -8,7 +8,7 @@ import {
   ParkItChip,
   WhatAmIMissingChip,
 } from './chips';
-import type { CoverageSlot, CoverageSummary } from './coverage';
+import type { CoverageSummary } from './coverage';
 import { CoverageIndicator, useSessionStream } from './coverage';
 import type { DetectedLanguage } from './language';
 import { LanguageChrome } from './language';
@@ -87,7 +87,6 @@ export function OperatorPanel({
     : never;
 }) {
   const [state, setState] = useState<PanelState>(initial);
-
   // The live session drives the panel when there is one. Coverage arrives as
   // the current summary rather than a diff, and each nudge replaces the
   // active one — the previous nudge recedes into history rather than being
@@ -100,31 +99,50 @@ export function OperatorPanel({
   } = useSessionStream(state.meetingId ?? null, {
     createSource,
     onNudge: (nudge) =>
-      setState((current) => ({
-        ...current,
-        active: nudge,
-        history: current.active ? [current.active, ...current.history] : current.history,
-      })),
+      setState((current) => {
+        // Already seen. The stream replays its whole backlog on every
+        // connect — that is how a panel opened mid-meeting catches up — and
+        // `EventSource` reconnects on its own schedule every few minutes.
+        // Nothing deduped, so each reconnection appended the meeting's
+        // entire history to itself: an operator who had seen three nudges
+        // found six, then nine, all of them real and none of them new.
+        if (current.active?.id === nudge.id) return current;
+        if (current.history.some((held) => held.id === nudge.id)) return current;
+        // Already dealt with, so it arrives behind whatever is live rather
+        // than in front of it. The backlog replays in full on every connect
+        // and after every restart, and a question the operator asked an hour
+        // ago handed back as the live card is one they will ask twice —
+        // several nudges on one trigger carry near-identical wording, so
+        // there is nothing else to tell them apart by.
+        if (nudge.disposition) {
+          return { ...current, history: [...current.history, nudge] };
+        }
+        return {
+          ...current,
+          active: nudge,
+          history: current.active ? [current.active, ...current.history] : current.history,
+        };
+      }),
   });
 
-  const onAsked = (slot: CoverageSlot) => {
-    setState((current) =>
-      current.coverage === null
-        ? current
-        : {
-            ...current,
-            coverage: {
-              ...current.coverage,
-              slots: current.coverage.slots.map((existing) =>
-                existing.id === slot.id ? { ...existing, filled: true } : existing,
-              ),
-            },
-          },
-    );
-
-    // Fire-and-forget: the operator's confirmation is the local mutation above,
-    // not this round trip (FR-6.6). A dropped sync costs an analytics row, and
-    // must never hold up a panel mid-meeting.
+  /**
+   * Mark the live nudge asked.
+   *
+   * The meter is deliberately not touched here. It used to be: the tap wrote
+   * the slot into `localStorage` and the panel merged that over the stream's
+   * coverage, so the count was a record of taps wearing the clothes of a
+   * measurement. Worse, the slot it wrote was whichever one happened to be
+   * first unfilled — unrelated to the nudge — so eight questions about "a
+   * lot" and "some" reported eight of eight covered.
+   *
+   * The disposition goes to the service, which owns what a section being
+   * asked about means and says so on the next coverage frame. One answer, in
+   * one place, that a restart and a second screen both see.
+   */
+  const onAsked = () => {
+    // Fire-and-forget: the operator's confirmation is the card receding in
+    // the same render pass (FR-6.6), not this round trip. A dropped sync must
+    // never hold up a panel mid-meeting.
     if (state.meetingId && state.active) {
       void recordNudgeDisposition({
         meetingId: state.meetingId,
@@ -132,6 +150,71 @@ export function OperatorPanel({
         disposition: 'taken',
       });
     }
+    retireActive('taken');
+  };
+
+  /**
+   * Put the active nudge down, into history.
+   *
+   * Both chips that deal with a question end here. Parking says "not now"
+   * and asking says "done"; either way the operator has finished with it,
+   * and the panel went on showing it — with the next nudge up to a minute
+   * away, that left a card sitting there already dealt with and nothing to
+   * press to move past it.
+   *
+   * Into history rather than gone. That was not safe until history became
+   * reachable: putting a nudge down used to lose it for good. It is one
+   * press away now, which is what makes retiring it the right behaviour
+   * rather than a trade.
+   */
+  const retireActive = (disposition: 'taken' | 'parked') => {
+    setState((current) =>
+      current.active === null
+        ? current
+        : {
+            ...current,
+            active: null,
+            // Marked here as well as recorded on the service. The stream
+            // carries the disposition, but only on the next connect — and
+            // the row has to change the moment it is pressed, or the
+            // operator sees no difference between a question they have just
+            // asked and one still waiting.
+            history: [{ ...current.active, disposition }, ...current.history],
+          },
+    );
+  };
+
+  /**
+   * Bring a nudge that has receded back to the front.
+   *
+   * A swap, not a reordering: the one being brought back leaves history and
+   * the one it displaces takes the front of it, so nothing is lost and the
+   * one just put down is a single press away. Exactly one stays prominent,
+   * which is what FR-6.3 asks — it constrains prominence, not which nudge
+   * the operator is allowed to be looking at.
+   *
+   * Without this every chip acted on whatever arrived last, and a nudge
+   * became unactionable the moment the next one landed. With one arriving
+   * as often as a minute apart, that is most of a meeting's worth.
+   */
+  const onSelectNudge = (nudge: Nudge) => {
+    setState((current) => {
+      // Already here. Nothing to do, and swapping it with itself would drop
+      // it into its own history.
+      if (current.active?.id === nudge.id) return current;
+      return {
+        ...current,
+        active: nudge,
+        // Nothing to demote when nothing is active — which is the state
+        // parking leaves, and the state an operator is in when they reach
+        // for a question they put down. A guard that returned early here
+        // made the button do nothing at exactly the moment it is for.
+        history: [
+          ...(current.active === null ? [] : [current.active]),
+          ...current.history.filter((held) => held.id !== nudge.id),
+        ],
+      };
+    });
   };
 
   const onParked = () => {
@@ -142,10 +225,60 @@ export function OperatorPanel({
         disposition: 'parked',
       });
     }
+    retireActive('parked');
   };
 
+  /**
+   * A question the operator typed rather than one the gate surfaced.
+   *
+   * It becomes the active nudge, because that is what they meant by typing
+   * it: they intend to ask it, and every chip acts on the active nudge. So
+   * the escape hatch produces a question the rest of the panel already knows
+   * how to handle — parking files it into the next meeting's bank, asking it
+   * ticks a section — rather than needing a second machinery of its own.
+   *
+   * It said nothing before. The handler was a no-op and the field cleared on
+   * Enter, which is the gesture that means "sent" — so it signalled success
+   * for work that never happened.
+   *
+   * Deliberately no model call: typing already costs an order of magnitude
+   * more attention than a tap (FR-6.6's rationale), and a wait on top of
+   * that is what the chips exist to avoid.
+   */
+  const onTypedQuestion = (query: { text: string; submittedAt: number }) => {
+    setState((current) => ({
+      ...current,
+      active: {
+        id: `typed-${query.submittedAt}`,
+        stub: 'Your question',
+        question: query.text,
+        // The reason line says why this is on screen, and "you typed it" is
+        // as true an answer as "somebody said several".
+        triggerReason: 'typed by you',
+        createdAt: query.submittedAt,
+      },
+      history: current.active ? [current.active, ...current.history] : current.history,
+    }));
+  };
+
+  /**
+   * What the meter shows: the stream's slots, with the operator's ticks on
+   * top.
+   *
+   * These are two different facts and were one piece of state. The stream
+   * knows which sections *exist* — it derives them from the meeting's bank —
+   * and re-sends every one of them unfilled on each connect, because nothing
+   * server-side marks a section covered. Which are covered is the operator's,
+   * recorded when they tap `Asked it`.
+   *
+   * Read as `coverage ?? state.coverage`, the stream's copy won whenever
+   * there was one, so in a live meeting the tick was invisible and the meter
+   * sat at 0 of however many for the whole meeting. Merged, it moves and it
+   * survives the reconnection that used to wipe it.
+   */
+  // Whatever the service last said, unedited. The panel used to merge the
+  // operator's own taps in over the top; see `onAsked`.
   const liveCoverage = coverage ?? state.coverage;
-  const firstUnfilled = liveCoverage?.slots.find((slot) => !slot.filled) ?? null;
   // The live stream wins over the initial prop once a meeting is running:
   // the prop is what the panel was handed at mount, the stream is what the
   // service knows now. Without a meeting there is no stream, so the prop is
@@ -191,6 +324,7 @@ export function OperatorPanel({
           active={state.active}
           history={[...state.history]}
           operatorLanguage={state.operatorLanguage}
+          onSelect={onSelectNudge}
         />
       </section>
 
@@ -203,7 +337,22 @@ export function OperatorPanel({
           the visual order never come apart. */}
       <footer className="panel-dock">
         <div className="panel-chips">
-          {firstUnfilled ? <AskedItChip slot={firstUnfilled} onAsked={onAsked} /> : null}
+          {/* Gated on the nudge as well as the slot. Bound to the slot
+              alone it rendered permanently, whether anything had been
+              suggested or not — so it sat beside "No active nudge" saying
+              "Asked it" about nothing, and stayed after the question it
+              referred to had been dealt with. FR-6.7 settles which it is:
+              it suppresses re-suggestion, and there is nothing to
+              re-suggest without a question that was suggested. */}
+          {/* Gated on the live nudge alone. It used to be gated on there
+              being an unfilled section left as well, which made it remove
+              itself the moment the operator had marked them all — and with
+              no chip there was no way to record another disposition, so
+              nothing was ever marked "Asked" again. The chip is about the
+              nudge; the meter is the service's business. */}
+          {state.active ? (
+            <AskedItChip section={state.active.templateSection ?? null} onAsked={onAsked} />
+          ) : null}
           {state.active ? (
             <ParkItChip
               thread={{
@@ -231,7 +380,7 @@ export function OperatorPanel({
             keyboard reaches it in source order after the chips, which are the
             primary input, and because the foot of the dock is where a thumb
             expects a field it has decided to type in. */}
-        <EscapeHatchInput onSubmit={() => undefined} />
+        <EscapeHatchInput onSubmit={onTypedQuestion} />
       </footer>
     </main>
   );

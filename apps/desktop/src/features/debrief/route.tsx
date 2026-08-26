@@ -1,4 +1,5 @@
 import '../prep/screens.css';
+import './notices.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
 import { ScreenState } from '../../ui/ScreenState';
@@ -26,8 +27,13 @@ export interface DebriefScreenProps {
   readonly brief: Claim | null;
   /** Why the write-up is short, when it is. See `incompleteNotice`. */
   readonly incomplete?: string | null;
+  /** Whether the pipeline is working on it right now. */
+  readonly running?: boolean;
   /** Why there is nothing here at all, when there is nothing. See `emptyNotice`. */
   readonly empty?: string | null;
+  /** Produce the write-up for a meeting that is owed one. */
+  readonly onProduce?: () => Promise<void>;
+  readonly producing?: boolean;
 }
 
 function ClaimRow({ claim }: { claim: Claim }) {
@@ -55,6 +61,9 @@ export function DebriefScreen({
   brief,
   incomplete = null,
   empty = null,
+  running = false,
+  onProduce,
+  producing = false,
 }: DebriefScreenProps) {
   return (
     <main className="screen" aria-labelledby="debrief-title">
@@ -69,9 +78,27 @@ export function DebriefScreen({
         </p>
       </header>
 
+      {/* `alert`, not `status`. A run that stopped is not progress news: the
+          polite live region waits for a convenient moment and reads as body
+          text, and this sentence is the only account of why a meeting that
+          was recorded and transcribed has no documents. It also used to carry
+          `.degraded-note`, which is defined in the panel's stylesheet and not
+          in this screen's — so it had no styling at all. */}
       {incomplete ? (
-        <p className="degraded-note t-footnote" role="status">
+        <p className="notice notice--error t-footnote" role="alert">
           {incomplete}
+        </p>
+      ) : null}
+
+      {/* Progress, which genuinely is a status. Rendered above the empty
+          notice and in place of the button, so pressing it visibly changes
+          the screen — the request is answered immediately now and the work
+          goes on behind it, which is only an improvement if the screen says
+          so. */}
+      {running ? (
+        <p className="notice notice--working t-footnote" role="status">
+          This meeting is being written up now. It takes a few minutes; the
+          documents appear here as they are produced.
         </p>
       ) : null}
 
@@ -79,7 +106,26 @@ export function DebriefScreen({
           is simply still to come would otherwise raise an alert on every
           visit. The headings below stay, so it reads as "these are not filled
           in yet" rather than "these came back empty". */}
-      {empty ? <p className="t-footnote hint">{empty}</p> : null}
+      {empty && !running ? (
+        <div className="debrief-empty">
+          <p className="t-footnote hint">{empty}</p>
+          {onProduce ? (
+            /* The sentence above explains the absence; this is what does
+               something about it. The pipeline runs itself once, when the
+               second record-path engine finishes, and a run lost to a
+               restart left a meeting with a transcript, nothing to show and
+               nothing to press. */
+            <button
+              type="button"
+              className="btn"
+              disabled={producing}
+              onClick={() => void onProduce()}
+            >
+              {producing ? 'Writing it up…' : 'Write it up now'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {brief ? (
         <section aria-labelledby="brief-title">
@@ -150,6 +196,9 @@ export default function DebriefRoute() {
       brief={debrief.brief}
       incomplete={debrief.incomplete}
       empty={debrief.empty}
+      running={debrief.running}
+      onProduce={debrief.onProduce}
+      producing={debrief.producing}
     />
   );
 }

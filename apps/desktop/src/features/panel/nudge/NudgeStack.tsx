@@ -15,6 +15,21 @@ export interface NudgeStackProps {
    * the meeting language (FR-2.24). Defaults to English.
    */
   operatorLanguage?: string;
+  /**
+   * Bring a nudge that has receded back to the front.
+   *
+   * Every chip acts on the active nudge, and a history entry used to be two
+   * spans in a list item — not focusable, not pressable. So the moment a
+   * second nudge arrived the first became unactionable for good, and in a
+   * meeting where one can arrive every minute that is most of them.
+   *
+   * FR-6.3 constrains prominence, not reachability: one shown prominently at
+   * a time. This keeps exactly one; it lets the operator choose which.
+   *
+   * Optional because a fixed scene has nothing to press. Given none, the
+   * entries render as the plain list they were.
+   */
+  onSelect?: (nudge: Nudge) => void;
 }
 
 /* The floor is a contrast constraint, not a taste one.
@@ -55,8 +70,40 @@ export function historyOpacity(index: number): number {
  * FR-6.4), matching the design system's "no typing animation, no streaming"
  * rule for nudge entry.
  */
-export function NudgeStack({ active, history, operatorLanguage }: NudgeStackProps) {
+/** What the operator did, in a word. Only where they did something: a mark
+ *  on every row would make the marked ones invisible. */
+const DISPOSITION_MARK: Record<NonNullable<Nudge['disposition']>, string> = {
+  taken: 'Asked',
+  parked: 'Parked',
+};
+
+/**
+ * What the operator already did with this one, when they did anything.
+ *
+ * Rendered for every history row, interactive or not: the mark is what stops
+ * a question being asked twice, and a read-only stack is exactly where the
+ * operator has no other way to tell.
+ */
+function DispositionMark({ nudge }: { nudge: Nudge }) {
+  if (!nudge.disposition) return null;
+  return (
+    <span className={`nudge-stack__history-mark nudge-stack__history-mark--${nudge.disposition}`}>
+      {DISPOSITION_MARK[nudge.disposition]}
+    </span>
+  );
+}
+
+export function NudgeStack({
+  active,
+  history,
+  operatorLanguage,
+  onSelect,
+}: NudgeStackProps) {
   const chrome = getNudgeChromeCopy(operatorLanguage);
+  // Counted off the disposition rather than off the length: a question
+  // recedes because a newer one arrived, not because it was answered, so
+  // most of the history is usually still owed an answer.
+  const waiting = history.filter((nudge) => !nudge.disposition).length;
 
   return (
     <div className="nudge-stack">
@@ -71,18 +118,60 @@ export function NudgeStack({ active, history, operatorLanguage }: NudgeStackProp
       )}
 
       {history.length > 0 ? (
-        <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
+        <>
+          {/* Visible, not only an accessible name. Every entry is a button
+              and nothing said so: a sighted operator saw a dim column of
+              near-identical stubs under an empty state, with no heading and
+              no affordance, and reported that there was no way to reach
+              them. There was. A way that cannot be found is not a way. */}
+          <p className="nudge-stack__history-heading t-caption">
+            {onSelect ? chrome.historyHint : chrome.historyLabel}
+            {/* The backlog, beside the questions it is about. Silent at zero
+                rather than showing "0 still waiting": a count that is always
+                on screen is one nobody sees, and there is nothing to act on
+                when everything has been dealt with. */}
+            {waiting > 0 ? (
+              <span className="nudge-stack__history-waiting">
+                {chrome.historyWaiting.replace('{n}', String(waiting))}
+              </span>
+            ) : null}
+          </p>
+          <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
           {history.map((nudge, index) => (
             <li
               key={nudge.id}
               className="nudge-stack__history-item"
               style={{ opacity: historyOpacity(index) }}
             >
-              <span className="nudge-stack__history-stub">{nudge.stub}</span>
-              <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+              {onSelect === undefined ? (
+                <>
+                  <span className="nudge-stack__history-stub">
+                    {nudge.stub}
+                    <DispositionMark nudge={nudge} />
+                  </span>
+                  <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="nudge-stack__history-button"
+                  /* Named by what pressing it does, not by the stub alone:
+                     read out of context, "Second" says nothing about the
+                     consequence, and several stubs can be identical. */
+                  aria-label={`Bring back ${nudge.stub}`}
+                  onClick={() => onSelect(nudge)}
+                >
+                  <span className="nudge-stack__history-stub">
+                    {nudge.stub}
+                    <DispositionMark nudge={nudge} />
+                  </span>
+                  <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
+                </button>
+              )}
             </li>
           ))}
-        </ol>
+          </ol>
+        </>
       ) : null}
     </div>
   );

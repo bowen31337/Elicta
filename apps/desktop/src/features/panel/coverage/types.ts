@@ -35,6 +35,18 @@ export interface SessionStreamNudge {
   readonly question: string;
   readonly triggerReason: string;
   readonly createdAt: number;
+  /**
+   * What the operator already did with it, when they have. Carried on the
+   * wire so a reconnect — or a restart — does not present a question they
+   * have asked as one still waiting.
+   */
+  readonly disposition?: 'taken' | 'parked' | null;
+  /**
+   * The template section this nudge belongs to, or `null` when it belongs to
+   * none. Resolved by the service from the candidate the nudge was drawn
+   * from; a template fallback fires on a phrase and names nothing.
+   */
+  readonly templateSection?: string | null;
 }
 
 /**

@@ -358,3 +358,61 @@ def test_the_meeting_being_recorded_can_be_found_from_outside_the_browser(
     started_only = next(row for row in sessions if row["meeting_id"] == quiet)
     assert started_only["receiving_audio"] is False
     assert started_only["last_audio_at"] is None
+
+
+def test_the_stream_tells_the_panel_what_there_is_to_cover(client: TestClient) -> None:
+    """Half the panel's controls are gated on this frame, and it never came.
+
+    `Asked it` and `What am I missing?` are two of the four one-tap responses
+    FR-6.6 calls the primary input, and both render only when the panel has a
+    coverage summary. Nothing anywhere put one on the stream — the only frame
+    kind ever queued was `nudge` — so in a live meeting neither existed to be
+    tapped, and the meter beside them sat on its placeholder.
+
+    Observed on a real recording: five nudges on screen, two chips under
+    them, and the two that were missing were the ones that mark a section
+    covered and say what is left.
+    """
+
+    meeting_id = _meeting(client)
+
+    frames = _frames(client, meeting_id)
+
+    coverage = [payload for name, payload in frames if name == "coverage"]
+    assert coverage, f"no coverage frame; got {[name for name, _ in frames]}"
+    assert coverage[0]["slots"], "a summary with no slots leaves the chips unrendered"
+    for slot in coverage[0]["slots"]:
+        assert slot["id"] and slot["label"]
+        # Nothing is covered before anybody has said anything, and the panel
+        # fills these as the operator taps.
+        assert slot["filled"] is False
+
+
+def test_the_slots_are_the_sections_this_meeting_is_trying_to_fill(
+    client: TestClient,
+) -> None:
+    """Not an invented list. The bank is drafted section by section, and those
+    sections are what the meeting is for — a coverage meter counting anything
+    else would be measuring against something nobody is working from."""
+
+    meeting_id = _meeting(client)
+
+    frames = _frames(client, meeting_id)
+    bank = client.get(f"/api/meetings/{meeting_id}/bank").json()
+
+    labels = [slot["label"] for name, payload in frames if name == "coverage"
+              for slot in payload["slots"]]
+    sections = [section["template_section"] for section in bank.get("sections", [])]
+    if sections:
+        assert labels == sections
+
+
+def test_the_lane_frame_still_comes_first(client: TestClient) -> None:
+    """The panel has to know which mode it is in before it renders anything,
+    and adding a frame ahead of `lane` would break that quietly."""
+
+    meeting_id = _meeting(client)
+
+    names = [name for name, _ in _frames(client, meeting_id)]
+
+    assert names[0] == "lane"

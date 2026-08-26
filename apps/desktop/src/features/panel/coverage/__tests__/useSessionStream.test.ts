@@ -102,6 +102,8 @@ describe('useSessionStream', () => {
       question: 'What does fast mean?',
       triggerReason: 'vague adjective',
       createdAt: 1,
+      disposition: null,
+      templateSection: null,
     });
     expect(result.current.coverage).toBeNull();
   });

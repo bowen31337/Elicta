@@ -154,6 +154,60 @@ def test_where_a_question_came_from_survives_a_restart(database: str) -> None:
     assert reasoned.authority_match == []
 
 
+def test_a_meetings_nudges_survive_a_restart(database: str) -> None:
+    """The history the panel shows, and the ids `Park it` addresses.
+
+    Held in memory, a restart lost the whole meeting's worth: the operator
+    could reach none of the questions they had not dealt with, and every
+    thread id the panel still held answered 404 because the service no
+    longer knew which meeting had raised it.
+    """
+
+    from datetime import UTC, datetime
+
+    from app.modules.nudges.models import SurfacedNudge
+
+    moment = datetime(2026, 8, 26, 9, 0, tzinfo=UTC)
+
+    store = open_state_store(database)
+    nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
+    nudges["meeting-1"] = [
+        SurfacedNudge(
+            id="nudge-1",
+            meeting_id="meeting-1",
+            stub="“several” — how many?",
+            question="How many is several?",
+            trigger_reason='vague quantifier — "several"',
+            term="several",
+            category="unquantified_amount",
+            candidate_id="cand-9",
+            created_at=moment,
+        ),
+        SurfacedNudge(
+            id="nudge-2",
+            meeting_id="meeting-1",
+            stub="Your question",
+            question="What happens on a bad day?",
+            trigger_reason="typed by you",
+            created_at=moment,
+            disposition="parked",
+        ),
+    ]
+    store.close()
+
+    reloaded = open_state_store(database).surfaced_nudges(lambda row: SurfacedNudge(**row))
+    first, second = reloaded["meeting-1"]
+    # The order the meeting produced them in, not whatever order rows return.
+    assert [n.id for n in reloaded["meeting-1"]] == ["nudge-1", "nudge-2"]
+    assert first.term == "several"
+    assert first.candidate_id == "cand-9"
+    assert first.disposition is None, "unanswered is a state, not a default"
+    # A typed question has no trigger behind it, and that has to reload as
+    # absence rather than as something lost.
+    assert second.term is None
+    assert second.disposition == "parked"
+
+
 def test_replacing_a_list_does_not_leave_the_old_entries_behind(database: str) -> None:
     from app.modules.compiler.api.recompile import InheritedOpenQuestion
 

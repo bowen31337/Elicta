@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -89,6 +89,7 @@ from app.modules.debrief.pipeline.models import (
     BmadArtifactSet,
     CitationRow,
     DebriefCompletion,
+    DebriefOutcome,
     SessionBmadAnalystChain,
     SessionDiarization,
 )
@@ -177,7 +178,11 @@ from app.modules.engagement.vocabulary.schemas import (
     VocabularyTermCreateRequest,
     VocabularyTermResponse,
 )
-from app.modules.nudges.models import NudgeDispositionRequest, NudgeDispositionResponse
+from app.modules.nudges.models import (
+    NudgeDispositionRequest,
+    NudgeDispositionResponse,
+    SurfacedNudge,
+)
 from app.modules.nudges.router import build_nudge_disposition_router
 from app.modules.replay.api.errors import ReplayRunNotFoundError
 from app.modules.replay.api.models import (
@@ -426,6 +431,16 @@ class Backend:
     template_sections: list[Any] = field(default_factory=list)
     document_language: str = "en"
     debrief_runs: dict[str, Any] = field(default_factory=dict)
+    #: What became of each session's run, flat enough to store. `debrief_runs`
+    #: holds whole stage records and cannot be; this holds the four fields the
+    #: completion endpoint reads, and it is durable — a pipeline that stopped
+    #: for a nameable reason used to come back after a restart as "no write-up
+    #: has been produced yet", which is the one thing that was not true.
+    debrief_outcomes: dict[str, Any] = field(default_factory=dict)
+    #: Sessions whose pipeline is running right now. Deliberately *not*
+    #: durable: a restart kills the task, so a session left marked as running
+    #: would be a spinner nothing is ever going to stop.
+    debrief_in_flight: set[str] = field(default_factory=set)
     #: Which recording of each session the run in `debrief_runs` was for. The
     #: re-entry guard has to mean "this recording has already been written up",
     #: not "this meeting has": keyed by session alone, a meeting recorded a
@@ -495,7 +510,21 @@ class Backend:
     #: next thirty seconds; restoring one after a restart would put a stale
     #: question in front of a client. What outlives the meeting is the
     #: operator's disposition of it, which is recorded on its own route.
-    live_events: dict[str, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
+    #: Every nudge a meeting has surfaced, in order, keyed by meeting.
+    #:
+    #: Durable, and the single record: `live_events` and `raised_nudges` were
+    #: two parallel copies of this, one for the stream and one for resolving
+    #: a thread id, and both died with the process. A restart took the
+    #: operator's whole history — their only route back to a question they
+    #: had not dealt with — and left `Park it` answering 404 for every nudge
+    #: raised before it, to a panel that was still showing them.
+    #:
+    #: The objection this replaces was that a nudge is worth asking in the
+    #: next thirty seconds and restoring a stale one would put it in front of
+    #: a client. That argues against *promoting* one, which is the panel's
+    #: decision and is where it is made — restored nudges land in history —
+    #: rather than against remembering it.
+    surfaced_nudges: dict[str, list[Any]] = field(default_factory=dict)
     #: When each meeting last had a nudge surfaced (FR-5.8).
     last_nudge_at: dict[str, datetime] = field(default_factory=dict)
     #: Which bank candidates a meeting has already used, so the same question
@@ -800,8 +829,17 @@ def current_recording_transcripts(backend: Backend, session_id: str) -> list[Any
 
     transcripts = backend.record_path_transcripts.get(session_id, [])
     entry = backend.session_audio.get(session_id)
-    baseline = getattr(entry, "transcript_baseline", 0)
-    return list(transcripts[baseline:])
+    if entry is not None:
+        return list(transcripts[getattr(entry, "transcript_baseline", 0) :])
+
+    # No hold, so no recording is open and the baseline is gone with it —
+    # which after a restart is every meeting. Taking the whole list then made
+    # "the tail is the lot", and the pipeline drafts from the *first*
+    # completed transcript in what it is given: a meeting recorded four times
+    # was written up from the first attempt. The last engines' worth is the
+    # last recording, which is the one the operator kept.
+    engines = max(1, backend.record_path_engine_count)
+    return list(transcripts[-engines:])
 
 
 def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
@@ -816,6 +854,118 @@ def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
         return bytes(entry.buffer) if entry is not None else b""
 
     return read
+
+
+def _next_nudge_id(backend: Backend) -> str:
+    """The next id, never one already issued.
+
+    Counted off what is stored rather than off a field starting at zero. The
+    same trap the document and vocabulary ids were fixed for: after a restart
+    a counter beginning again hands the next nudge an id a stored one already
+    has, and `Park it` addresses a thread by id — so the operator would file
+    one question believing they had filed another.
+    """
+
+    highest = 0
+    for nudges in backend.surfaced_nudges.values():
+        for nudge in nudges:
+            _, _, ordinal = str(nudge.id).partition("-")
+            if ordinal.isdigit():
+                highest = max(highest, int(ordinal))
+    backend.next_nudge_id = max(backend.next_nudge_id, highest) + 1
+    return f"nudge-{backend.next_nudge_id}"
+
+
+def _raised_nudge(backend: Backend, thread_id: str) -> dict | None:
+    """The nudge a thread id names, in the shape the thread routes read.
+
+    Scanned rather than indexed: a meeting holds tens of these, the lookup
+    happens when an operator taps a chip, and an index would be a second
+    thing to keep in step with the record — which is what the two parallel
+    in-memory copies this replaced were.
+    """
+
+    for nudges in backend.surfaced_nudges.values():
+        for nudge in nudges:
+            if nudge.id == thread_id:
+                return {
+                    "meeting_id": nudge.meeting_id,
+                    "term": nudge.term,
+                    "category": nudge.category,
+                    "question": nudge.question,
+                }
+    return None
+
+
+def _coverage_slots_for_meeting(backend: Backend, meeting_id: str) -> list[dict]:
+    """The sections this meeting is trying to fill, as the panel's slots.
+
+    Taken from the meeting's own bank rather than from a list invented here:
+    the bank is drafted section by section, and those sections are what the
+    meeting is *for*. A meter counting anything else would be measuring
+    against something nobody is working from.
+
+    `filled` is derived from the meeting's own nudges: a section counts as
+    asked about once a nudge belonging to it was marked `taken`. That is a
+    weaker claim than "the client answered", and the panel labels it as the
+    weaker claim — but it is a claim something durable actually supports.
+
+    It used to be hardcoded `False`, with the truth delegated to the panel,
+    which kept it in `localStorage` and attributed each tap to whichever
+    section happened to be first unticked. Eight questions about "a lot" and
+    "some" ticked off Volumes, Performance and Integrations in list order,
+    and the meter read eight of eight on evidence of nothing. Deriving it
+    here means one answer, in one place, that a restart and a second screen
+    both see.
+    """
+
+    engagement_id = _engagement_of_meeting(backend, meeting_id)
+    if engagement_id is None:
+        return []
+
+    seen: list[str] = []
+    for candidate in backend.compiled_candidates.get(engagement_id, []):
+        section = getattr(candidate, "template_section", None)
+        if section and section not in seen:
+            seen.append(section)
+
+    # A meeting has sections to cover whether or not a bank has been drafted
+    # — the bank holds questions *about* those sections, and a meeting held
+    # before the compile finished still needs a meter. The compiler's own
+    # taxonomy is what it would have drafted against.
+    sections = seen or list(_agent_models.DEFAULT_TEMPLATE_SECTIONS)
+
+    # Only `taken`. Parking defers a thread — nothing about it was asked, so
+    # nothing about it is covered.
+    asked = {
+        section
+        for nudge in backend.surfaced_nudges.get(meeting_id, ())
+        if getattr(nudge.disposition, "value", nudge.disposition) == "taken"
+        for section in (_section_of_nudge(backend, engagement_id, nudge),)
+        if section is not None
+    }
+    return [
+        {"id": section, "label": section, "filled": section in asked} for section in sections
+    ]
+
+
+def _section_of_nudge(backend: Backend, engagement_id: str, nudge: Any) -> str | None:
+    """Which template section this nudge is about, if anything knows.
+
+    The candidate it was drawn from is what knows. A nudge with no candidate
+    behind it — the template fallback, which fires on the phrase alone — is
+    about no section, and says `None` rather than being attributed to one:
+    guessing here is the same fabrication as guessing a citation, in a
+    smaller place where nobody would look for it.
+    """
+
+    candidate_id = getattr(nudge, "candidate_id", None)
+    if not candidate_id:
+        return None
+    for candidate in backend.compiled_candidates.get(engagement_id, []):
+        if getattr(candidate, "id", None) == candidate_id:
+            return getattr(candidate, "template_section", None) or None
+    return None
 
 
 def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
@@ -1062,6 +1212,20 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # re-minted `doc-1` is a 500 on the screen rather than a silent overwrite.
     backend.next_document_id = store.highest_document_ordinal()
     backend.document_texts = store.document_texts()
+    # The panel's history, and what resolves a thread id. Held in memory a
+    # restart took both: the operator's route back to any question they had
+    # not dealt with, and `Park it`'s ability to say which meeting raised it.
+    # The debrief's output, and the product's. Four routes read this one
+    # record — the project brief, the decision log, the open questions and
+    # the follow-up email — and a plain dict took all four on every restart.
+    # Nothing rebuilds it: it is a model pipeline over the whole transcript.
+    backend.bmad_chains = store.bmad_chains(
+        lambda row: SessionBmadAnalystChain(**row)
+    )
+    # And why a run stopped, which is all there is to say when it produced no
+    # chain at all — the case where the operator most needs telling.
+    backend.debrief_outcomes = store.debrief_outcomes(lambda row: DebriefOutcome(**row))
+    backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
     )
@@ -1812,20 +1976,43 @@ def build_app(
         thing that ever looks at them on the operator's behalf.
         """
 
+        running = meeting_id in backend.debrief_in_flight
         run = backend.debrief_runs.get(meeting_id)
-        if run is None:
-            return None
+        if run is not None:
+            stopped_at = getattr(run, "stopped_at", None)
+            record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
+            reason = getattr(record, "error", None)
+            stages = list(getattr(run, "stages_completed", []))
+        else:
+            # Nothing in memory. Either this process did not run it — the
+            # usual case after a restart — or it is running right now and has
+            # not finished. The stored outcome answers the first; `running`
+            # answers the second, and between them there is no longer a state
+            # that reads as "nobody ever asked".
+            stored = backend.debrief_outcomes.get(meeting_id)
+            if stored is None:
+                return (
+                    DebriefCompletion(
+                        session_id=meeting_id,
+                        complete=False,
+                        stages_completed=[],
+                        running=True,
+                    )
+                    if running
+                    else None
+                )
+            stopped_at = stored.stopped_at
+            reason = stored.reason
+            stages = list(stored.stages_completed)
 
-        stopped_at = getattr(run, "stopped_at", None)
-        record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
-        reason = getattr(record, "error", None)
         return DebriefCompletion(
             session_id=meeting_id,
-            complete=stopped_at is None,
-            stages_completed=list(getattr(run, "stages_completed", [])),
+            complete=stopped_at is None and not running,
+            stages_completed=stages,
             stopped_at=stopped_at,
             reason=reason,
             cause=_stage_failure_cause(stopped_at, reason),
+            running=running,
         )
 
     app.include_router(build_debrief_completion_router(get_debrief_completion))
@@ -1862,6 +2049,71 @@ def build_app(
     async def get_bmad_chain(session_id: str) -> SessionBmadAnalystChain | None:
         return backend.bmad_chains.get(session_id)
 
+    # Its own router rather than a factory, because it needs the backend,
+    # the audio lifecycle and the engines together — the three things the
+    # automatic trigger is handed — and a factory taking all three would be
+    # a seam with exactly one caller.
+    debrief_run_router = APIRouter(prefix="/api/meetings", tags=["debrief-pipeline"])
+
+    @debrief_run_router.post("/{meeting_id}/debrief/run", status_code=202)
+    async def run_debrief_now(meeting_id: str) -> dict:
+        """Produce the write-up for a meeting that is owed one.
+
+        The pipeline otherwise runs itself once, when the second record-path
+        engine finishes, and there is no other way to reach it —
+        `/debrief/start` opens the conversation rather than producing the
+        artifacts. So a meeting whose run was lost, or whose engines were
+        misconfigured at the time, had transcripts, nothing to show, and
+        nothing to press.
+
+        Refused rather than run when nothing has been transcribed: the
+        pipeline over no transcript produces an empty write-up, which reads
+        as a meeting where nothing was said.
+        """
+
+        transcripts = current_recording_transcripts(backend, meeting_id)
+        if not any(t.status is TranscriptionStatus.COMPLETE for t in transcripts):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This meeting has no completed transcript to write up. "
+                    "Transcribe the recording first."
+                ),
+            )
+        if meeting_id in backend.debrief_in_flight:
+            # Already working on it. Answered rather than refused: pressing
+            # twice is what an operator does when nothing appears to happen,
+            # and the honest answer is that it is happening.
+            return {"meeting_id": meeting_id, "started": True, "running": True}
+
+        # Asked for explicitly, so the once-only guard is stepped past: it
+        # exists to stop the automatic trigger firing twice per engine, not
+        # to stop an operator asking again.
+        backend.debrief_runs.pop(meeting_id, None)
+
+        # Scheduled, not awaited. This endpoint declared 202 and then sat
+        # through the whole pipeline — diarize, clean, translate, classify and
+        # the analyst chain, every one a model call over a couple of hundred
+        # segments. The operator pressed the button and the request hung for
+        # minutes, which on screen is indistinguishable from a button that
+        # does nothing, and any client or proxy timeout in between made it
+        # into one.
+        backend.debrief_in_flight.add(meeting_id)
+
+        async def produce() -> None:
+            try:
+                await _run_debrief_when_record_path_completes(
+                    backend, meeting_id, audio_lifecycle, debrief_engines
+                )
+            finally:
+                # Cleared whatever happened. A session left marked as running
+                # is a spinner nothing will ever stop.
+                backend.debrief_in_flight.discard(meeting_id)
+
+        schedule(produce)
+        return {"meeting_id": meeting_id, "started": True, "running": True}
+
+    app.include_router(debrief_run_router)
     app.include_router(build_project_brief_router(get_bmad_chain))
     app.include_router(build_decision_log_router(get_bmad_chain))
     app.include_router(build_open_questions_router(get_bmad_chain))
@@ -2119,6 +2371,19 @@ def _include_operational_routers(
             recorded_at=datetime.now(UTC),
         )
         backend.nudge_dispositions.append(recorded)
+        # And onto the nudge itself. The append-only log answers "what did
+        # the operator do, and when"; the panel asks "has this one been
+        # dealt with", and was reading a field nothing wrote — so a history
+        # entry for a question already asked looked exactly like one still
+        # waiting.
+        held = backend.surfaced_nudges.get(meeting_id, [])
+        if any(nudge.id == nudge_id for nudge in held):
+            backend.surfaced_nudges[meeting_id] = [
+                nudge.model_copy(update={"disposition": request.disposition})
+                if nudge.id == nudge_id
+                else nudge
+                for nudge in held
+            ]
         return recorded
 
     app.include_router(build_nudge_disposition_router(record_disposition))
@@ -2230,6 +2495,22 @@ def _include_operational_routers(
         for language in _expected_languages_for_meeting(backend, meeting_id):
             yield "language", {"language": language, "expected": True}
 
+        # What there is to cover, before any nudge. Two of the four one-tap
+        # responses FR-6.6 calls the primary input — `Asked it` and `What am I
+        # missing?` — render only when the panel holds a summary, and nothing
+        # anywhere put one on the stream: the only frame kind ever queued was
+        # `nudge`. Observed on a real recording as five nudges with two chips
+        # under them, the two missing being the ones that mark a section
+        # covered and say what is left.
+        opening_coverage = {
+            "slots": _coverage_slots_for_meeting(backend, meeting_id),
+            # Not tracked yet. `null` is what the panel reads as "no clock",
+            # and inventing a number here would put a countdown on screen that
+            # nothing is counting.
+            "time_remaining_ms": None,
+        }
+        yield "coverage", opening_coverage
+
         for name, payload in backend.session_stream_events.get(meeting_id, []):
             yield name, payload
 
@@ -2244,8 +2525,52 @@ def _include_operational_routers(
         # blank. `yield None` is "still here, nothing to say", which reaches
         # the panel as a comment frame and costs it nothing.
         delivered = 0
+        # What the meter last showed this connection. Coverage used to be a
+        # single frame at stream open, which was adequate while nothing
+        # server-side ever moved it — the panel kept its own count. Now that
+        # the count is derived here, a frame sent only at open leaves the
+        # operator reading a stale meter for as long as the connection lasts,
+        # which mid-meeting is the whole time it matters.
+        last_coverage = opening_coverage
         while True:
-            produced = backend.live_events.get(meeting_id, ())
+            current_coverage = {
+                "slots": _coverage_slots_for_meeting(backend, meeting_id),
+                "time_remaining_ms": None,
+            }
+            if current_coverage != last_coverage:
+                last_coverage = current_coverage
+                yield "coverage", current_coverage
+                continue
+
+            produced = [
+                (
+                    "nudge",
+                    {
+                        "id": nudge.id,
+                        "stub": nudge.stub,
+                        "question": nudge.question,
+                        "trigger_reason": nudge.trigger_reason,
+                        "created_at": int(nudge.created_at.timestamp() * 1000),
+                        # So the panel can mark a question already dealt
+                        # with. Null until the operator answers, which is a
+                        # state rather than a default: a nudge nobody got to
+                        # is not one that was ignored.
+                        "disposition": getattr(
+                            nudge.disposition, "value", nudge.disposition
+                        ),
+                        # Which section a tap on this nudge attributes to.
+                        # `None` for a template fallback, which is about a
+                        # phrase rather than a section — the panel must then
+                        # move no part of the meter.
+                        "template_section": _section_of_nudge(
+                            backend,
+                            _engagement_of_meeting(backend, meeting_id) or "",
+                            nudge,
+                        ),
+                    },
+                )
+                for nudge in backend.surfaced_nudges.get(meeting_id, ())
+            ]
             if delivered < len(produced):
                 event = produced[delivered]
                 delivered += 1
@@ -2309,31 +2634,25 @@ def _include_operational_routers(
                 meeting_id=meeting_id, triggered=True, trigger_reason=hit.reason
             )
 
-        backend.next_nudge_id += 1
-        nudge_id = f"nudge-{backend.next_nudge_id}"
+        nudge_id = _next_nudge_id(backend)
         # Reassigned rather than appended in place: the collections here are
         # swapped for durable mappings that only persist through __setitem__,
         # and an in-place append against one of those writes to memory and
         # nowhere else.
-        backend.live_events[meeting_id] = [
-            *backend.live_events.get(meeting_id, []),
-            (
-                "nudge",
-                {
-                    "id": nudge_id,
-                    "stub": chosen.stub,
-                    "question": chosen.question,
-                    "trigger_reason": chosen.trigger_reason,
-                    "created_at": int(chosen.created_at.timestamp() * 1000),
-                },
+        backend.surfaced_nudges[meeting_id] = [
+            *backend.surfaced_nudges.get(meeting_id, []),
+            SurfacedNudge(
+                id=nudge_id,
+                meeting_id=meeting_id,
+                stub=chosen.stub,
+                question=chosen.question,
+                trigger_reason=chosen.trigger_reason,
+                created_at=chosen.created_at,
+                term=hit.term,
+                category=hit.category,
+                candidate_id=chosen.candidate_id,
             ),
         ]
-        backend.raised_nudges[nudge_id] = {
-            "meeting_id": meeting_id,
-            "term": hit.term,
-            "category": hit.category,
-            "question": chosen.question,
-        }
         backend.last_nudge_at[meeting_id] = now
         if chosen.candidate_id is not None:
             backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.candidate_id}
@@ -2357,7 +2676,7 @@ def _include_operational_routers(
         "not now" mean "next time" rather than "never".
         """
 
-        raised = backend.raised_nudges.get(thread_id)
+        raised = _raised_nudge(backend, thread_id)
         if raised is None:
             return None
 
@@ -2393,7 +2712,7 @@ def _include_operational_routers(
         model can be reached.
         """
 
-        raised = backend.raised_nudges.get(thread_id)
+        raised = _raised_nudge(backend, thread_id)
         if raised is None:
             return None
 
@@ -3441,8 +3760,31 @@ async def _run_debrief_when_record_path_completes(
     )
     backend.debrief_runs[session_id] = run
     backend.debrief_epochs[session_id] = epoch
+    _record_debrief_outcome(backend, session_id, run)
     _record_debrief_artifacts(backend, session_id, run)
     return run
+
+
+def _record_debrief_outcome(backend: Backend, session_id: str, run: Any) -> None:
+    """Store what became of the run, flat enough to outlive the process.
+
+    The run itself carries every stage's own record and cannot be stored;
+    these four fields are what anybody asks it for. Written for a run that
+    finished *and* one that stopped, because the second is the case with
+    nothing else to show for it — a pipeline that halted at diarization
+    produces no chain, and without this the screen came back after a restart
+    saying no write-up had been produced, which was not what happened.
+    """
+
+    stopped_at = getattr(run, "stopped_at", None)
+    record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
+    backend.debrief_outcomes[session_id] = DebriefOutcome(
+        session_id=session_id,
+        stopped_at=stopped_at,
+        reason=getattr(record, "error", None),
+        stages_completed=list(getattr(run, "stages_completed", [])),
+        recorded_at=datetime.now(UTC),
+    )
 
 
 def _record_debrief_artifacts(backend: Backend, session_id: str, run: Any) -> None:

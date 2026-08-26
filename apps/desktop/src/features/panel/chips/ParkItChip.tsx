@@ -45,6 +45,7 @@ export function ParkItChip({
       <button
         type="button"
         className="park-it-chip__button"
+        title="File this question for later. It carries into the next meeting's bank instead of being lost, and the nudge is put down."
         onClick={() => void tap()}
         disabled={pending}
         aria-busy={pending}

@@ -196,6 +196,87 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class DebriefOutcomeRow(Base):
+    """What became of one debrief run, whether or not it produced anything.
+
+    Separate from `bmad_chains`, which holds the artifacts: a run that stopped
+    at diarization produces no chain at all, and the reason it stopped is then
+    the only thing there is to tell the operator. Held in a plain dict, that
+    reason died with the process — so a pipeline that failed for a nameable
+    reason came back after a restart as "no write-up has been produced yet",
+    which is the one thing that was not true.
+
+    Nothing rebuilds it. Re-running the pipeline is minutes of model calls,
+    and would tell you what happens now rather than what happened then.
+    """
+
+    __tablename__ = "debrief_outcomes"
+
+    session_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    #: The first stage that did not complete, or null when the run finished.
+    stopped_at: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    #: That stage's own error, for whoever is debugging the pipeline. The
+    #: sentence the operator reads is composed in the panel, not here.
+    reason: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    stages_completed: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
+class BmadChainRow(Base):
+    """One debrief run over a session, and the artifacts it produced.
+
+    The product's output rather than a cache of it: the project brief, the
+    decision log, the open questions and the follow-up email are all read off
+    this one record, and nothing rebuilds it short of running a model
+    pipeline over the whole transcript again.
+    """
+
+    __tablename__ = "bmad_chains"
+
+    session_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    engine: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    # Null on a failed run, which `status` and `error` are what make visible.
+    artifacts: Mapped[dict | None] = mapped_column(sa.JSON(), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    error: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+
+class SurfacedNudgeRow(Base):
+    """A nudge the live panel surfaced in a meeting (FR-6.3, FR-6.8).
+
+    Not `nudges`, which is the analysis pipeline's record and cannot hold one
+    of these: its id is a generated UUID where the live path issues
+    `nudge-1`, its `candidate_id` is NOT NULL where a templated nudge has
+    none, and its `trigger_event_id` is a NOT NULL foreign key into a chain
+    the live path never writes.
+    """
+
+    __tablename__ = "surfaced_nudges"
+
+    id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    meeting_id: Mapped[str] = mapped_column(
+        sa.String(64),
+        sa.ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    stub: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    question: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    term: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    category: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    candidate_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    disposition: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    # The order the meeting produced them in, so the stream replays what the
+    # panel saw rather than whatever order rows return.
+    ordinal: Mapped[int] = mapped_column(
+        sa.Integer(), nullable=False, default=0, server_default="0"
+    )
+
+
 metadata = Base.metadata
 
 

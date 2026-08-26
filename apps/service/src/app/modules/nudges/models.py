@@ -47,3 +47,33 @@ class NudgeDispositionResponse(BaseModel):
     nudge_id: str
     disposition: OperatorNudgeDisposition
     recorded_at: datetime
+
+
+class SurfacedNudge(BaseModel):
+    """One nudge a meeting put in front of the operator, and its fate.
+
+    Durable because the panel's history is the operator's only route back to
+    a question they have not dealt with, and because `Park it` and `Go
+    deeper` address a thread by id alone — held in memory, a restart left the
+    service unable to say which meeting had raised any of them.
+
+    `term` and `category` are nullable for the question an operator typed:
+    the escape hatch produces a real nudge with no trigger behind it.
+    `candidate_id` is nullable for a templated one, where the bank had
+    nothing to offer. `disposition` is null until they answer, which is a
+    third state rather than a default — a nudge nobody got to is not one that
+    was ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    meeting_id: str
+    stub: str
+    question: str
+    trigger_reason: str
+    created_at: datetime
+    term: str | None = None
+    category: str | None = None
+    candidate_id: str | None = None
+    disposition: OperatorNudgeDisposition | None = None

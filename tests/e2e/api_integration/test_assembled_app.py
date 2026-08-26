@@ -63,6 +63,7 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/debrief/completion", "get"),
     ("/api/meetings/{meeting_id}/debrief/message", "post"),
     ("/api/meetings/{meeting_id}/debrief/start", "post"),
+    ("/api/meetings/{meeting_id}/debrief/run", "post"),
     ("/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition", "post"),
     ("/api/meetings/{meeting_id}/record/divergences", "get"),
     ("/api/meetings/{meeting_id}/record/transcribe", "post"),
