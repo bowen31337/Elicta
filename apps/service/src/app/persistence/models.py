@@ -196,6 +196,32 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class DebriefOutcomeRow(Base):
+    """What became of one debrief run, whether or not it produced anything.
+
+    Separate from `bmad_chains`, which holds the artifacts: a run that stopped
+    at diarization produces no chain at all, and the reason it stopped is then
+    the only thing there is to tell the operator. Held in a plain dict, that
+    reason died with the process — so a pipeline that failed for a nameable
+    reason came back after a restart as "no write-up has been produced yet",
+    which is the one thing that was not true.
+
+    Nothing rebuilds it. Re-running the pipeline is minutes of model calls,
+    and would tell you what happens now rather than what happened then.
+    """
+
+    __tablename__ = "debrief_outcomes"
+
+    session_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    #: The first stage that did not complete, or null when the run finished.
+    stopped_at: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    #: That stage's own error, for whoever is debugging the pipeline. The
+    #: sentence the operator reads is composed in the panel, not here.
+    reason: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    stages_completed: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
 class BmadChainRow(Base):
     """One debrief run over a session, and the artifacts it produced.
 

@@ -584,6 +584,23 @@ class SessionCitationTable(BaseModel):
     completed_at: datetime
     error: str | None = None
 
+class DebriefOutcome(BaseModel):
+    """What became of one session's debrief run, in a shape that stores.
+
+    `DebriefPipelineRun` carries every stage's own record and is not
+    serialisable in any useful way; this is the four fields anyone asks it
+    for. Kept as its own record rather than derived from `bmad_chains`
+    because a run that stopped before the analyst chain produces no chain,
+    and that is precisely the run whose outcome has to survive.
+    """
+
+    session_id: str
+    stopped_at: str | None = None
+    reason: str | None = None
+    stages_completed: list[str] = Field(default_factory=list)
+    recorded_at: datetime
+
+
 class DebriefCompletion(BaseModel):
     """How far the write-up got, and what stopped it (PRD NFR-4.1).
 
@@ -608,3 +625,11 @@ class DebriefCompletion(BaseModel):
     #: `not_configured`, `failed`, or `unknown` — never the raw prose. See
     #: `_completion_cause`. `reason` stays for whoever is diagnosing it.
     cause: str | None = None
+    #: Whether the pipeline is working on it right now.
+    #:
+    #: A third state, and the screen has no way to be honest without it: a run
+    #: that has been asked for is not one that finished, and not one that was
+    #: never asked for either. The request used to hold the caller for the
+    #: whole pipeline instead — minutes of model calls — so "under way" was
+    #: something the operator inferred from a button that never came back.
+    running: bool = False

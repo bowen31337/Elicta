@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   meetingIdleHint,
@@ -53,6 +53,8 @@ interface WireCompletion {
   /** Written for whoever is debugging the pipeline. Never rendered. */
   readonly reason: string | null;
   readonly cause: 'not_configured' | 'failed' | 'unknown' | null;
+  /** Whether the pipeline is working on it right now. */
+  readonly running?: boolean;
 }
 
 /**
@@ -161,6 +163,23 @@ export function emptyNotice(
   return completion?.complete === true ? FINISHED_EMPTY : null;
 }
 
+/**
+ * What the service said when it refused to start a run.
+ *
+ * FastAPI puts it in `detail`. Falling back to a sentence of our own rather
+ * than to the status code: "409" on screen is not something anybody can act
+ * on, and a refusal with no reason reads as a broken button.
+ */
+async function refusalOf(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === 'string' && body.detail.length > 0) return body.detail;
+  } catch {
+    /* not JSON, or an empty body */
+  }
+  return 'The write-up could not be started. Nothing has been changed.';
+}
+
 /** A resource that has answered, either with a body or with a 404. */
 function settledStatus(status: ResourceStatus): boolean {
   return status === 'ready' || status === 'missing';
@@ -182,6 +201,8 @@ export function useDebrief(): DebriefData {
     id === null ? null : apiUrl(`/api/sessions/${encodeURIComponent(id)}/${suffix}`);
 
   const [producing, setProducing] = useState(false);
+  /** What the service said when it would not start a run. */
+  const [refused, setRefused] = useState<string | null>(null);
   const questions = useResource<readonly WireOpenQuestion[]>(scoped('open-questions'));
   const decisions = useResource<readonly WireDecision[]>(scoped('decision-log'));
   const brief = useResource<WireBrief>(scoped('project-brief'));
@@ -191,7 +212,31 @@ export function useDebrief(): DebriefData {
     id === null ? null : apiUrl(`/api/meetings/${encodeURIComponent(id)}/debrief/completion`),
   );
 
-  const incomplete = incompleteNotice(completion.data);
+  const running = completion.data?.running === true;
+  // A stopped run explains itself; a run still going has not earned that
+  // sentence yet, and showing both at once says two contradictory things.
+  const incomplete = running ? null : incompleteNotice(completion.data);
+
+  /* Asked again while it is working.
+   *
+   * The run endpoint answers immediately now and the pipeline goes on behind
+   * it, which is only an improvement if something notices it finishing.
+   * Nothing did: `produce` re-read once, straight after the POST, when the
+   * pipeline had not started a stage — so the screen showed the same nothing
+   * it had before, which is what "write it up now does not work" looked like.
+   *
+   * Every fifteen seconds, and only while running. The pipeline is minutes of
+   * model calls, so this is a handful of requests, not a poll loop. */
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = window.setInterval(() => {
+      completion.reload();
+      brief.reload();
+      decisions.reload();
+      questions.reload();
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [running, completion, brief, decisions, questions]);
 
   const openQuestions = useMemo(
     (): readonly Claim[] =>
@@ -236,16 +281,21 @@ export function useDebrief(): DebriefData {
     if (id === null) return;
     setProducing(true);
     try {
-      await fetch(apiUrl(`/api/meetings/${encodeURIComponent(id)}/debrief/run`), {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-      });
-      // Re-read rather than assume: the pipeline is several model stages and
-      // what it produced is the service's to report, not this hook's to
-      // predict.
-      brief.reload();
-      decisions.reload();
-      questions.reload();
+      const response = await fetch(
+        apiUrl(`/api/meetings/${encodeURIComponent(id)}/debrief/run`),
+        { method: 'POST', headers: { Accept: 'application/json' } },
+      );
+      if (!response.ok) {
+        // A refusal is the service saying why, and it is the one thing the
+        // operator can act on — a meeting with nothing transcribed answers
+        // 409 here, and swallowing it left the button looking broken.
+        setRefused(await refusalOf(response));
+        return;
+      }
+      setRefused(null);
+      // Re-read rather than assume. The run is under way rather than done, so
+      // what this picks up is the `running` flag; the effect above takes it
+      // from there.
       completion.reload();
     } finally {
       setProducing(false);
@@ -254,7 +304,10 @@ export function useDebrief(): DebriefData {
 
   return {
     meetingTitle: meetingTitle(engagement.engagement, meeting.meeting),
-    incomplete,
+    // A refusal outranks everything: it is the answer to the thing the
+    // operator just did.
+    incomplete: refused ?? incomplete,
+    running,
     onProduce: produce,
     producing,
     empty: emptyNotice(

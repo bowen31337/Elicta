@@ -1152,6 +1152,49 @@ class StateStore:
             lock=self._lock,
         )
 
+    def debrief_outcomes(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """What became of each session's debrief run.
+
+        One value per session, because a session has one outcome: asking for
+        the write-up again replaces what is known about it.
+        """
+
+        table = metadata.tables["debrief_outcomes"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.session_id] = decode(
+                {
+                    "session_id": row.session_id,
+                    "stopped_at": row.stopped_at,
+                    "reason": row.reason,
+                    "stages_completed": row.stages_completed or [],
+                    "recorded_at": row.recorded_at,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "session_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "stopped_at": value.stopped_at,
+                    "reason": value.reason,
+                    "stages_completed": list(value.stages_completed or []),
+                    "recorded_at": value.recorded_at,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
     def bmad_chains(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
         """One debrief run per session — the brief and its three siblings.
 

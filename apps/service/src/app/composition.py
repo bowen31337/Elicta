@@ -89,6 +89,7 @@ from app.modules.debrief.pipeline.models import (
     BmadArtifactSet,
     CitationRow,
     DebriefCompletion,
+    DebriefOutcome,
     SessionBmadAnalystChain,
     SessionDiarization,
 )
@@ -430,6 +431,16 @@ class Backend:
     template_sections: list[Any] = field(default_factory=list)
     document_language: str = "en"
     debrief_runs: dict[str, Any] = field(default_factory=dict)
+    #: What became of each session's run, flat enough to store. `debrief_runs`
+    #: holds whole stage records and cannot be; this holds the four fields the
+    #: completion endpoint reads, and it is durable — a pipeline that stopped
+    #: for a nameable reason used to come back after a restart as "no write-up
+    #: has been produced yet", which is the one thing that was not true.
+    debrief_outcomes: dict[str, Any] = field(default_factory=dict)
+    #: Sessions whose pipeline is running right now. Deliberately *not*
+    #: durable: a restart kills the task, so a session left marked as running
+    #: would be a spinner nothing is ever going to stop.
+    debrief_in_flight: set[str] = field(default_factory=set)
     #: Which recording of each session the run in `debrief_runs` was for. The
     #: re-entry guard has to mean "this recording has already been written up",
     #: not "this meeting has": keyed by session alone, a meeting recorded a
@@ -818,8 +829,17 @@ def current_recording_transcripts(backend: Backend, session_id: str) -> list[Any
 
     transcripts = backend.record_path_transcripts.get(session_id, [])
     entry = backend.session_audio.get(session_id)
-    baseline = getattr(entry, "transcript_baseline", 0)
-    return list(transcripts[baseline:])
+    if entry is not None:
+        return list(transcripts[getattr(entry, "transcript_baseline", 0) :])
+
+    # No hold, so no recording is open and the baseline is gone with it —
+    # which after a restart is every meeting. Taking the whole list then made
+    # "the tail is the lot", and the pipeline drafts from the *first*
+    # completed transcript in what it is given: a meeting recorded four times
+    # was written up from the first attempt. The last engines' worth is the
+    # last recording, which is the one the operator kept.
+    engines = max(1, backend.record_path_engine_count)
+    return list(transcripts[-engines:])
 
 
 def read_session_audio(backend: Backend) -> Callable[[str], bytes]:
@@ -1202,6 +1222,9 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.bmad_chains = store.bmad_chains(
         lambda row: SessionBmadAnalystChain(**row)
     )
+    # And why a run stopped, which is all there is to say when it produced no
+    # chain at all — the case where the operator most needs telling.
+    backend.debrief_outcomes = store.debrief_outcomes(lambda row: DebriefOutcome(**row))
     backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
@@ -1953,20 +1976,43 @@ def build_app(
         thing that ever looks at them on the operator's behalf.
         """
 
+        running = meeting_id in backend.debrief_in_flight
         run = backend.debrief_runs.get(meeting_id)
-        if run is None:
-            return None
+        if run is not None:
+            stopped_at = getattr(run, "stopped_at", None)
+            record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
+            reason = getattr(record, "error", None)
+            stages = list(getattr(run, "stages_completed", []))
+        else:
+            # Nothing in memory. Either this process did not run it — the
+            # usual case after a restart — or it is running right now and has
+            # not finished. The stored outcome answers the first; `running`
+            # answers the second, and between them there is no longer a state
+            # that reads as "nobody ever asked".
+            stored = backend.debrief_outcomes.get(meeting_id)
+            if stored is None:
+                return (
+                    DebriefCompletion(
+                        session_id=meeting_id,
+                        complete=False,
+                        stages_completed=[],
+                        running=True,
+                    )
+                    if running
+                    else None
+                )
+            stopped_at = stored.stopped_at
+            reason = stored.reason
+            stages = list(stored.stages_completed)
 
-        stopped_at = getattr(run, "stopped_at", None)
-        record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
-        reason = getattr(record, "error", None)
         return DebriefCompletion(
             session_id=meeting_id,
-            complete=stopped_at is None,
-            stages_completed=list(getattr(run, "stages_completed", [])),
+            complete=stopped_at is None and not running,
+            stages_completed=stages,
             stopped_at=stopped_at,
             reason=reason,
             cause=_stage_failure_cause(stopped_at, reason),
+            running=running,
         )
 
     app.include_router(build_debrief_completion_router(get_debrief_completion))
@@ -2034,14 +2080,38 @@ def build_app(
                     "Transcribe the recording first."
                 ),
             )
+        if meeting_id in backend.debrief_in_flight:
+            # Already working on it. Answered rather than refused: pressing
+            # twice is what an operator does when nothing appears to happen,
+            # and the honest answer is that it is happening.
+            return {"meeting_id": meeting_id, "started": True, "running": True}
+
         # Asked for explicitly, so the once-only guard is stepped past: it
         # exists to stop the automatic trigger firing twice per engine, not
         # to stop an operator asking again.
         backend.debrief_runs.pop(meeting_id, None)
-        await _run_debrief_when_record_path_completes(
-            backend, meeting_id, audio_lifecycle, debrief_engines
-        )
-        return {"meeting_id": meeting_id, "started": True}
+
+        # Scheduled, not awaited. This endpoint declared 202 and then sat
+        # through the whole pipeline — diarize, clean, translate, classify and
+        # the analyst chain, every one a model call over a couple of hundred
+        # segments. The operator pressed the button and the request hung for
+        # minutes, which on screen is indistinguishable from a button that
+        # does nothing, and any client or proxy timeout in between made it
+        # into one.
+        backend.debrief_in_flight.add(meeting_id)
+
+        async def produce() -> None:
+            try:
+                await _run_debrief_when_record_path_completes(
+                    backend, meeting_id, audio_lifecycle, debrief_engines
+                )
+            finally:
+                # Cleared whatever happened. A session left marked as running
+                # is a spinner nothing will ever stop.
+                backend.debrief_in_flight.discard(meeting_id)
+
+        schedule(produce)
+        return {"meeting_id": meeting_id, "started": True, "running": True}
 
     app.include_router(debrief_run_router)
     app.include_router(build_project_brief_router(get_bmad_chain))
@@ -3690,8 +3760,31 @@ async def _run_debrief_when_record_path_completes(
     )
     backend.debrief_runs[session_id] = run
     backend.debrief_epochs[session_id] = epoch
+    _record_debrief_outcome(backend, session_id, run)
     _record_debrief_artifacts(backend, session_id, run)
     return run
+
+
+def _record_debrief_outcome(backend: Backend, session_id: str, run: Any) -> None:
+    """Store what became of the run, flat enough to outlive the process.
+
+    The run itself carries every stage's own record and cannot be stored;
+    these four fields are what anybody asks it for. Written for a run that
+    finished *and* one that stopped, because the second is the case with
+    nothing else to show for it — a pipeline that halted at diarization
+    produces no chain, and without this the screen came back after a restart
+    saying no write-up had been produced, which was not what happened.
+    """
+
+    stopped_at = getattr(run, "stopped_at", None)
+    record = getattr(run, _DEBRIEF_STAGE_RECORD.get(stopped_at or "", ""), None)
+    backend.debrief_outcomes[session_id] = DebriefOutcome(
+        session_id=session_id,
+        stopped_at=stopped_at,
+        reason=getattr(record, "error", None),
+        stages_completed=list(getattr(run, "stages_completed", [])),
+        recorded_at=datetime.now(UTC),
+    )
 
 
 def _record_debrief_artifacts(backend: Backend, session_id: str, run: Any) -> None:

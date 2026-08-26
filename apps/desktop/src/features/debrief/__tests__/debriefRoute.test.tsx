@@ -211,8 +211,8 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/translating/i);
-    expect(screen.getByRole('status')).toHaveTextContent(/did not get through/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/translating/i);
+    expect(screen.getByRole('alert')).toHaveTextContent(/did not get through/i);
   });
 
   it('never puts the pipeline\'s own words on the operator\'s screen', async () => {
@@ -235,7 +235,7 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice).toHaveTextContent(/telling the voices apart/i);
     expect(notice).toHaveTextContent(/not set up/i);
     expect(notice.textContent).not.toMatch(/anthropic_debrief_engines|ADR-|§/);
@@ -252,7 +252,7 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice).toHaveTextContent(/translating/i);
     expect(notice).not.toHaveTextContent(/not set up/i);
   });
@@ -272,6 +272,7 @@ describe('a debrief that could not finish', () => {
     render(<DebriefRoute />);
 
     await screen.findByText('A depot scheduling rebuild.');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
@@ -282,6 +283,7 @@ describe('a debrief that could not finish', () => {
     render(<DebriefRoute />);
 
     await screen.findByText('Open questions');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
@@ -366,7 +368,7 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    await screen.findByRole('status');
+    await screen.findByRole('alert');
     expect(screen.queryByText(/no write-up has been produced/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/finished without producing/i)).not.toBeInTheDocument();
   });
@@ -400,7 +402,7 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/some new stage/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/some new stage/i);
   });
 
   it('names the stage even when the reason is missing', async () => {
@@ -416,6 +418,6 @@ describe('a debrief that could not finish', () => {
     });
     render(<DebriefRoute />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/translating/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/translating/i);
   });
 });
