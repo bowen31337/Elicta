@@ -61,6 +61,24 @@ describe('the debrief screen when something went wrong', () => {
 });
 
 describe('what the alert says about the kind of failure', () => {
+  it('says a spent allowance is a spent allowance, with the reset', () => {
+    /* Observed on a real write-up: the credential had spent its seven-day
+       Claude allowance, and the operator was told "The call it needed did not
+       get through." Nothing failed to get through, there is nothing to retry
+       until a stated time, and the remedy is nowhere near a network. */
+    const said = incompleteNotice({
+      complete: false,
+      stopped_at: 'cleaning',
+      reason:
+        "the Claude Agent SDK [rate_limited]: You've hit your weekly limit \u00b7 resets Aug 28 at 5pm",
+      cause: 'rate_limited',
+    });
+
+    expect(said).toMatch(/tidying up the transcript/i);
+    expect(said).not.toMatch(/did not get through/i);
+    expect(said).toMatch(/allowance|limit/i);
+  });
+
   it('never reports a network problem for a run that made no call', () => {
     /* A real meeting stored `no audio held for meeting-3: nothing to
        transcribe` and the screen said "The call it needed did not get
