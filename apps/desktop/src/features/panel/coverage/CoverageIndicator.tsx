@@ -49,11 +49,15 @@ export function CoverageIndicator({ summary }: CoverageIndicatorProps) {
       <span className="coverage-indicator__count">
         {filled} of {total}
       </span>
-      {/* The word is the whole fix. Two bare numbers and a row of dashes
-          said the same thing twice and neither said what it counted — and
-          when it did acquire a word, "covered" was a claim about the client
-          that nothing had measured. */}
-      <span className="coverage-indicator__unit">asked about</span>
+      {/* The noun is the whole fix, and it took three goes. Two bare numbers
+          and a row of dashes said the same thing twice and neither said what
+          they counted. "covered" was then a claim about the client that
+          nothing had measured. And "asked about" still did not say *what*
+          had been asked about — sitting directly above the nudge stack, on a
+          meeting whose bank happened to have eight sections at the moment
+          there were eight nudges, it read as a count of nudges and stayed
+          read that way when the nudges went to fifteen. */}
+      <span className="coverage-indicator__unit">sections asked about</span>
       {summary.timeRemainingMs !== null ? (
         <span className="coverage-indicator__time">
           {formatTimeRemaining(summary.timeRemainingMs)} left

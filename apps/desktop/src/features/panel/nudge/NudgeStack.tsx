@@ -100,6 +100,10 @@ export function NudgeStack({
   onSelect,
 }: NudgeStackProps) {
   const chrome = getNudgeChromeCopy(operatorLanguage);
+  // Counted off the disposition rather than off the length: a question
+  // recedes because a newer one arrived, not because it was answered, so
+  // most of the history is usually still owed an answer.
+  const waiting = history.filter((nudge) => !nudge.disposition).length;
 
   return (
     <div className="nudge-stack">
@@ -122,6 +126,15 @@ export function NudgeStack({
               them. There was. A way that cannot be found is not a way. */}
           <p className="nudge-stack__history-heading t-caption">
             {onSelect ? chrome.historyHint : chrome.historyLabel}
+            {/* The backlog, beside the questions it is about. Silent at zero
+                rather than showing "0 still waiting": a count that is always
+                on screen is one nobody sees, and there is nothing to act on
+                when everything has been dealt with. */}
+            {waiting > 0 ? (
+              <span className="nudge-stack__history-waiting">
+                {chrome.historyWaiting.replace('{n}', String(waiting))}
+              </span>
+            ) : null}
           </p>
           <ol className="nudge-stack__history" aria-label={chrome.historyLabel}>
           {history.map((nudge, index) => (

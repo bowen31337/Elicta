@@ -7,6 +7,7 @@ describe('getNudgeChromeCopy', () => {
       emptyState: 'Listening — nothing worth asking yet',
       historyLabel: 'Prior nudges',
       historyHint: 'Earlier — tap one to bring it back',
+      historyWaiting: '{n} still waiting',
     });
   });
 
@@ -15,6 +16,7 @@ describe('getNudgeChromeCopy', () => {
       emptyState: '正在聆听，暂无提示',
       historyLabel: '历史提示',
       historyHint: '之前的提示 — 点按可重新显示',
+      historyWaiting: '{n} 条待处理',
     });
   });
 

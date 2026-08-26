@@ -24,6 +24,17 @@ export interface NudgeChromeCopy {
    * a column of dimmed stubs as anything an operator could act on.
    */
   readonly historyHint: string;
+  /**
+   * How many earlier questions the operator has not dealt with, rendered
+   * with the count substituted for `{n}`.
+   *
+   * This is the number they were reading the coverage meter for. The meter
+   * counts template sections; it sits above the nudge stack and on the first
+   * meeting it was seen on the bank happened to have as many sections as
+   * there were nudges, so it was read as a count of questions and stayed
+   * read that way. The count of questions now exists, beside the questions.
+   */
+  readonly historyWaiting: string;
 }
 
 const EN: NudgeChromeCopy = {
@@ -35,6 +46,7 @@ const EN: NudgeChromeCopy = {
   emptyState: 'Listening — nothing worth asking yet',
   historyLabel: 'Prior nudges',
   historyHint: 'Earlier — tap one to bring it back',
+  historyWaiting: '{n} still waiting',
 };
 
 /**
@@ -48,6 +60,7 @@ const NUDGE_CHROME_COPY: Record<string, NudgeChromeCopy> = {
     emptyState: '正在聆听，暂无提示',
     historyLabel: '历史提示',
     historyHint: '之前的提示 — 点按可重新显示',
+    historyWaiting: '{n} 条待处理',
   },
 };
 

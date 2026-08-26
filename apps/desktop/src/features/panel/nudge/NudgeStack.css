@@ -148,3 +148,17 @@
 .nudge-stack__history-mark--parked {
   color: var(--orange-ink);
 }
+
+/* The backlog count, on the same line as the heading it qualifies.
+ *
+ * Pushed to the end rather than following the text: the heading is an
+ * instruction and this is a quantity, and reading them as one sentence
+ * ("Earlier — tap one to bring it back 12 still waiting") is worse than
+ * either alone. `--orange-ink` because it is work outstanding, matching the
+ * `Parked` mark; text ink, not the vivid fill, and solved against glass.
+ */
+.nudge-stack__history-waiting {
+  float: inline-end;
+  font-weight: var(--weight-semibold);
+  color: var(--orange-ink);
+}
