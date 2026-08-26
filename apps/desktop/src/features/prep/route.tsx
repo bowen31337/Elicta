@@ -166,6 +166,15 @@ export function PrepScreen({
    * button that opened it and tells the operator nothing they did not have.
    */
   const [removingMeeting, setRemovingMeeting] = useState<PreparedMeeting | null>(null);
+  /**
+   * Whether the recompile question is open.
+   *
+   * `Compile` used to live only in the branch that renders when there is no
+   * bank, so an engagement could be compiled exactly once — and the moment
+   * that matters most was the unreachable one: documents get added, the bank
+   * goes stale, and nothing offered to draft it again.
+   */
+  const [confirmingRecompile, setConfirmingRecompile] = useState(false);
   const [purposeDraft, setPurposeDraft] = useState('');
   /**
    * Which bank sections are open, or `null` for "the operator has not said".
@@ -333,6 +342,18 @@ export function PrepScreen({
        a sticky rail has to be free to travel. Nested inside the column it
        could only travel within its own row, which is no distance at all. */
     <div className="screen-layout">
+      <ConfirmDialog
+        open={confirmingRecompile}
+        title="Draft this bank again?"
+        body="It reads the documents as they are now and replaces every question in the bank — including the pruning you have done, which is stored on the questions being replaced. It takes minutes, and it costs a model pass."
+        confirmLabel="Recompile"
+        cancelLabel="Keep this bank"
+        onCancel={() => setConfirmingRecompile(false)}
+        onConfirm={() => {
+          setConfirmingRecompile(false);
+          void write.run(() => actions.compile());
+        }}
+      />
       <ConfirmDialog
         open={removingMeeting !== null}
         title={`Remove ${removingMeeting === null ? '' : meetingName(removingMeeting)}?`}
@@ -589,6 +610,28 @@ export function PrepScreen({
         ) : (
           <>
             <div className="group">
+              <div className="row">
+                <div className="row-main">
+                  <span className="t-body">
+                    {compileRunning ? 'Compiling…' : 'Draft this bank again'}
+                  </span>
+                  {/* Stated here rather than in the dialog alone: an operator
+                      deciding whether to bother needs to know it is not free
+                      before they press anything. */}
+                  <span className="t-footnote">
+                    Reads the documents as they are now and replaces the bank.
+                    Minutes, not seconds.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={write.busy || compileRunning}
+                  onClick={() => setConfirmingRecompile(true)}
+                >
+                  Recompile
+                </button>
+              </div>
               <div className="row row--form">
                 <div className="row-main">
                   <label className="t-footnote" htmlFor="bank-filter">

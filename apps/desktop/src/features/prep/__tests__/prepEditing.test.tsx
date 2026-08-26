@@ -225,6 +225,63 @@ describe('reordering the question bank', () => {
   });
 });
 
+describe('compiling a bank that already exists', () => {
+  /**
+   * Reported: "there is no recompile button in UI".
+   *
+   * `Compile` lived in the branch that renders when there is *no* bank, and
+   * the branch with one rendered the list instead. So an engagement could be
+   * compiled exactly once, ever — and the moment that matters most is the
+   * one that was unreachable: documents get added, the taxonomy changes, the
+   * bank goes stale, and nothing on the screen offers to draft it again.
+   */
+  it('offers to compile again once there is a bank', async () => {
+    stubService();
+    await ready();
+
+    expect(
+      await screen.findByRole('button', { name: /Recompile/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('says what recompiling costs before doing it', async () => {
+    /* Recompiling replaces the bank whole, and pruning is stored on the
+       candidates it replaces — so an operator's judgement about which
+       questions to drop goes with it. That is the fact the answer turns on,
+       and it belongs in the question rather than in a footnote. */
+    stubService();
+    await ready();
+
+    await userEvent.click(await screen.findByRole('button', { name: /Recompile/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/pruning|pruned/i)).toBeInTheDocument();
+  });
+
+  it('does not compile until that is confirmed', async () => {
+    const written = stubService();
+    await ready();
+
+    await userEvent.click(await screen.findByRole('button', { name: /Recompile/i }));
+
+    expect(written.filter((w) => w.path.includes('compile'))).toHaveLength(0);
+  });
+
+  it('compiles once it is', async () => {
+    const written = stubService();
+    await ready();
+    await userEvent.click(await screen.findByRole('button', { name: /Recompile/i }));
+
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: /Recompile/i }),
+    );
+
+    await waitFor(() =>
+      expect(written.filter((w) => w.path.includes('bank/compile'))).toHaveLength(1),
+    );
+  });
+});
+
 describe('compiling the bank', () => {
   it('asks the service to compile rather than being a button that does nothing', async () => {
     const written = stubService({ path: 'none', status: 0, detail: null });
