@@ -117,3 +117,17 @@
   margin: var(--space-5) 0 var(--space-2);
   color: var(--label-supporting);
 }
+
+/* What became of a nudge, beside its headline.
+ *
+ * `--label-supporting` rather than a colour: this is a fact about the row,
+ * not a status to react to, and a green tick on half a list would pull the
+ * eye to the ones already dealt with rather than the ones still waiting. */
+.nudge-stack__history-mark {
+  margin-inline-start: var(--space-3);
+  font-size: var(--text-caption-2);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-supporting);
+}

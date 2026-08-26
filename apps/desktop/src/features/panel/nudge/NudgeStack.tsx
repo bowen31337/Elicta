@@ -70,6 +70,25 @@ export function historyOpacity(index: number): number {
  * FR-6.4), matching the design system's "no typing animation, no streaming"
  * rule for nudge entry.
  */
+/** What the operator did, in a word. Only where they did something: a mark
+ *  on every row would make the marked ones invisible. */
+const DISPOSITION_MARK: Record<NonNullable<Nudge['disposition']>, string> = {
+  taken: 'Asked',
+  parked: 'Parked',
+};
+
+/**
+ * What the operator already did with this one, when they did anything.
+ *
+ * Rendered for every history row, interactive or not: the mark is what stops
+ * a question being asked twice, and a read-only stack is exactly where the
+ * operator has no other way to tell.
+ */
+function DispositionMark({ nudge }: { nudge: Nudge }) {
+  if (!nudge.disposition) return null;
+  return <span className="nudge-stack__history-mark">{DISPOSITION_MARK[nudge.disposition]}</span>;
+}
+
 export function NudgeStack({
   active,
   history,
@@ -109,7 +128,10 @@ export function NudgeStack({
             >
               {onSelect === undefined ? (
                 <>
-                  <span className="nudge-stack__history-stub">{nudge.stub}</span>
+                  <span className="nudge-stack__history-stub">
+                    {nudge.stub}
+                    <DispositionMark nudge={nudge} />
+                  </span>
                   <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
                 </>
               ) : (
@@ -122,7 +144,10 @@ export function NudgeStack({
                   aria-label={`Bring back ${nudge.stub}`}
                   onClick={() => onSelect(nudge)}
                 >
-                  <span className="nudge-stack__history-stub">{nudge.stub}</span>
+                  <span className="nudge-stack__history-stub">
+                    {nudge.stub}
+                    <DispositionMark nudge={nudge} />
+                  </span>
                   <span className="nudge-stack__history-reason">{nudge.triggerReason}</span>
                 </button>
               )}

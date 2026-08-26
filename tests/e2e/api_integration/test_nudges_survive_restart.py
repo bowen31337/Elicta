@@ -136,3 +136,50 @@ def test_the_next_nudge_does_not_reuse_an_id_it_has_already_issued(tmp_path) -> 
 
     assert len(after) == len(set(after)), f"an id was reissued: {after}"
     assert set(after) > before, "the earlier nudge was replaced rather than kept"
+
+
+def test_a_nudge_that_was_dealt_with_says_so_on_the_stream(tmp_path) -> None:
+    """So the panel can mark it, and the operator does not act on it twice.
+
+    The disposition was appended to its own list and never reached the nudge
+    it was about, so a history entry for a question already asked looked
+    exactly like one still waiting. Two records of one fact, and the one the
+    panel reads was not the one being written.
+    """
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as first:
+        meeting_id = _meeting(first)
+        first.post(
+            f"/api/meetings/{meeting_id}/live/utterance",
+            json={"text": "The dashboard just has to be fast.", "speaker": "client"},
+        )
+        nudge_id = _nudges_on_stream(first, meeting_id)[0]["id"]
+
+        first.post(
+            f"/api/meetings/{meeting_id}/nudges/{nudge_id}/disposition",
+            json={"disposition": "taken"},
+        )
+
+        surfaced = _nudges_on_stream(first, meeting_id)[0]
+        assert surfaced["disposition"] == "taken"
+
+    # And it is still marked after a restart, which is when the operator is
+    # least able to remember what they already asked.
+    with _client(url) as restarted:
+        assert _nudges_on_stream(restarted, meeting_id)[0]["disposition"] == "taken"
+
+
+def test_a_nudge_nobody_has_answered_carries_no_disposition(tmp_path) -> None:
+    """Unanswered is a state, not a default — a nudge nobody got to is not
+    one that was ignored."""
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as first:
+        meeting_id = _meeting(first)
+        first.post(
+            f"/api/meetings/{meeting_id}/live/utterance",
+            json={"text": "The dashboard just has to be fast.", "speaker": "client"},
+        )
+
+        assert _nudges_on_stream(first, meeting_id)[0]["disposition"] is None

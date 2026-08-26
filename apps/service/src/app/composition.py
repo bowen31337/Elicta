@@ -2263,6 +2263,19 @@ def _include_operational_routers(
             recorded_at=datetime.now(UTC),
         )
         backend.nudge_dispositions.append(recorded)
+        # And onto the nudge itself. The append-only log answers "what did
+        # the operator do, and when"; the panel asks "has this one been
+        # dealt with", and was reading a field nothing wrote — so a history
+        # entry for a question already asked looked exactly like one still
+        # waiting.
+        held = backend.surfaced_nudges.get(meeting_id, [])
+        if any(nudge.id == nudge_id for nudge in held):
+            backend.surfaced_nudges[meeting_id] = [
+                nudge.model_copy(update={"disposition": request.disposition})
+                if nudge.id == nudge_id
+                else nudge
+                for nudge in held
+            ]
         return recorded
 
     app.include_router(build_nudge_disposition_router(record_disposition))
@@ -2413,6 +2426,13 @@ def _include_operational_routers(
                         "question": nudge.question,
                         "trigger_reason": nudge.trigger_reason,
                         "created_at": int(nudge.created_at.timestamp() * 1000),
+                        # So the panel can mark a question already dealt
+                        # with. Null until the operator answers, which is a
+                        # state rather than a default: a nudge nobody got to
+                        # is not one that was ignored.
+                        "disposition": getattr(
+                            nudge.disposition, "value", nudge.disposition
+                        ),
                     },
                 )
                 for nudge in backend.surfaced_nudges.get(meeting_id, ())

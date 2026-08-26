@@ -23,6 +23,7 @@ interface WireSessionStreamNudge {
   question: string;
   trigger_reason: string;
   created_at: number;
+  disposition?: 'taken' | 'parked' | null;
 }
 
 /**
@@ -75,6 +76,10 @@ function parseSessionStreamNudge(rawData: string): SessionStreamNudge {
     question: payload.question,
     triggerReason: payload.trigger_reason,
     createdAt: payload.created_at,
+    // Carried so a question already dealt with is marked as such after a
+    // reconnect or a restart — which is exactly when the operator is least
+    // able to remember what they already asked.
+    disposition: payload.disposition ?? null,
   };
 }
 

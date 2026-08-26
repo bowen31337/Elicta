@@ -124,6 +124,15 @@ export function OperatorPanel({
         // found six, then nine, all of them real and none of them new.
         if (current.active?.id === nudge.id) return current;
         if (current.history.some((held) => held.id === nudge.id)) return current;
+        // Already dealt with, so it arrives behind whatever is live rather
+        // than in front of it. The backlog replays in full on every connect
+        // and after every restart, and a question the operator asked an hour
+        // ago handed back as the live card is one they will ask twice —
+        // several nudges on one trigger carry near-identical wording, so
+        // there is nothing else to tell them apart by.
+        if (nudge.disposition) {
+          return { ...current, history: [...current.history, nudge] };
+        }
         return {
           ...current,
           active: nudge,
@@ -147,7 +156,7 @@ export function OperatorPanel({
         disposition: 'taken',
       });
     }
-    retireActive();
+    retireActive('taken');
   };
 
   /**
@@ -164,11 +173,20 @@ export function OperatorPanel({
    * press away now, which is what makes retiring it the right behaviour
    * rather than a trade.
    */
-  const retireActive = () => {
+  const retireActive = (disposition: 'taken' | 'parked') => {
     setState((current) =>
       current.active === null
         ? current
-        : { ...current, active: null, history: [current.active, ...current.history] },
+        : {
+            ...current,
+            active: null,
+            // Marked here as well as recorded on the service. The stream
+            // carries the disposition, but only on the next connect — and
+            // the row has to change the moment it is pressed, or the
+            // operator sees no difference between a question they have just
+            // asked and one still waiting.
+            history: [{ ...current.active, disposition }, ...current.history],
+          },
     );
   };
 
@@ -213,7 +231,7 @@ export function OperatorPanel({
         disposition: 'parked',
       });
     }
-    retireActive();
+    retireActive('parked');
   };
 
   /**

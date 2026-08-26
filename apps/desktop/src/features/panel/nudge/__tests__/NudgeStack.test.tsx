@@ -215,6 +215,29 @@ describe('reaching a nudge that has receded', () => {
     expect(screen.getByText(/bring (one )?back|tap/i)).toBeInTheDocument();
   });
 
+  it('marks a nudge that has been dealt with, so it is not asked twice', () => {
+    /* A history entry for a question already asked looked exactly like one
+       still waiting — same stub, same reason, same weight. With several of
+       them carrying near-identical wording, the operator has no way to tell
+       which they have used. */
+    const dealt = [
+      { ...HISTORY[0], disposition: 'taken' as const },
+      { ...HISTORY[1], disposition: 'parked' as const },
+    ];
+    render(<NudgeStack active={ACTIVE} history={dealt} onSelect={() => {}} />);
+
+    expect(screen.getByText(/asked/i)).toBeInTheDocument();
+    expect(screen.getByText(/parked/i)).toBeInTheDocument();
+  });
+
+  it('says nothing about one nobody has answered', () => {
+    /* Silence is right here and only here: unanswered is the resting state,
+       and a badge on every row would make the marked ones invisible. */
+    render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
+
+    expect(screen.queryByText(/^asked$/i)).toBeNull();
+  });
+
   it('offers each past nudge as something that can be pressed', () => {
     render(<NudgeStack active={ACTIVE} history={HISTORY} onSelect={() => {}} />);
 
