@@ -1157,6 +1157,13 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # The panel's history, and what resolves a thread id. Held in memory a
     # restart took both: the operator's route back to any question they had
     # not dealt with, and `Park it`'s ability to say which meeting raised it.
+    # The debrief's output, and the product's. Four routes read this one
+    # record — the project brief, the decision log, the open questions and
+    # the follow-up email — and a plain dict took all four on every restart.
+    # Nothing rebuilds it: it is a model pipeline over the whole transcript.
+    backend.bmad_chains = store.bmad_chains(
+        lambda row: SessionBmadAnalystChain(**row)
+    )
     backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)

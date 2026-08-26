@@ -1152,6 +1152,57 @@ class StateStore:
             lock=self._lock,
         )
 
+    def bmad_chains(self, decode: Callable[[dict[str, Any]], V]) -> DurableMapping[str, V]:
+        """One debrief run per session — the brief and its three siblings.
+
+        A single value per key rather than a list, because a session has one
+        chain: running the debrief again replaces it.
+        """
+
+        table = metadata.tables["bmad_chains"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.session_id] = decode(
+                {
+                    "session_id": row.session_id,
+                    "status": row.status,
+                    "engine": row.engine,
+                    "artifacts": row.artifacts,
+                    "requested_at": row.requested_at,
+                    "completed_at": row.completed_at,
+                    "error": row.error,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "session_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "status": _enum_text(value.status),
+                    "engine": value.engine,
+                    # Dumped rather than handed over whole: a JSON column
+                    # takes a dict, and the artifact set is a model.
+                    "artifacts": (
+                        None
+                        if value.artifacts is None
+                        else value.artifacts.model_dump(mode="json")
+                    ),
+                    "requested_at": value.requested_at,
+                    "completed_at": value.completed_at,
+                    "error": value.error,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "session_id", key),
+            lock=self._lock,
+        )
+
     def surfaced_nudges(
         self, decode: Callable[[dict[str, Any]], V]
     ) -> DurableMapping[str, list[V]]:

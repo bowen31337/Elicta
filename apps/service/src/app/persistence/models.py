@@ -196,6 +196,27 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class BmadChainRow(Base):
+    """One debrief run over a session, and the artifacts it produced.
+
+    The product's output rather than a cache of it: the project brief, the
+    decision log, the open questions and the follow-up email are all read off
+    this one record, and nothing rebuilds it short of running a model
+    pipeline over the whole transcript again.
+    """
+
+    __tablename__ = "bmad_chains"
+
+    session_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    engine: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    # Null on a failed run, which `status` and `error` are what make visible.
+    artifacts: Mapped[dict | None] = mapped_column(sa.JSON(), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    error: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+
 class SurfacedNudgeRow(Base):
     """A nudge the live panel surfaced in a meeting (FR-6.3, FR-6.8).
 
