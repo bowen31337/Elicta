@@ -490,6 +490,29 @@ describe('the live panel', () => {
     expect(await screen.findByText(/1 of 2/)).toBeInTheDocument();
   });
 
+  it('brings one back when nothing is active, which is when it is wanted', async () => {
+    /* Reported: "tap it to bring it back does not work".
+
+       The guard read `if (current.active === null || ...) return current`.
+       The null clause was defensive noise and it broke the main case:
+       nothing being active is exactly the state parking leaves, and exactly
+       when an operator reaches for a question they put down. Every test
+       written for this had an active nudge, so none of them went near it. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    emitNudge(1);
+    await screen.findByText('Question 1?');
+    await userEvent.click(screen.getByRole('button', { name: /park it/i }));
+    await waitFor(() => expect(screen.getByText(/Listening/)).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /Bring back Stub 1/i }));
+
+    expect(await screen.findByText('Question 1?')).toBeInTheDocument();
+    // And it is out of history, because it is here.
+    expect(screen.queryByRole('button', { name: /Bring back Stub 1/i })).toBeNull();
+  });
+
   it('is short two of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage

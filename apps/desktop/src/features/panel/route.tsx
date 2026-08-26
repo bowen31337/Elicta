@@ -187,11 +187,20 @@ export function OperatorPanel({
    */
   const onSelectNudge = (nudge: Nudge) => {
     setState((current) => {
-      if (current.active === null || current.active.id === nudge.id) return current;
+      // Already here. Nothing to do, and swapping it with itself would drop
+      // it into its own history.
+      if (current.active?.id === nudge.id) return current;
       return {
         ...current,
         active: nudge,
-        history: [current.active, ...current.history.filter((held) => held.id !== nudge.id)],
+        // Nothing to demote when nothing is active — which is the state
+        // parking leaves, and the state an operator is in when they reach
+        // for a question they put down. A guard that returned early here
+        // made the button do nothing at exactly the moment it is for.
+        history: [
+          ...(current.active === null ? [] : [current.active]),
+          ...current.history.filter((held) => held.id !== nudge.id),
+        ],
       };
     });
   };
