@@ -295,7 +295,16 @@ export function OperatorPanel({
           the visual order never come apart. */}
       <footer className="panel-dock">
         <div className="panel-chips">
-          {firstUnfilled ? <AskedItChip slot={firstUnfilled} onAsked={onAsked} /> : null}
+          {/* Gated on the nudge as well as the slot. Bound to the slot
+              alone it rendered permanently, whether anything had been
+              suggested or not — so it sat beside "No active nudge" saying
+              "Asked it" about nothing, and stayed after the question it
+              referred to had been dealt with. FR-6.7 settles which it is:
+              it suppresses re-suggestion, and there is nothing to
+              re-suggest without a question that was suggested. */}
+          {state.active && firstUnfilled ? (
+            <AskedItChip slot={firstUnfilled} onAsked={onAsked} />
+          ) : null}
           {state.active ? (
             <ParkItChip
               thread={{

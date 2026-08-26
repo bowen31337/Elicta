@@ -360,6 +360,40 @@ describe('the live panel', () => {
     expect(screen.queryAllByRole('button', { name: /Bring back/i })).toHaveLength(1);
   });
 
+  it('leaves only the chip that says what to do next once a nudge is dealt with', async () => {
+    /* Reported: "after park it there are still chips shown".
+
+       Three of the four are about the nudge — `Asked it` says you asked it,
+       `Park it` says not now, `Go deeper` asks for another on the same
+       thread — and all three should go when it does. `Asked it` did not,
+       because it was bound to a coverage slot rather than to the nudge, so
+       it rendered permanently whether anything had been suggested or not.
+       FR-6.7 settles which it is: it "suppresses re-suggestion", and there
+       is nothing to re-suggest without a question that was suggested.
+
+       `What am I missing?` stays, and this is the moment it is most for:
+       the operator has just finished with something and is deciding what to
+       raise next. */
+    stubService(BASE);
+    render(<PanelRoute />);
+    await waitFor(() => expect(stream()).toBeDefined());
+    stream().emit('coverage', {
+      slots: [{ id: 's-1', label: 'Performance', filled: false }],
+      time_remaining_ms: null,
+    });
+    emitNudge(1);
+    await screen.findByText('Question 1?');
+    expect(screen.getByRole('button', { name: /asked it/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /park it/i }));
+
+    await waitFor(() => expect(screen.getByText('No active nudge')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /asked it/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /park it/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /deeper/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /missing/i })).toBeInTheDocument();
+  });
+
   it('is short two of the four responses when no coverage frame arrives', async () => {
     /* The failure this pair documents, and the reason the test above passed
        while the panel was broken in a real meeting: it *emits* the coverage
