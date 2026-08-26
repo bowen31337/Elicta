@@ -106,22 +106,34 @@ export function DebriefScreen({
           is simply still to come would otherwise raise an alert on every
           visit. The headings below stay, so it reads as "these are not filled
           in yet" rather than "these came back empty". */}
-      {empty && !running ? (
+      {/* The account of why there is nothing, and the thing to do about it.
+          They used to be one block, gated on `empty` — and `emptyNotice`
+          returns null the moment there is a failure notice to show, so a
+          stopped run replaced the only control that could rerun it. The
+          operator was left with a red alert and nothing to press.
+
+          The same shape as the `Asked it` chip that removed itself once
+          every section was marked: an affordance gated on the state it
+          exists to change. A failed run is not a reason to hide the retry;
+          it is the reason to show it. */}
+      {(empty || incomplete) && !running ? (
         <div className="debrief-empty">
-          <p className="t-footnote hint">{empty}</p>
+          {empty ? <p className="t-footnote hint">{empty}</p> : null}
           {onProduce ? (
-            /* The sentence above explains the absence; this is what does
-               something about it. The pipeline runs itself once, when the
-               second record-path engine finishes, and a run lost to a
-               restart left a meeting with a transcript, nothing to show and
-               nothing to press. */
             <button
               type="button"
               className="btn"
               disabled={producing}
               onClick={() => void onProduce()}
             >
-              {producing ? 'Writing it up…' : 'Write it up now'}
+              {producing
+                ? 'Writing it up…'
+                : /* Named for what pressing it does *now*. "Write it up now"
+                     over a notice saying the write-up already stopped reads
+                     as an offer to do something that has plainly been tried. */
+                  incomplete
+                  ? 'Try again'
+                  : 'Write it up now'}
             </button>
           ) : null}
         </div>

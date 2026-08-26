@@ -79,3 +79,46 @@ describe('what the alert says about the kind of failure', () => {
     expect(said).toMatch(/recording it needed/i);
   });
 });
+
+describe('acting on a write-up that stopped', () => {
+  it('offers the retry precisely when a run has failed', () => {
+    /* Reported as an alert that would not go away. It could not: the button
+       that reruns the pipeline sat inside the "this screen is empty" block,
+       and `emptyNotice` returns null the moment there is a failure notice to
+       show. So a stopped run replaced the one control that could clear it.
+
+       The same shape as the `Asked it` chip that removed itself once every
+       section was marked: an affordance gated on the state it exists to
+       change. A failed run is not a reason to hide the retry — it is the
+       whole reason to show it. */
+    render(
+      <DebriefScreen
+        {...NOTHING}
+        incomplete="The write-up stopped while telling the voices apart."
+        onProduce={async () => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it('calls it "write it up now" when nothing has been tried yet', () => {
+    render(
+      <DebriefScreen {...NOTHING} empty="No write-up has been produced yet." onProduce={async () => {}} />,
+    );
+
+    expect(screen.getByRole('button', { name: /write it up now/i })).toBeInTheDocument();
+  });
+
+  it('offers nothing to press once the write-up is there', () => {
+    render(
+      <DebriefScreen
+        {...NOTHING}
+        brief={{ id: 'b', text: 'A depot rebuild.', provenance: 'stated', citation: null }}
+        onProduce={async () => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /try again|write it up/i })).not.toBeInTheDocument();
+  });
+});
