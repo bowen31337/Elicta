@@ -3636,8 +3636,21 @@ async def _run_debrief_when_record_path_completes(
     # engagement's requirements state under a meeting id, where the next
     # meeting in the same engagement could never find it.
     engagement_id = (
+        # A live session allocates an id of its own, so that map is asked
+        # first. The record path keys everything by the meeting id and calls
+        # it a session id, which is what `_engagement_of_meeting` resolves —
+        # and it resolves it from the meeting's own row as well as from the
+        # in-memory map, which is the part that matters here.
         backend.session_engagement_ids.get(session_id)
-        or backend.meeting_engagement_ids.get(session_id)
+        or _engagement_of_meeting(backend, session_id)
+        # Only when nothing knows. The chain used to end at the *meeting* map
+        # alone, which is in-memory: after a restart it knew nothing about a
+        # meeting the previous process created, so a write-up filed its
+        # requirements state under the meeting id. The Engagement arc asks for
+        # the engagement and found nothing there, and FR-3.11's carry-forward
+        # to the next meeting could never find it either. The button that
+        # reruns a write-up exists precisely for a run that did not happen
+        # when the recording finished — which is to say, after a restart.
         or session_id
     )
 
