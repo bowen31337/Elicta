@@ -1116,9 +1116,9 @@ def engines_from_settings(
 
     from app.modules.settings.models import AuthMode, SecretKey
 
+    # The client re-reads the secret's value per request; `harness` below
+    # re-reads which harness to send it to. Neither is captured here.
     client = SettingsBackedClient(store)
-    settings = store.read()
-    model = settings.inference.model or DEFAULT_MODEL
 
     # ADR-012 names the Agent SDK as the compiler's harness; the compiler
     # shipped on the Messages API for both. With an API key that difference is
@@ -1131,29 +1131,111 @@ def engines_from_settings(
     # rate-limit headers, so on that credential the Messages API compiler
     # cannot draft a bank at all. The credential decides the harness because
     # only one harness will accept it.
-    compiler: CompilerEngines
-    debrief: DebriefEngines
-    if settings.inference.auth_mode is AuthMode.OAUTH_TOKEN:
-        from .agent_sdk_engines import (
-            agent_sdk_compiler_engines,
-            agent_sdk_debrief_engines,
+    def harness() -> tuple[DebriefEngines, CompilerEngines]:
+        """The engines the settings ask for *now*.
+
+        Resolved per call rather than once, because the settings screen
+        promises a credential takes effect without a restart and this was the
+        half that did not keep it. `SettingsBackedClient` re-reads the secret's
+        value on every request; the choice of harness was made in `create_app`
+        and never revisited, so a deployment that booted on an OAuth token
+        stayed on Claude Code's surface after the admin switched it to an API
+        key — and went on spending a weekly Claude Code allowance the operator
+        had stopped meaning to use.
+
+        Cheap enough to do per stage: one settings read, and the Agent SDK
+        import is already lazy. A stage is a model call taking seconds.
+        """
+
+        now = store.read()
+        chosen_model = now.inference.model or DEFAULT_MODEL
+        if now.inference.auth_mode is AuthMode.OAUTH_TOKEN:
+            from .agent_sdk_engines import (
+                agent_sdk_compiler_engines,
+                agent_sdk_debrief_engines,
+            )
+
+            token = store.get_secret(SecretKey.ANTHROPIC_OAUTH_TOKEN)
+            revealed = token.reveal() if token else None
+            # Both halves, or the credential drafts a bank and then cannot
+            # write up the meeting the bank was drafted for. ADR-012 puts the
+            # debrief engine on the Agent SDK anyway; with this credential it
+            # is the only harness that will take it.
+            return (
+                agent_sdk_debrief_engines(
+                    oauth_token=revealed, model=chosen_model, diarize=diarize
+                ),
+                agent_sdk_compiler_engines(oauth_token=revealed, model=chosen_model),
+            )
+        return (
+            anthropic_debrief_engines(client, model=chosen_model, diarize=diarize),
+            anthropic_compiler_engines(client, model=chosen_model),
         )
 
-        token = store.get_secret(SecretKey.ANTHROPIC_OAUTH_TOKEN)
-        revealed = token.reveal() if token else None
-        compiler = agent_sdk_compiler_engines(oauth_token=revealed, model=model)
-        # Both halves, or the credential drafts a bank and then cannot write
-        # up the meeting the bank was drafted for. ADR-012 puts the debrief
-        # engine on the Agent SDK anyway; with this credential it is the only
-        # harness that will take it.
-        debrief = agent_sdk_debrief_engines(
-            oauth_token=revealed, model=model, diarize=diarize
-        )
-    else:
-        compiler = anthropic_compiler_engines(client, model=model)
-        debrief = anthropic_debrief_engines(client, model=model, diarize=diarize)
+    # `name` labels every record the pipeline persists, and `DebriefEngines`
+    # is frozen, so it cannot follow a mid-session change of harness the way
+    # the stages now do. Resolved once here, from the settings as they stand —
+    # which is what it did before, and is right except in the window between
+    # an operator changing the mode and the app next starting. A stale label
+    # on an otherwise correct run is a far smaller thing than the run itself
+    # going to the wrong provider, which is what this is fixing.
+    at_startup = harness()
+    return (
+        _dispatching_debrief(harness, name=at_startup[0].name),
+        _dispatching_compiler(harness, name=at_startup[1].name),
+    )
 
-    return (debrief, compiler)
+
+#: The §3.10 chain's stages. `run_analyst` is included: it is optional on the
+#: dataclass, and the fallback path `compiler.py` runs for batch-refusing
+#: credentials reaches for it, so a dispatcher that dropped it would send that
+#: path to `None` on exactly the credential that needs it.
+_COMPILER_STAGES = ("extract", "structure", "submit_batch", "fetch_batch", "run_analyst")
+
+
+def _dispatching(
+    harness: Callable[[], tuple[DebriefEngines, CompilerEngines]], half: int, stage: str
+) -> Callable[..., Any]:
+    """One stage, sent to whichever harness the settings name at the time."""
+
+    async def call(*args: Any, **kwargs: Any) -> Any:
+        return await getattr(harness()[half], stage)(*args, **kwargs)
+
+    return call
+
+
+def _dispatching_debrief(
+    harness: Callable[[], tuple[DebriefEngines, CompilerEngines]], *, name: str
+) -> DebriefEngines:
+    """A real `DebriefEngines` whose stages resolve the harness per call.
+
+    A dataclass rather than a duck-typed stand-in on purpose:
+    `dataclasses.replace` is used on these — the debrief substitutes a
+    transcript-derived diarizer when the audio is gone — and that requires
+    one.
+    """
+
+    return DebriefEngines(
+        name=name,
+        **{
+            stage: _dispatching(harness, 0, stage)
+            for stage in ("diarize", "clean", "translate", "classify", "run_chain", "converse")
+        },
+    )
+
+
+def _dispatching_compiler(
+    harness: Callable[[], tuple[DebriefEngines, CompilerEngines]], *, name: str
+) -> CompilerEngines:
+    """The same, for the §3.10 compiler chain."""
+
+    return CompilerEngines(
+        name=name,
+        **{
+            stage: _dispatching(harness, 1, stage)
+            for stage in _COMPILER_STAGES
+        },
+    )
 
 
 def configured_engines(
