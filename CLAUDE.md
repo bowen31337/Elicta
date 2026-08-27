@@ -76,9 +76,25 @@ macOS desktop bundle (`.app` + `.dmg`) — **build locally, not in CI**:
 Python, so `service_main.py` is frozen by `scripts/build-service-sidecar.sh`
 into `src-tauri/binaries/elicta-service-<target>`, declared as an `externalBin`,
 and started by the shell when nothing is already answering on port 8000. The
-build script freezes it first and reuses an existing one unless `apps/service`
-is newer; a missing binary stops the bundler outright. The freeze needs a
-`python3` and takes minutes.
+build reuses an existing binary; a missing one stops the bundler outright. The
+freeze needs a `python3` and takes minutes.
+
+**Staleness is pruned, not detected at the point of use.**
+`scripts/prune-stale-builds.sh` runs first on every build and deletes a frozen
+service older than anything it was built from, so the reuse check refreezes
+rather than shipping the previous one. Its inputs are every Python file under
+`apps/service` **plus** `uv.lock` and the freeze script — the two the old
+check missed, either of which changes what is inside the binary with no `.py`
+moving. It also clears bundles left from other versions.
+
+Nothing of the operator's is removed. An install in `/Applications` and a
+running service from another build are named with the command to deal with
+each, behind `--remove-installed` and `--stop-running`; `--dry-run` says what
+would go. That matters because a stale install is what shadowed a whole
+afternoon of rebuilds: its service held port 8000, the shell adopts whatever
+is already answering, and a panel built minutes ago ran against an API from
+two days earlier. The shell refuses a service it cannot identify as its own
+now (`GET /api/service/identity`), but refusing is not clearing.
 
 There is no universal2 route: pydantic-core, cryptography, asyncpg, jiter,
 rpds-py and cffi publish one wheel per architecture and none for universal2, so

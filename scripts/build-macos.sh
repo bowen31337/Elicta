@@ -78,8 +78,20 @@ pnpm install --frozen-lockfile
 #
 # Skipped when the binary is already there and newer than the service, because
 # freezing takes minutes and most rebuilds here are of the front end.
+# Everything a previous build left behind that this one would trip over —
+# most of all a frozen service older than something it was built from, which
+# is deleted here so the check below refreezes rather than reusing it. The
+# predicate lives in the pruner because that is where it can be kept in step
+# with what the freeze actually reads: every Python file under `apps/service`
+# missed `uv.lock`, which decides which dependency versions go in, and the
+# freeze script, which decides the hidden imports and the entry point.
+#
+# Nothing of the operator's is touched. An install in /Applications and a
+# running service are named, with the command to deal with each.
+./scripts/prune-stale-builds.sh
+
 sidecar="apps/desktop/src-tauri/binaries/elicta-service-${target}"
-if [[ -x "$sidecar" ]] && [[ -z "$(find apps/service -newer "$sidecar" -name '*.py' -print -quit)" ]]; then
+if [[ -x "$sidecar" ]]; then
   echo "==> reusing the frozen service at $sidecar"
 else
   ./scripts/build-service-sidecar.sh "$target"
