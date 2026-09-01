@@ -102,11 +102,24 @@ export function CompileProgress({
     step.ids.some((id) => stagesCompleted.includes(id)),
   ).length;
   const heading = currentlyDoing(state, done, steps);
+  const showsPercent = state === 'running' || state === 'awaiting' || state === 'complete';
 
   return (
     <div className="compile-progress">
-      {heading === null ? null : (
-        <p className="compile-progress__doing t-footnote">{heading}</p>
+      {heading === null && !showsPercent ? null : (
+        <p className="compile-progress__doing t-footnote">
+          <span>{heading}</span>
+          {/* The bar carries the shape; the number carries the amount, and
+              the amount is what gets asked for. Withheld once a compile has
+              stopped: a figure frozen at twenty-five per cent invites the
+              reading that it is still climbing, and what matters then is the
+              reason directly underneath. */}
+          {showsPercent ? (
+            <span className="compile-progress__percent">
+              {Math.round((done / steps.length) * 100)}%
+            </span>
+          ) : null}
+        </p>
       )}
 
       {/* One segment per stage rather than a continuous bar: the stages are

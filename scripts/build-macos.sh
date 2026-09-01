@@ -4,7 +4,8 @@
 # Default is a host-architecture build, which is what you want for testing on
 # your own machine: it is roughly half the work of the universal build CI
 # produces, because it compiles the Rust workspace once instead of twice.
-# Pass --universal for the shippable arm64+x86_64 bundle.
+# Pass --universal for the shippable arm64+x86_64 bundle, and --no-bump to
+# rebuild the current version rather than the next one.
 #
 # Output lands in apps/desktop/src-tauri/target/<triple>/release/bundle/
 # as both Elicta.app and a .dmg.
@@ -13,8 +14,20 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# Scanned rather than read off `$1`: with two flags to pass, checking only the
+# first position means `--no-bump --universal` silently builds one
+# architecture, which is the kind of thing nobody notices until the bundle is
+# on somebody else's Mac.
 universal=0
-[[ "${1:-}" == "--universal" ]] && universal=1
+keep_version=0
+for arg in "$@"; do
+  case "$arg" in
+    --universal) universal=1 ;;
+    --no-bump|--keep) keep_version=1 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "build-macos: unknown option $arg" >&2; exit 2 ;;
+  esac
+done
 
 fail() { echo "error: $*" >&2; exit 1; }
 
@@ -78,6 +91,21 @@ pnpm install --frozen-lockfile
 #
 # Skipped when the binary is already there and newer than the service, because
 # freezing takes minutes and most rebuilds here are of the front end.
+# Its own version number, so the artifact on disk says which build it is.
+# Every `.dmg` was `Elicta_0.1.0_aarch64.dmg` and a rebuild overwrote the last
+# one — and an install from days earlier shadowing a fresh build cost most of
+# an afternoon with "which one is this?" having no answer anywhere.
+#
+# Before the pruner, so the bundles it clears are the ones from the version
+# just superseded. `--no-bump` rebuilds the same number, for re-signing or
+# after a bundler run that failed.
+if (( keep_version )); then
+  echo "==> keeping version $(./scripts/bump-version.sh --no-bump)"
+else
+  ./scripts/bump-version.sh > /dev/null
+  echo "==> building version $(./scripts/bump-version.sh --no-bump)"
+fi
+
 # Everything a previous build left behind that this one would trip over —
 # most of all a frozen service older than something it was built from, which
 # is deleted here so the check below refreezes rather than reusing it. The
