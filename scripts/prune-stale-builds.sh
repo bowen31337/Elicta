@@ -72,25 +72,34 @@ note() {
 # check then refreezes. One rule, in one place, instead of a predicate that has
 # to be kept in step with what the freeze actually reads.
 echo "==> frozen service"
-freeze_inputs() {
-  # Everything whose change alters the binary. `uv.lock` because the freeze
-  # script refuses to build an environment that disagrees with it, so the lock
-  # decides which versions are inside; `pyproject.toml` for the same reason;
-  # and the freeze script because it chooses the hidden imports, the exclusions
-  # and the entry point.
-  find apps/service -name '*.py' -not -path '*/.venv/*' -not -path '*/__pycache__/*'
-  for extra in apps/service/uv.lock apps/service/pyproject.toml \
-               scripts/build-service-sidecar.sh; do
-    [ -f "$extra" ] && echo "$extra"
-  done
+#: Everything whose change alters the frozen binary. `uv.lock` because the
+#: freeze script refuses to build an environment that disagrees with it, so
+#: the lock decides which versions go inside; `pyproject.toml` for the same
+#: reason; and the freeze script because it chooses the hidden imports, the
+#: exclusions and the entry point.
+newer_than() {
+  local sidecar="$1" found extra
+  # `-quit` rather than a pipeline that breaks out of a read loop: breaking
+  # closes the pipe under the reader, `find` takes SIGPIPE, and `pipefail`
+  # turns that into a failed build — which it did, but only once something
+  # actually was newer, so the bug shipped looking fine.
+  found="$(find apps/service -name '*.py' -not -path '*/.venv/*' \
+                -not -path '*/__pycache__/*' -newer "$sidecar" -print -quit)"
+  if [ -z "$found" ]; then
+    for extra in apps/service/uv.lock apps/service/pyproject.toml \
+                 scripts/build-service-sidecar.sh; do
+      if [ -f "$extra" ] && [ "$extra" -nt "$sidecar" ]; then
+        found="$extra"
+        break
+      fi
+    done
+  fi
+  printf '%s' "$found"
 }
 
 shopt -s nullglob
 for sidecar in apps/desktop/src-tauri/binaries/elicta-service-*; do
-  newer="$(freeze_inputs | while read -r input; do
-    [ "$input" -nt "$sidecar" ] && { echo "$input"; break; }
-    true
-  done)"
+  newer="$(newer_than "$sidecar")"
   if [ -n "$newer" ]; then
     echo "    out of date (\"$newer\" is newer)"
     remove "$sidecar"
