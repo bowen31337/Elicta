@@ -112,3 +112,42 @@ describe('what the meter says when something is wrong', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe('the meter on the route the button actually takes', () => {
+  it('fills completely when a direct compile is done', () => {
+    // The direct route never sends a batch, so `batch-submission` never
+    // completes — and a meter with a fixed four steps sat at three of four
+    // for ever on a compile that had finished.
+    render(
+      <CompileProgress
+        state="complete"
+        stagesCompleted={['extraction', 'structuring', 'analyst-pass-direct']}
+      />,
+    );
+
+    const meter = screen.getByRole('progressbar');
+    expect(meter).toHaveAttribute('aria-valuenow', '3');
+    expect(meter).toHaveAttribute('aria-valuemax', '3');
+  });
+
+  it('still counts four when a batch was sent', () => {
+    render(
+      <CompileProgress
+        state="awaiting"
+        stagesCompleted={['extraction', 'structuring', 'batch-submission']}
+      />,
+    );
+
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuemax', '4');
+  });
+
+  it('names the drafting stage while a direct compile is running', () => {
+    render(
+      <CompileProgress state="running" stagesCompleted={['extraction', 'structuring']} />,
+    );
+
+    // Two of three done on the direct route, so the stage under way is the
+    // drafting itself rather than sending anything off.
+    expect(screen.getByText(/sending off/i)).toBeInTheDocument();
+  });
+});

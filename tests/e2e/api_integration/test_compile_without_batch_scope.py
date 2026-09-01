@@ -73,7 +73,10 @@ def _analyst_output(count: int = MIN_CANDIDATES) -> BmadAnalystPassOutput:
 
 
 def _engines(
-    *, submit_failure: UpstreamFailure | None, with_direct: bool
+    *,
+    submit_failure: UpstreamFailure | None,
+    with_direct: bool,
+    direct_failure: UpstreamFailure | None = None,
 ) -> CompilerEngines:
     async def submit_batch(*_args, **_kwargs):
         if submit_failure is not None:
@@ -83,6 +86,10 @@ def _engines(
         return "batch-1"
 
     async def run_analyst(engagement_id: str, _context_pack):
+        if direct_failure is not None:
+            raise UpstreamUnavailableError(
+                "analyst pass", direct_failure, "the provider refused."
+            )
         return [AnalystBatchResult(custom_id=engagement_id, output=_analyst_output())]
 
     async def fetch_batch(_job_id: str):
@@ -164,39 +171,53 @@ def test_the_run_says_it_took_the_direct_route_rather_than_hiding_it() -> None:
         assert "batch-submission" not in outcome["stages_completed"], outcome
 
 
-def test_a_provider_that_is_merely_unreachable_is_not_asked_twice() -> None:
+def test_a_provider_that_is_merely_unreachable_is_reported_once() -> None:
+    """One account of one failure, at the stage that actually ran.
+
+    Rewritten when the app stopped sending a batch for a compile somebody is
+    waiting on — measured against the provider, every batch that succeeded
+    took longer than any window worth making them wait, so waiting first and
+    drafting directly anyway was the slowest and dearest of the routes.
+
+    What the test is about survives that: a provider that cannot be reached
+    answers the same way twice, so it is asked once, and the stage named is
+    the one that was tried.
+    """
+
     with _client(
-        _engines(submit_failure=UpstreamFailure.UNAVAILABLE, with_direct=True)
+        _engines(
+            submit_failure=None,
+            with_direct=True,
+            direct_failure=UpstreamFailure.UNAVAILABLE,
+        )
     ) as (client, _):
         engagement_id = _engagement(client)
         outcome = _compile_and_settle(client, engagement_id)
 
-        assert outcome["stopped_at"] == "batch-submission", outcome
-        assert outcome["cause"] == "unavailable", outcome
+    assert outcome["stopped_at"] == "analyst-pass-direct", outcome
+    assert outcome["cause"] == "unavailable", outcome
 
 
-def test_without_a_direct_route_the_refusal_still_stops_the_compile() -> None:
-    """The behaviour every deployment had before this existed, unchanged."""
+def test_the_compile_somebody_is_waiting_on_drafts_directly() -> None:
+    """No batch, because no batch was ever going to arrive in time.
 
-    with _client(
-        _engines(submit_failure=UpstreamFailure.NOT_ENTITLED, with_direct=False)
-    ) as (client, _):
-        engagement_id = _engagement(client)
-        outcome = _compile_and_settle(client, engagement_id)
+    Measured against the provider after the schema fix, the batches that
+    *succeeded* took 202s, 307s and 501s. Waiting a bounded time for one and
+    then drafting directly anyway spent the wait, spent a second pass, and
+    still paid for the batch when it finished.
 
-        assert outcome["stopped_at"] == "batch-submission", outcome
-        assert outcome["cause"] == "not_entitled", outcome
-
-
-def test_a_batch_that_submits_normally_is_left_alone() -> None:
-    """The cheap path stays the default, and the fallback must not pre-empt it."""
+    The batch route itself is untouched and still the library's default; this
+    is only what the button sends.
+    """
 
     with _client(_engines(submit_failure=None, with_direct=True)) as (client, _):
         engagement_id = _engagement(client)
         outcome = _compile_and_settle(client, engagement_id)
 
-        assert "batch-submission" in outcome["stages_completed"], outcome
-        assert "analyst-pass-direct" not in outcome["stages_completed"], outcome
+    assert outcome["complete"] is True, outcome
+    assert "analyst-pass-direct" in outcome["stages_completed"], outcome
+    assert "batch-submission" not in outcome["stages_completed"], outcome
+
 
 
 def test_a_direct_attempt_that_fails_is_not_reported_as_never_attempted() -> None:
