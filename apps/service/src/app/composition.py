@@ -4111,9 +4111,15 @@ async def _run_engagement_compile(
         sinks=sinks,
         on_stage=on_stage,
         # The application's choice, not the library's default. An operator is
-        # standing in front of this: §3.10 budgets minutes and the Batch API
-        # has a twenty-four hour SLA, so the compile waits a bounded time for
-        # its own batch and drafts the pass directly when that runs out.
+        # standing in front of this, and measured against the provider every
+        # batch that succeeded took longer than any window worth making them
+        # wait — 202s, 307s, 501s. Waiting first and drafting directly anyway
+        # was the slowest and dearest of the three routes: dead time, then a
+        # second pass, and the batch still billed when it finished.
+        #
+        # `batch_patience` stays for the route that does send one, and for a
+        # deployment with no direct route configured to fall back to.
+        route="direct",
         batch_patience=BATCH_PATIENCE_SECONDS,
     )
     if run.complete:

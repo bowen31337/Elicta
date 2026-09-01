@@ -121,6 +121,7 @@ async def submit_engagement_compile(
     sinks: CompilerSinks,
     on_stage: Callable[[str], None] | None = None,
     batch_patience: float = 0.0,
+    route: str = "batch",
 ) -> CompileRun:
     """Run §3.10 up to and including batch submission.
 
@@ -168,6 +169,24 @@ async def submit_engagement_compile(
         run.stopped_at = "structuring"
         return run
     completed("structuring")
+
+    # A compile somebody is waiting on does not send a batch at all.
+    #
+    # Measured against the provider: every batch that *succeeded* took longer
+    # than the window that had been set to wait for one — 202s, 307s, 501s,
+    # against a hundred and eighty. So the window could only ever lose. The
+    # compile waited three minutes for a batch that was never going to arrive
+    # in three, drafted the pass directly anyway, and the batch went on to
+    # finish and be billed: slowest *and* dearest.
+    #
+    # Direct is therefore both quicker and cheaper here — one pass instead of
+    # two, and none of the dead time. The batch is still right for work nobody
+    # is waiting on, which is why it stays the default and why everything that
+    # collects one is untouched.
+    if route == "direct" and engines.run_analyst is not None:
+        return await _analyst_without_a_batch(
+            run, context_pack, engines, sinks, on_stage=on_stage, require_refusal=False
+        )
 
     run.submission = await submit_bmad_analyst_batch(
         engagement_id,

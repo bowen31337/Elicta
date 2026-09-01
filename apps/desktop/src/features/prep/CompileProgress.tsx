@@ -42,6 +42,29 @@ const STEPS: readonly { readonly ids: readonly string[]; readonly doing: string 
   { ids: ['batch-collection', 'analyst-pass-direct'], doing: 'drafting the questions' },
 ];
 
+/**
+ * The stages this compile actually has, which depends on the route it took.
+ *
+ * A compile somebody is waiting on drafts the pass directly and sends no
+ * batch, so `batch-submission` never completes — and a meter with a fixed
+ * four steps sat at three of four for ever on a compile that had finished.
+ *
+ * The test is whether a batch was *sent*, not whether the direct route ran:
+ * a compile that sent one, waited, and drafted directly anyway did do four
+ * things, and saying three would lose one of them. Read off the run rather
+ * than configured, so nothing has to be told which route was taken.
+ *
+ * Before the batch is sent there is nothing to go on, so the fourth step
+ * shows and disappears if it turns out not to apply. Guessing the shorter
+ * shape would be worse: a meter that grew a step mid-compile.
+ */
+function stepsFor(stagesCompleted: readonly string[]): typeof STEPS {
+  const sentABatch =
+    stagesCompleted.includes('batch-submission')
+    || !stagesCompleted.includes('analyst-pass-direct');
+  return sentABatch ? STEPS : STEPS.filter((step) => !step.ids.includes('batch-submission'));
+}
+
 function toneFor(state: CompileState, given?: NoticeTone): NoticeTone {
   if (given) return given;
   return state === 'stopped' ? 'error' : 'working';
@@ -55,13 +78,13 @@ function toneFor(state: CompileState, given?: NoticeTone): NoticeTone {
  * claim work that is not happening, which is the same overstatement that had
  * a batch already refused reporting itself as on its way.
  */
-function currentlyDoing(state: CompileState, done: number): string | null {
+function currentlyDoing(state: CompileState, done: number, steps = STEPS): string | null {
   if (state === 'complete') return null;
   if (state === 'awaiting') return 'The drafting job is with the provider';
   if (state !== 'running') return null;
   // The stage alone. The row above already says "Compiling", and repeating it
   // here read as two labels for one thing.
-  const step = STEPS[Math.min(done, STEPS.length - 1)];
+  const step = steps[Math.min(done, steps.length - 1)];
   const doing = step.doing;
   return doing.charAt(0).toUpperCase() + doing.slice(1);
 }
@@ -74,10 +97,11 @@ export function CompileProgress({
 }: CompileProgressProps) {
   if (state === 'idle' && notice === null) return null;
 
-  const done = STEPS.filter((step) =>
+  const steps = stepsFor(stagesCompleted);
+  const done = steps.filter((step) =>
     step.ids.some((id) => stagesCompleted.includes(id)),
   ).length;
-  const heading = currentlyDoing(state, done);
+  const heading = currentlyDoing(state, done, steps);
 
   return (
     <div className="compile-progress">
@@ -94,10 +118,10 @@ export function CompileProgress({
         role="progressbar"
         aria-valuenow={done}
         aria-valuemin={0}
-        aria-valuemax={STEPS.length}
+        aria-valuemax={steps.length}
         aria-label="Compile progress"
       >
-        {STEPS.map((step, index) => (
+        {steps.map((step, index) => (
           <span
             key={step.doing}
             className={
