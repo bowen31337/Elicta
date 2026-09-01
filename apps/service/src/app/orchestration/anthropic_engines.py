@@ -98,6 +98,18 @@ DEFAULT_MODEL = "claude-opus-5"
 # Non-streaming calls; keep clear of the SDK's HTTP timeout.
 MAX_TOKENS = 16000
 
+# The Analyst pass is the one stage that emits a whole bank, and it needs its
+# own budget. Every stage shared `MAX_TOKENS`, which suits a handful of claims
+# and does not suit up to `MAX_CANDIDATES` candidates each carrying a section,
+# a trigger list, a phrasing, a stub, a language and a priority.
+#
+# The failure is not a smaller bank. Truncation lands mid-token, so what comes
+# back is unparseable and the whole pass is lost — observed live as
+# "Unterminated string starting at: line 1 column 15243", with the batch
+# reported as succeeded by the provider and the bank empty.
+ANALYST_MAX_TOKENS = 32000
+
+
 
 
 # The bank shape the analyst batch must return. Derived from the domain model
@@ -873,17 +885,26 @@ def anthropic_compiler_engines(
         a large answer to ask for in one request.
         """
 
+        # Streamed, and that is what lets it ask for a whole bank. The SDK
+        # refuses a *non-streaming* request whose budget implies more than ten
+        # minutes of generation — "Streaming is required for operations that
+        # may take longer than 10 minutes" — so this call was capped at the
+        # shared sixteen thousand, and a bank that did not fit came back
+        # truncated mid-token and failed to parse. Neither a smaller bank nor
+        # an error: a whole pass lost.
+        #
         # Schema-enforced from the pass's own model rather than the
         # hand-written batch schema beside it: this route parses its answer
         # immediately, so the model that has to hold is the one the collection
         # will read.
-        response = await client.messages.parse(
+        async with client.messages.stream(
             model=model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=ANALYST_MAX_TOKENS,
             system=_cached_system(_COMPILER_ANALYST_SYSTEM),
             messages=[{"role": "user", "content": _analyst_prompt(context_pack)}],
             output_format=BmadAnalystPassOutput,
-        )
+        ) as stream:
+            response = await stream.get_final_message()
         return [
             AnalystBatchResult(custom_id=engagement_id, output=response.parsed_output)
         ]
@@ -896,7 +917,7 @@ def anthropic_compiler_engines(
                     "custom_id": engagement_id,
                     "params": {
                         "model": model,
-                        "max_tokens": MAX_TOKENS,
+                        "max_tokens": ANALYST_MAX_TOKENS,
                         # Schema-enforced here too (§14.4). A batch result is
                         # collected hours later by a different process, so
                         # prose that "looks parseable" is not recoverable —
