@@ -3066,7 +3066,20 @@ def _include_operational_routers(
         # collecting the drafted questions" and "the drafting itself did not
         # produce a usable bank". Every clause of it wrong, and arriving while
         # the provider was still working.
-        if stopped_at == "batch-collection" and getattr(run, "batch_job_id", None):
+        # `analyst_passes` empty is what "still processing" looks like: an
+        # unfinished batch collects nothing at all, so an empty list means
+        # come back and a non-empty one means this is as good as it gets —
+        # the same distinction `BankCollector._finished_badly` draws.
+        #
+        # Without it, "stopped at batch-collection" covered two opposite
+        # situations and both read as waiting. A batch that errored
+        # forty-six seconds in reported that the drafting job was with the
+        # provider and would come back on its own, for ever.
+        if (
+            stopped_at == "batch-collection"
+            and getattr(run, "batch_job_id", None)
+            and not getattr(run, "analyst_passes", None)
+        ):
             return BankCompileOutcome(
                 engagement_id=engagement_id,
                 compile_id=latest,

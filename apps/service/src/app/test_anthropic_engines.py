@@ -1547,3 +1547,63 @@ class TestARefusalNamesTheCredentialNotOnlyTheModel:
 
         assert "should succeed shortly" not in str(failure)
         assert failure is not None and failure.retry_after is None
+
+
+class TestTheBatchSchemaIsOneTheApiAccepts:
+    """A schema the provider refuses makes every compile hang, not fail.
+
+    Observed on a live engagement. The batch was accepted, ended forty-six
+    seconds later with `errored=1, succeeded=0`, and the reason was in the
+    result rather than in the submission:
+
+        output_config.format.schema: For 'integer' type, property 'minimum'
+        is not supported
+
+    So the bank could never be drafted through the batch path at all — and
+    because the collector cannot tell an ended-and-errored batch from one
+    still processing, the screen said the drafting job was with the provider
+    and would come back on its own, indefinitely.
+
+    The constraint bought nothing. `priority` is validated where it is parsed;
+    asserting it again in a schema the provider will not take costs the whole
+    feature.
+    """
+
+    def _numeric_keywords(self, node, path="schema"):
+        """Every numeric bound anywhere in the schema, with where it is."""
+
+        found = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in {
+                    "minimum",
+                    "maximum",
+                    "exclusiveMinimum",
+                    "exclusiveMaximum",
+                    "multipleOf",
+                }:
+                    found.append(f"{path}.{key}")
+                found.extend(self._numeric_keywords(value, f"{path}.{key}"))
+        elif isinstance(node, list):
+            for index, item in enumerate(node):
+                found.extend(self._numeric_keywords(item, f"{path}[{index}]"))
+        return found
+
+    def test_the_bank_schema_carries_no_numeric_bounds(self):
+        from app.orchestration.anthropic_engines import _BANK_SCHEMA
+
+        offending = self._numeric_keywords(_BANK_SCHEMA)
+
+        assert offending == [], (
+            "the provider refuses these outright, and the batch errors rather "
+            f"than returning anything: {offending}"
+        )
+
+    def test_priority_is_still_required_and_still_an_integer(self):
+        """Dropping the bound must not quietly drop the field."""
+
+        from app.orchestration.anthropic_engines import _BANK_SCHEMA
+
+        item = _BANK_SCHEMA["properties"]["candidates"]["items"]
+        assert item["properties"]["priority"] == {"type": "integer"}
+        assert "priority" in item["required"]

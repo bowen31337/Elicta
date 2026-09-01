@@ -56,14 +56,28 @@ def _engagement(client: TestClient) -> str:
 
 
 class _SubmittedRun:
-    """A compile that got as far as sending the drafting job off."""
+    """A compile that got as far as sending the drafting job off.
 
-    def __init__(self, engagement_id: str) -> None:
+    `analyst_passes` empty is what "still processing" looks like: an
+    unfinished batch collects nothing at all, so an empty list means come
+    back and a non-empty one means this is as good as it gets. That is the
+    same distinction `BankCollector._finished_badly` draws.
+    """
+
+    def __init__(self, engagement_id: str, passes: list | None = None) -> None:
         self.engagement_id = engagement_id
         self.batch_job_id = "batch-abc"
         self.stages_completed = ["extraction", "structuring", "batch-submission"]
         self.stopped_at = "batch-collection"
         self.complete = False
+        self.analyst_passes = passes or []
+
+
+class _FailedPass:
+    """What `fetch_batch` returns for a request the provider refused."""
+
+    status = "failed"
+    error = "output_config.format.schema: For 'integer' type, property 'minimum' is not supported"
 
 
 def _submitted(backend: Backend, engagement_id: str) -> None:
@@ -172,3 +186,33 @@ def test_an_in_flight_run_is_not_shadowed_by_its_own_stored_row(tmp_path):
     assert isinstance(sweeping["compile-1"], _SubmittedRun), (
         "the live run knows more than the row rebuilt from storage"
     )
+
+
+def test_a_batch_that_ended_badly_is_not_reported_as_still_waiting(tmp_path):
+    """The failure this file's own first fix introduced.
+
+    "Stopped at batch-collection" covers two opposite situations: a batch the
+    provider is still working on, and one that ended and returned nothing
+    usable. Reporting both as `awaiting` told an operator whose batch had
+    errored forty-six seconds in that the drafting job was with the provider
+    and would come back on its own — for ever.
+
+    The distinguishing fact is whether any pass came back at all. An
+    unfinished batch collects nothing; a finished one collects something,
+    even if that something is an error.
+    """
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        backend.bank_compiles.append((engagement_id, "compile-1"))
+        backend.compile_runs["compile-1"] = _SubmittedRun(
+            engagement_id, passes=[_FailedPass()]
+        )
+
+        body = client.get(f"/api/engagements/{engagement_id}/bank/compile").json()
+
+    assert body["state"] != "awaiting", (
+        "the batch ended and returned an error; nothing is coming back"
+    )
+    assert body["stopped_at"] == "batch-collection"
