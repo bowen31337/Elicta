@@ -4363,11 +4363,29 @@ def _compiles_to_sweep(backend: Backend) -> dict[str, Any]:
             continue
         sweeping[compile_id] = CompileRun(
             engagement_id=pending.engagement_id,
-            submission=_RestoredSubmission(pending.batch_job_id, pending.submitted_at),
+            submission=_RestoredSubmission(
+                pending.batch_job_id, _as_aware(pending.submitted_at)
+            ),
             stages_completed=list(pending.stages_completed),
             stopped_at="batch-collection",
         )
     return sweeping
+
+
+def _as_aware(when: Any) -> Any:
+    """A stored timestamp, in the form the collector compares against.
+
+    SQLite keeps no timezone, so a datetime written aware comes back naive —
+    and the collector ages a batch by subtracting it from an aware `now()`,
+    which raises. That exception escaped the visit and ended the whole sweep,
+    so one restored batch stopped every engagement's bank from ever being
+    collected. Everything here is written in UTC, which is what makes
+    attaching it a correction rather than a guess.
+    """
+
+    if when is not None and getattr(when, "tzinfo", None) is None:
+        return when.replace(tzinfo=UTC)
+    return when
 
 
 @dataclass(frozen=True)
