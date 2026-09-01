@@ -82,8 +82,11 @@
    reads as working rather than stuck. The one animation on this screen, and it
    earns its place — telling working from hung is the whole question an
    operator has while a compile runs. */
+/* Half, matching what the percentage counts a stage under way as. They were
+   0.45 and nothing respectively, so the bar and the number disagreed about
+   the same stage. */
 .compile-progress__step--active::after {
-  transform: scaleX(0.45);
+  transform: scaleX(0.5);
   animation: compile-progress-breathe 1.8s var(--ease-in-out) infinite;
 }
 
