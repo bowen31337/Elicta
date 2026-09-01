@@ -62,6 +62,30 @@ class _StubMessages:
         self.calls.append(kwargs)
         return types.SimpleNamespace(parsed_output=self._outputs.pop(0))
 
+    def stream(self, **kwargs):
+        """The streaming form, which the Analyst pass uses.
+
+        Recorded in `calls` beside `parse`, so a test that asserts what
+        reached the model does not have to know which of the two a stage
+        chose — and the direct Analyst pass streams precisely because it may
+        ask for a whole bank, which a non-streaming request is not allowed to.
+        """
+
+        self.calls.append(kwargs)
+        outputs = self._outputs
+
+        class _Stream:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc):
+                return False
+
+            async def get_final_message(self):
+                return types.SimpleNamespace(parsed_output=outputs.pop(0))
+
+        return _Stream()
+
 
 class _StubClient:
     def __init__(self, outputs: list) -> None:
@@ -528,6 +552,25 @@ class _AlwaysFailingMessages:
 
     async def parse(self, **_kwargs):
         raise self._error
+
+    def stream(self, **_kwargs):
+        """Fails where the real one would: on entering the stream.
+
+        The Analyst pass streams, so a provider refusal reaches it here rather
+        than from `parse`, and a stage that could not report a rate limit as
+        one is the whole point of the test this serves.
+        """
+
+        error = self._error
+
+        class _Failing:
+            async def __aenter__(self):
+                raise error
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return _Failing()
 
     async def create(self, **_kwargs):
         raise self._error
@@ -1607,3 +1650,63 @@ class TestTheBatchSchemaIsOneTheApiAccepts:
         item = _BANK_SCHEMA["properties"]["candidates"]["items"]
         assert item["properties"]["priority"] == {"type": "integer"}
         assert "priority" in item["required"]
+
+
+class TestTheAnalystPassHasRoomForABank:
+    """One token budget for five stages, and only one of them emits a bank.
+
+    Watched live: the batch succeeded at the provider and the compile stopped
+    with an empty bank and this reason —
+
+        analyst batch returned unparseable output: Unterminated string
+        starting at: line 1 column 15243 (char 15242)
+
+    Truncated output, cut mid-string, because `MAX_TOKENS` is 16000 and shared
+    by every stage. Extraction returns a handful of claims; the Analyst pass
+    returns up to `MAX_CANDIDATES` candidates, each carrying a section, a
+    trigger list, a phrasing, a stub, a language and a priority. A bank near
+    its own ceiling cannot fit, and what comes back is not a smaller bank but
+    a broken one — the truncation lands mid-token, so the whole pass is lost
+    rather than shortened.
+    """
+
+    def test_the_analyst_budget_is_larger_than_the_shared_one(self):
+        from app.orchestration.anthropic_engines import ANALYST_MAX_TOKENS, MAX_TOKENS
+
+        assert ANALYST_MAX_TOKENS > MAX_TOKENS
+
+    def test_the_direct_route_asks_for_a_whole_bank_too(self):
+        """It streams, which is the only way it may ask for one.
+
+        The SDK refuses a *non-streaming* request whose budget implies more
+        than ten minutes — "Streaming is required for operations that may take
+        longer than 10 minutes" — so capping the call instead just moved the
+        failure: a bank that did not fit came back truncated mid-token and
+        failed to parse. Neither a smaller bank nor an error; a whole pass
+        lost.
+        """
+
+        import inspect
+
+        from app.orchestration import anthropic_engines
+
+        source = inspect.getsource(anthropic_engines.anthropic_compiler_engines)
+        direct = source[source.index("async def run_analyst") :]
+        direct = direct[: direct.index("async def submit_batch")]
+
+        assert "client.messages.stream(" in direct, "a capped request truncates instead"
+        assert "max_tokens=ANALYST_MAX_TOKENS" in direct
+
+    def test_it_leaves_room_for_a_bank_at_its_own_ceiling(self):
+        """The contract the pass is held to is what it has to be able to emit.
+
+        A rough floor rather than an exact size: a candidate is a short object
+        and fifty tokens apiece is conservative, but a budget under that
+        cannot express the bank the contract demands and the shortfall shows
+        up as unparseable JSON rather than as a refusal.
+        """
+
+        from app.modules.compiler.agent import MAX_CANDIDATES
+        from app.orchestration.anthropic_engines import ANALYST_MAX_TOKENS
+
+        assert ANALYST_MAX_TOKENS >= MAX_CANDIDATES * 50
