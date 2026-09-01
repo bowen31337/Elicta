@@ -100,7 +100,21 @@ class BankCollector:
         # Copied before iterating: a compile triggered mid-sweep would
         # otherwise mutate the mapping underneath the loop.
         for compile_id, run in list(self._runs().items()):
-            outcome = await self._visit(compile_id, run)
+            try:
+                outcome = await self._visit(compile_id, run)
+            except Exception as cause:  # noqa: BLE001
+                # The same reasoning the collect call below already applies,
+                # applied to the whole visit: every other engagement's bank is
+                # waiting on this one loop, and a record that cannot be read
+                # must not be able to stop it. One did — a restored batch
+                # whose timestamp came back without a timezone — and no bank
+                # anywhere was collected again.
+                outcome = CollectionOutcome(
+                    compile_id,
+                    getattr(run, "engagement_id", ""),
+                    CollectionState.FAILED,
+                    f"this compile could not be read: {cause}",
+                )
             if outcome is None:
                 continue
             outcomes.append(outcome)

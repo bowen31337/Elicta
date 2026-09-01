@@ -279,3 +279,78 @@ def test_a_restored_batch_that_ends_badly_stops_saying_it_is_waiting(tmp_path):
     assert body.get("stopped_at") == "batch-collection", (
         "and it must still say where it got to, not 404 as if nothing ran"
     )
+
+
+def test_a_batch_restored_from_storage_can_be_aged(tmp_path):
+    """SQLite hands back a naive datetime; the collector compares aware ones.
+
+    `_expired` subtracts the submission time from now to decide whether to
+    abandon a batch. Restored, `submitted_at` came back without a timezone —
+    SQLite does not keep one — and the subtraction raised. The exception
+    escaped `_visit`, which ends the *whole* sweep: one restored batch stopped
+    every engagement's bank from ever being collected, which is how a compile
+    came to take for ever.
+    """
+
+    from datetime import UTC, datetime
+
+    from app.composition import _compiles_to_sweep
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+    with _client(url) as (_after, backend):
+        run = _compiles_to_sweep(backend)["compile-1"]
+        submitted_at = run.submission.requested_at
+
+        assert submitted_at.tzinfo is not None, (
+            "naive here, and the collector subtracts it from an aware `now()`"
+        )
+        # The comparison the collector actually makes.
+        assert (datetime.now(UTC) - submitted_at).total_seconds() >= 0
+
+
+def test_one_unswept_batch_does_not_end_the_sweep(tmp_path):
+    """Every other engagement's bank is waiting on the same loop.
+
+    The collector already says so about a provider failure and guards for it.
+    Anything else raised out of a visit killed the pass — so a single bad
+    record was enough to stop collection everywhere.
+    """
+
+    import asyncio
+
+    from app.orchestration.bank_collector import BankCollector
+
+    class _Exploding:
+        engagement_id = "eng-boom"
+        batch_job_id = "batch-boom"
+        analyst_passes: list = []
+        stages_completed: list = []
+        stopped_at = "batch-collection"
+
+        @property
+        def submission(self):
+            raise RuntimeError("this record cannot be read")
+
+    reached: list[str] = []
+
+    async def collect(run):
+        reached.append(run.engagement_id)
+        return run
+
+    collector = BankCollector(
+        runs=lambda: {"bad": _Exploding(), "good": _SubmittedRun("eng-good")},
+        collect=collect,
+    )
+
+    outcomes = asyncio.run(collector.sweep())
+
+    assert "eng-good" in reached, (
+        "the healthy engagement was never visited: one bad record ended the pass"
+    )
+    assert any(o.engagement_id == "eng-boom" for o in outcomes), (
+        "and the one that failed has to be reported, not swallowed"
+    )
