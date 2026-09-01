@@ -196,6 +196,40 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class CompileOutcomeRow(Base):
+    """What one bank compile did, and how far it got.
+
+    `compile_runs` was a plain dict, so a restart erased it: the endpoint
+    answered "no bank compile has run for this engagement" about an engagement
+    compiled minutes earlier, and every failure this made visible went
+    invisible again at the next launch.
+
+    `finished_at` is null while a compile is in flight, and that is the whole
+    of how a compile the process died during is told from one that completed.
+    The task is gone and nothing will finish it, so on the next launch a row
+    still open is reported stopped, with what happened — reported running it
+    would be a spinner nobody can stop.
+
+    Nothing rebuilds this. Re-running the compile is minutes of model calls
+    and would say what happens now rather than what happened then.
+    """
+
+    __tablename__ = "compile_outcomes"
+
+    compile_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    engagement_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    stages_completed: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    #: The first stage that did not complete, or null when it all did.
+    stopped_at: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    #: That stage's own error, for whoever is debugging the pipeline. The
+    #: sentence the operator reads is composed in the panel.
+    reason: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+
+
 class CompileBatchRow(Base):
     """An analyst batch that was submitted and has not been collected yet.
 

@@ -83,6 +83,12 @@ def test_an_interrupted_compile_stops_reporting_itself_as_running() -> None:
 
     That is the one answer an operator cannot act on: they cannot wait it out
     and they cannot see a reason to fix.
+
+    It used to answer 404 instead — "no bank compile has run for this
+    engagement" — which stops it reporting itself as running and replaces one
+    wrong answer with another: work was done, and was billed. Now that the
+    outcome is stored the honest third answer is available, so that is what is
+    asserted.
     """
 
     with _client() as (client, backend):
@@ -101,4 +107,10 @@ def test_an_interrupted_compile_stops_reporting_itself_as_running() -> None:
         # The attempt is on record even though its run is not.
         assert backend.bank_compiles, "the attempt was not recorded at all"
         assert backend.compile_runs == {}, "a cancelled task must not record a run"
-        assert outcome.status_code == 404, outcome.text
+        assert outcome.status_code == 200, outcome.text
+        body = outcome.json()
+        assert body["state"] == "stopped", body
+        assert body["complete"] is False
+        assert "closed" in (body["reason"] or "").lower(), (
+            "404 would say nothing ran, and something did"
+        )

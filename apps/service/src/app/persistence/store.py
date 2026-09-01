@@ -1152,6 +1152,49 @@ class StateStore:
             lock=self._lock,
         )
 
+    def compile_outcomes(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """What each bank compile did, by compile id."""
+
+        table = metadata.tables["compile_outcomes"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.compile_id] = decode(
+                {
+                    "compile_id": row.compile_id,
+                    "engagement_id": row.engagement_id,
+                    "stages_completed": row.stages_completed or [],
+                    "stopped_at": row.stopped_at,
+                    "reason": row.reason,
+                    "started_at": row.started_at,
+                    "finished_at": row.finished_at,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "compile_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "engagement_id": value.engagement_id,
+                    "stages_completed": list(value.stages_completed or []),
+                    "stopped_at": value.stopped_at,
+                    "reason": value.reason,
+                    "started_at": value.started_at,
+                    "finished_at": value.finished_at,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "compile_id", key),
+            lock=self._lock,
+        )
+
     def compile_batches(
         self, decode: Callable[[dict[str, Any]], V]
     ) -> DurableMapping[str, V]:
