@@ -251,6 +251,7 @@ from app.modules.voiceprint.service import (
 from app.orchestration.anthropic_engines import probe_anthropic_credential
 from app.orchestration.bank_collector import BankCollector
 from app.orchestration.compiler import (
+    BATCH_PATIENCE_SECONDS,
     DIRECT_ANALYST_STAGE,
     CompilerSinks,
     CompileRun,
@@ -4094,6 +4095,11 @@ async def _run_engagement_compile(
         engines=engines,
         sinks=sinks,
         on_stage=on_stage,
+        # The application's choice, not the library's default. An operator is
+        # standing in front of this: §3.10 budgets minutes and the Batch API
+        # has a twenty-four hour SLA, so the compile waits a bounded time for
+        # its own batch and drafts the pass directly when that runs out.
+        batch_patience=BATCH_PATIENCE_SECONDS,
     )
     if run.complete:
         run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
