@@ -151,6 +151,22 @@ class BankCompileTrigger(BaseModel):
     triggered_at: datetime
 
 
+class PendingCompileBatch(BaseModel):
+    """An analyst batch submitted and not yet collected.
+
+    Enough for the collector to go back for it after a restart, and no more:
+    the run it came from is rebuilt around these fields rather than stored
+    whole, because everything else about that run is either already persisted
+    elsewhere or is about work that has finished.
+    """
+
+    compile_id: str
+    engagement_id: str
+    batch_job_id: str
+    stages_completed: list[str] = Field(default_factory=list)
+    submitted_at: datetime
+
+
 class BankCompileOutcome(BaseModel):
     """How far one engagement's last bank compile got, and what stopped it (PRD FR-4.8).
 

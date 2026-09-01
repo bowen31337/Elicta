@@ -52,8 +52,18 @@ interface WireMeetingList {
 
 /** How far the last compile got, and what stopped it. See `compileNotice`. */
 interface WireCompileOutcome {
-  readonly state?: 'running' | 'complete' | 'stopped';
+  /**
+   * `running`, `awaiting`, `complete` or `stopped`.
+   *
+   * `awaiting` is the drafting job sitting with the provider as a batch —
+   * everything asked of the chain is done and the result comes back on its
+   * own. It was reported as `stopped` until a live compile told an operator
+   * their successful submission had produced no usable bank.
+   */
+  readonly state?: 'running' | 'awaiting' | 'complete' | 'stopped';
   readonly complete: boolean;
+  /** Which stages finished. Sent by the service; useful for saying so. */
+  readonly stages_completed?: readonly string[];
   readonly stopped_at: string | null;
   /** Written for whoever maintains the pipeline. Never rendered. */
   readonly reason: string | null;
@@ -116,6 +126,21 @@ export function compileRunning(outcome: WireCompileOutcome | null | undefined): 
 export function compileNotice(outcome: WireCompileOutcome | null | undefined): string | null {
   if (compileRunning(outcome)) {
     return 'Compiling now — reading the documents and drafting candidates. Minutes, not seconds.';
+  }
+  /* The halfway point, and where a compile spends most of its life. The
+     drafting job goes to the provider as a batch and comes back minutes or
+     hours later; the chain returns at that point having done everything asked
+     of it. It used to be recorded as a stop, so forty seconds after a
+     submission that had just succeeded the operator was told the compile
+     "stopped while collecting the drafted questions" and that "the drafting
+     itself did not produce a usable bank". Every clause wrong, while the
+     provider was still working. */
+  if (outcome?.state === 'awaiting') {
+    return (
+      'The drafting job has been sent off and is with the provider. It comes '
+      + 'back on its own — usually minutes, sometimes hours — and the bank '
+      + 'fills in when it does. Nothing needs doing.'
+    );
   }
   if (!outcome || outcome.complete || outcome.stopped_at === null) return null;
   const stage = COMPILE_STAGE[outcome.stopped_at] ?? outcome.stopped_at.replace(/-/g, ' ');

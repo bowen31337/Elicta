@@ -196,6 +196,30 @@ class Candidate(Base):
     ordinal: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0)
 
 
+class CompileBatchRow(Base):
+    """An analyst batch that was submitted and has not been collected yet.
+
+    A compile does its work in two visits: the Analyst pass goes to the
+    provider as a batch, `fetch_batch` returns nothing while it is still
+    processing, and `BankCollector` sweeps until it comes back. The sweep
+    reads the in-flight compiles — which lived in a plain dict, so a restart
+    inside that window left nothing to sweep. The batch was paid for, the bank
+    never updated, and no screen mentioned it. A batch may take hours, which
+    makes a restart inside the window ordinary rather than exceptional.
+
+    Only what the collector needs to go back for it. The row goes when the
+    batch has been collected: it describes an obligation, not a history.
+    """
+
+    __tablename__ = "compile_batches"
+
+    compile_id: Mapped[str] = mapped_column(sa.String(64), primary_key=True)
+    engagement_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    batch_job_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    stages_completed: Mapped[list | None] = mapped_column(sa.JSON(), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
 class DebriefOutcomeRow(Base):
     """What became of one debrief run, whether or not it produced anything.
 

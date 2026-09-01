@@ -47,6 +47,7 @@ from app.modules.compiler.api.models import (
 from app.modules.compiler.api.models import (
     BankCompileOutcome,
     CandidatePatchRequest,
+    PendingCompileBatch,
 )
 from app.modules.compiler.api.router import (
     build_bank_candidates_router,
@@ -252,6 +253,7 @@ from app.orchestration.bank_collector import BankCollector
 from app.orchestration.compiler import (
     DIRECT_ANALYST_STAGE,
     CompilerSinks,
+    CompileRun,
     collect_engagement_compile,
     submit_engagement_compile,
 )
@@ -455,6 +457,13 @@ class Backend:
 
     # Context compiler chain (architecture §3.10) records.
     compile_runs: dict[str, Any] = field(default_factory=dict)
+    #: Analyst batches submitted and not yet collected, by compile id. Durable
+    #: on purpose: `BankCollector` sweeps the in-flight compiles, and those
+    #: live in memory — so a restart inside the window a batch takes left
+    #: nothing to sweep. The batch was paid for, the bank never updated, and
+    #: no screen said so. What is lost there is not a record of work; it is
+    #: work still owed.
+    pending_compile_batches: dict[str, Any] = field(default_factory=dict)
     #: Compiles that have been accepted and have not finished. A compile now
     #: runs outside its request, and an `asyncio` task nobody holds a reference
     #: to can be collected mid-flight — so these are held until they end.
@@ -1226,6 +1235,10 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     # And why a run stopped, which is all there is to say when it produced no
     # chain at all — the case where the operator most needs telling.
     backend.debrief_outcomes = store.debrief_outcomes(lambda row: DebriefOutcome(**row))
+    # And the batches a restart would otherwise strand with the provider.
+    backend.pending_compile_batches = store.compile_batches(
+        lambda row: PendingCompileBatch(**row)
+    )
     backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
@@ -2982,7 +2995,26 @@ def _include_operational_routers(
             None,
         )
         if latest is None:
-            return None
+            # `bank_compiles` is in-memory as well, so after a restart there
+            # is no id to look up — and a batch still with the provider is
+            # exactly the case that outlives the process that started it.
+            owed = next(
+                (
+                    pending
+                    for pending in backend.pending_compile_batches.values()
+                    if pending.engagement_id == engagement_id
+                ),
+                None,
+            )
+            if owed is None:
+                return None
+            return BankCompileOutcome(
+                engagement_id=engagement_id,
+                compile_id=owed.compile_id,
+                state="awaiting",
+                complete=False,
+                stages_completed=list(owed.stages_completed),
+            )
 
         if latest in backend.compile_tasks:
             # Accepted and still working. This state did not exist while the
@@ -3006,9 +3038,42 @@ def _include_operational_routers(
 
         run = backend.compile_runs.get(latest)
         if run is None:
-            return None
+            # Nothing in memory. A batch this process did not submit is still
+            # owed an answer, and saying "no compile has run" about one is how
+            # an operator concludes the button did nothing.
+            pending = backend.pending_compile_batches.get(latest)
+            if pending is None:
+                return None
+            return BankCompileOutcome(
+                engagement_id=engagement_id,
+                compile_id=latest,
+                state="awaiting",
+                complete=False,
+                stages_completed=list(pending.stages_completed),
+            )
 
         stopped_at = getattr(run, "stopped_at", None)
+
+        # The halfway point, and the state a compile spends most of its life
+        # in. The Analyst pass is submitted as a batch and collected minutes
+        # or hours later; `fetch_batch` returns `[]` while the provider is
+        # still working, so the chain returns at `batch-collection` having
+        # done everything asked of it, and `BankCollector` sweeps for the
+        # result.
+        #
+        # Recorded as a stop, that told the operator — forty seconds after a
+        # submission that had just succeeded — that the compile "stopped while
+        # collecting the drafted questions" and "the drafting itself did not
+        # produce a usable bank". Every clause of it wrong, and arriving while
+        # the provider was still working.
+        if stopped_at == "batch-collection" and getattr(run, "batch_job_id", None):
+            return BankCompileOutcome(
+                engagement_id=engagement_id,
+                compile_id=latest,
+                state="awaiting",
+                complete=False,
+                stages_completed=list(getattr(run, "stages_completed", [])),
+            )
         record = getattr(run, _STAGE_RECORD.get(stopped_at or "", ""), None)
         if record is None and isinstance(run, _CrashedCompile):
             record = run.orchestration
@@ -4170,6 +4235,29 @@ def _compiler_sinks(backend: Backend, engagement_id: str) -> CompilerSinks:
     async def save_batch_submission(record: Any) -> None:
         backend.batch_submissions[engagement_id] = record
 
+        # And durably, because from here the work is with the provider and
+        # this process is only the thing that has to remember to go back for
+        # it. Written on submission rather than when the compile returns: the
+        # gap between the two is where a crash strands a batch nobody knows
+        # about.
+        job_id = getattr(record, "batch_job_id", None)
+        compile_id = next(
+            (
+                candidate
+                for engagement, candidate in reversed(backend.bank_compiles)
+                if engagement == engagement_id
+            ),
+            None,
+        )
+        if job_id and compile_id:
+            backend.pending_compile_batches[compile_id] = PendingCompileBatch(
+                compile_id=compile_id,
+                engagement_id=engagement_id,
+                batch_job_id=job_id,
+                stages_completed=list(backend.compile_stages.get(compile_id, [])),
+                submitted_at=getattr(record, "requested_at", None) or datetime.now(UTC),
+            )
+
     async def save_analyst_pass(record: Any) -> None:
         backend.analyst_passes.append(record)
 
@@ -4195,7 +4283,21 @@ async def _collect_one_compile(backend: Backend, run: Any, engines: CompilerEngi
         run, engines=audited, sinks=_compiler_sinks(backend, engagement_id)
     )
     _store_compiled_candidates(backend, engagement_id, run)
+    if run.stopped_at != "batch-collection":
+        # Collected, or ended for a reason going back again will not change.
+        # The row is an obligation rather than a history, so it goes when
+        # there is nothing left to go back for — and stays while the provider
+        # is still working, which is what `batch-collection` means here.
+        _forget_pending_batch(backend, engagement_id)
     return run
+
+
+def _forget_pending_batch(backend: Backend, engagement_id: str) -> None:
+    """Drop every pending batch for this engagement, by whichever id."""
+
+    for compile_id, pending in list(backend.pending_compile_batches.items()):
+        if pending.engagement_id == engagement_id:
+            del backend.pending_compile_batches[compile_id]
 
 
 def build_bank_collector(backend: Backend, engines: CompilerEngines) -> BankCollector:
@@ -4207,9 +4309,48 @@ def build_bank_collector(backend: Backend, engines: CompilerEngines) -> BankColl
     """
 
     return BankCollector(
-        runs=lambda: backend.compile_runs,
+        runs=lambda: _compiles_to_sweep(backend),
         collect=lambda run: _collect_one_compile(backend, run, engines),
     )
+
+
+def _compiles_to_sweep(backend: Backend) -> dict[str, Any]:
+    """Every compile that might have a batch waiting, including from before.
+
+    The in-flight runs, plus one rebuilt for each batch this process did not
+    submit itself. Without the second, a restart inside the window a batch
+    takes left nothing to sweep: the batch was paid for, the bank never
+    updated, and no screen said so.
+
+    Rebuilt rather than stored whole. What `collect_engagement_compile` needs
+    of a run at this point is the engagement, the provider's handle and the
+    stages already done; everything else about that run is either persisted
+    elsewhere or is about work that has finished.
+    """
+
+    sweeping = dict(backend.compile_runs)
+    for compile_id, pending in backend.pending_compile_batches.items():
+        if compile_id in sweeping:
+            continue
+        sweeping[compile_id] = CompileRun(
+            engagement_id=pending.engagement_id,
+            submission=_RestoredSubmission(pending.batch_job_id, pending.submitted_at),
+            stages_completed=list(pending.stages_completed),
+            stopped_at="batch-collection",
+        )
+    return sweeping
+
+
+@dataclass(frozen=True)
+class _RestoredSubmission:
+    """The two fields a submission is asked for once its process has gone.
+
+    `CompileRun.batch_job_id` reads through `submission`, and the collector
+    ages a batch off `submission.requested_at` to decide when to abandon it.
+    """
+
+    batch_job_id: str
+    requested_at: Any
 
 
 def _store_compiled_candidates(backend: Backend, engagement_id: str, run: Any) -> None:
