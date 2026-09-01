@@ -22,6 +22,7 @@ several clients' requirements data is the incident that section warns about.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -100,6 +101,17 @@ class CompileRun:
         return self.stopped_at is None
 
 
+#: How long a compile waits for its own batch before drafting the pass
+#: directly. Minutes, because that is what §3.10 budgets and what the operator
+#: is standing in front of — not the provider's twenty-four hour SLA, which is
+#: a bound on the worst case rather than a promise about the usual one.
+BATCH_PATIENCE_SECONDS = 180.0
+
+#: How often the wait above asks. Cheap — a batch retrieve is one small
+#: request — and short enough that a batch landing early is used promptly.
+_BATCH_POLL_SECONDS = 10.0
+
+
 async def submit_engagement_compile(
     engagement_id: str,
     *,
@@ -108,6 +120,7 @@ async def submit_engagement_compile(
     engines: CompilerEngines,
     sinks: CompilerSinks,
     on_stage: Callable[[str], None] | None = None,
+    batch_patience: float = 0.0,
 ) -> CompileRun:
     """Run §3.10 up to and including batch submission.
 
@@ -169,7 +182,70 @@ async def submit_engagement_compile(
         )
     completed("batch-submission")
 
-    return run
+    # Wait for it, briefly, and draft the pass directly if it does not come.
+    #
+    # The Batch API has a twenty-four hour SLA and §3.10 budgets minutes, and
+    # the screen this runs behind is a button somebody pressed. Those cannot
+    # both be true. The one that gives is the batch: a bank drafted overnight
+    # for half the price is not a saving on a screen where the operator is
+    # still standing.
+    #
+    # Here rather than in the collector because the context pack is still in
+    # scope. Collecting later would have to rebuild it, which means running
+    # extraction and structuring a second time.
+    #
+    # The batch stays the first choice and nothing changes when it is quick.
+    # Zero by default, which is this function as it has always been: submit
+    # and return, leaving the batch to `collect_engagement_compile`. The wait
+    # is something the application asks for — `composition` passes
+    # `BATCH_PATIENCE_SECONDS` — rather than something every caller inherits.
+    # A library that blocked for three minutes by default would have made
+    # every test that submits a batch wait three minutes, which is exactly
+    # what the first version of this did.
+    if batch_patience <= 0:
+        return run
+    if await _batch_arrives_within(run, engines, sinks, batch_patience):
+        return run
+    return await _analyst_without_a_batch(
+        run, context_pack, engines, sinks, on_stage=on_stage, require_refusal=False
+    )
+
+
+
+async def _batch_arrives_within(
+    run: CompileRun,
+    engines: CompilerEngines,
+    sinks: CompilerSinks,
+    patience: float,
+) -> bool:
+    """Poll this run's batch until it answers or the window runs out.
+
+    Collected through `collect_engagement_compile` rather than by fetching
+    here, so a batch that lands inside the window is turned into a bank by
+    exactly the code that turns one landing outside it into a bank. A second
+    implementation of that step is the last thing this needs.
+
+    Answering means results in hand, successful or not: a batch that ended
+    badly has ended, and redrafting it directly would buy a second pass to be
+    told the same thing. Only silence falls through.
+    """
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + patience
+    while True:
+        run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
+        # `stopped_at` alone is not enough: a batch that ended badly also stops
+        # at `batch-collection`, and the passes are what tell the two apart —
+        # an unfinished batch collects nothing at all.
+        if run.stopped_at != "batch-collection" or run.analyst_passes:
+            return True
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        # Never past the deadline: the window is the promise being made to
+        # whoever pressed the button, and a poll interval overshooting it
+        # would quietly make the promise longer than it says.
+        await asyncio.sleep(min(_BATCH_POLL_SECONDS, remaining))
 
 
 #: The stage name a compile that bypassed the Batch API reports having run.
@@ -190,8 +266,9 @@ async def _analyst_without_a_batch(
     sinks: CompilerSinks,
     *,
     on_stage: Callable[[str], None] | None = None,
+    require_refusal: bool = True,
 ) -> CompileRun:
-    """Run the Analyst pass directly when the batch was refused as not permitted.
+    """Run the Analyst pass directly when the batch will not do.
 
     A credential can be perfectly good for `/v1/messages` and carry no batch
     scope at all, and until this existed that combination meant the question
@@ -212,8 +289,13 @@ async def _analyst_without_a_batch(
         run.stopped_at = "batch-submission"
         return run
 
+    # Two ways a batch will not do, and only one of them is a refusal. The
+    # other is a batch that was accepted and has not come back inside the
+    # window the operator is standing in — see `BATCH_PATIENCE_SECONDS` — and
+    # there is nothing to inspect on the submission for that, because the
+    # submission succeeded.
     refusal = getattr(run.submission, "error", None) or ""
-    if upstream_failure_in(refusal) is not UpstreamFailure.NOT_ENTITLED:
+    if require_refusal and upstream_failure_in(refusal) is not UpstreamFailure.NOT_ENTITLED:
         run.stopped_at = "batch-submission"
         return run
 
