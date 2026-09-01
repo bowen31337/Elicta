@@ -386,3 +386,22 @@ def test_a_collection_that_failed_says_why(tmp_path):
     assert body["stopped_at"] == "batch-collection"
     assert body["reason"] is not None, "the pass said what was wrong and nothing read it"
     assert "10-300" in body["reason"]
+
+
+def test_the_outcome_says_when_the_compile_began(tmp_path):
+    """A meter cannot move within a stage without knowing how long it has been.
+
+    The stages are the only thing the service reports, and they land twenty
+    seconds and then two hundred seconds apart. A bar that can only step at
+    those boundaries stands still for minutes at a time, which is the thing it
+    exists to distinguish from being stuck.
+    """
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+        body = client.get(f"/api/engagements/{engagement_id}/bank/compile").json()
+
+    assert body.get("started_at"), body

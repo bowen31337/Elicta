@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+
+import { compileFraction } from './compileFraction';
 import '../../ui/notices.css';
 import './CompileProgress.css';
 
@@ -26,7 +29,25 @@ export interface CompileProgressProps {
   readonly notice?: string | null;
   /** Defaults from `state`; pass it only where the state cannot decide. */
   readonly tone?: NoticeTone;
+  /**
+   * When the compile was accepted, in epoch milliseconds.
+   *
+   * Without it the bar can only step at stage boundaries, which are twenty
+   * seconds and then two hundred seconds apart — long enough that a working
+   * compile is indistinguishable from a stopped one, which is the whole thing
+   * this is here to show.
+   */
+  readonly startedAt?: number | null;
 }
+
+/**
+ * How often the creep is recomputed.
+ *
+ * Four times a second: enough that the bar reads as moving rather than
+ * ticking, and cheap — it is arithmetic and a style property, no network and
+ * no layout. Only while something is running.
+ */
+const TICK_MS = 250;
 
 /**
  * The four stages a compile passes through, in order, in the operator's words.
@@ -65,6 +86,18 @@ function stepsFor(stagesCompleted: readonly string[]): typeof STEPS {
   return sentABatch ? STEPS : STEPS.filter((step) => !step.ids.includes('batch-submission'));
 }
 
+/**
+ * How full the stage under way should be drawn.
+ *
+ * The whole bar is `along`; the segments before this one are full. What is
+ * left over belongs to this stage, as a share of the width one stage gets.
+ */
+function stepFill(along: number, steps: number, done: number): number {
+  const perStep = 1 / steps;
+  return Math.max(0, Math.min(1, (along - done * perStep) / perStep));
+}
+
+
 function toneFor(state: CompileState, given?: NoticeTone): NoticeTone {
   if (given) return given;
   return state === 'stopped' ? 'error' : 'working';
@@ -94,7 +127,16 @@ export function CompileProgress({
   stagesCompleted,
   notice = null,
   tone,
+  startedAt = null,
 }: CompileProgressProps) {
+  const running = state === 'running';
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running || startedAt === null) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [running, startedAt]);
+
   if (state === 'idle' && notice === null) return null;
 
   const steps = stepsFor(stagesCompleted);
@@ -103,19 +145,26 @@ export function CompileProgress({
   ).length;
   const heading = currentlyDoing(state, done, steps);
   const showsPercent = state === 'running' || state === 'awaiting' || state === 'complete';
-  /* The stage under way counts as half, which is what the bar already draws.
-     Counting finished stages alone read 0% for the whole of the first one —
-     twenty seconds of a compile whose longest stage is ten times that — while
-     the segment beside it was visibly filling. A number that disagrees with
-     the bar next to it is worse than no number.
-
-     Half is an estimate and is meant as one: the stages are wildly uneven, so
-     no arithmetic over stage *counts* is going to be accurate. What it has to
-     be is honest about direction and never contradict the bar. */
-  const reached = state === 'running' && done < steps.length ? done + 0.5 : done;
+  /* Weighted by how long each stage takes and crept within the current one,
+     rather than counted. Stage counting made the bar appear to start at
+     thirteen per cent and then stand still: the stages are twenty, twenty and
+     two hundred seconds, so a quarter of the *count* is a fiftieth of the
+     work. See `compileFraction` for what keeps the creep honest. */
+  const along = compileFraction({
+    stagesCompleted,
+    elapsedMs: startedAt === null ? null : Math.max(0, now - startedAt),
+    complete: state === 'complete',
+    awaiting: state === 'awaiting',
+  });
 
   return (
-    <div className="compile-progress">
+    <div
+      className="compile-progress"
+      /* A number rather than a class per bucket: the fill walks from the
+         working blue to the finished green as it climbs, and buckets would
+         put steps back into the one thing being made continuous. */
+      style={{ '--compile-along': along } as React.CSSProperties}
+    >
       {heading === null && !showsPercent ? null : (
         <p className="compile-progress__doing t-footnote">
           <span>{heading}</span>
@@ -126,7 +175,7 @@ export function CompileProgress({
               reason directly underneath. */}
           {showsPercent ? (
             <span className="compile-progress__percent">
-              {Math.round((reached / steps.length) * 100)}%
+              {Math.round(along * 100)}%
             </span>
           ) : null}
         </p>
@@ -153,6 +202,14 @@ export function CompileProgress({
                 : index === done && state === 'running'
                   ? 'compile-progress__step compile-progress__step--active'
                   : 'compile-progress__step'
+            }
+            /* Each segment fills by the share of *this* stage that is done,
+               so the picture and the figure are the one number rather than
+               two that have to be kept in step. They were not, once. */
+            style={
+              index === done && state === 'running'
+                ? ({ '--step-fill': stepFill(along, steps.length, done) } as React.CSSProperties)
+                : undefined
             }
           />
         ))}

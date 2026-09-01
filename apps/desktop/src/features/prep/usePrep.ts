@@ -64,6 +64,8 @@ interface WireCompileOutcome {
   readonly complete: boolean;
   /** Which stages finished. Sent by the service; useful for saying so. */
   readonly stages_completed?: readonly string[];
+  /** When the compile was accepted, so the meter can move within a stage. */
+  readonly started_at?: string | null;
   readonly stopped_at: string | null;
   /** Written for whoever maintains the pipeline. Never rendered. */
   readonly reason: string | null;
@@ -144,6 +146,20 @@ export function compileStages(
  * warning: nothing broke, and there is still something to look at. Everything
  * else is work in progress, which is not a problem at all.
  */
+/**
+ * When the compile began, as the meter needs it.
+ *
+ * `null` for anything unparseable rather than a guess: a start time invented
+ * here would make the bar creep from a moment that never happened.
+ */
+export function compileStartedAt(
+  outcome: WireCompileOutcome | null | undefined,
+): number | null {
+  if (!outcome?.started_at) return null;
+  const at = Date.parse(outcome.started_at);
+  return Number.isNaN(at) ? null : at;
+}
+
 export function compileTone(
   outcome: WireCompileOutcome | null | undefined,
 ): 'working' | 'warning' | 'error' {
@@ -231,6 +247,8 @@ export interface PrepData {
   readonly compileStages: readonly string[];
   /** How the notice reads: something to wait out, look at, or fix. */
   readonly compileTone: 'working' | 'warning' | 'error';
+  /** When the compile began, in epoch milliseconds, or `null`. */
+  readonly compileStartedAt: number | null;
   readonly meetings: readonly PreparedMeeting[];
   readonly status: ResourceStatus;
   readonly error: string | null;
@@ -324,6 +342,7 @@ export function usePrep(): PrepData {
       | 'stopped',
     compileStages: compileStages(compile.data),
     compileTone: compileTone(compile.data),
+    compileStartedAt: compileStartedAt(compile.data),
     meetings: useMemo(
       () =>
         (meetings.data?.meetings ?? []).map((meeting) => ({

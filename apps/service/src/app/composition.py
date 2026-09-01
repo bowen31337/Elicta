@@ -3040,6 +3040,7 @@ def _include_operational_routers(
                 state="awaiting",
                 complete=False,
                 stages_completed=list(owed.stages_completed),
+                started_at=owed.submitted_at,
             )
 
         if latest in backend.compile_tasks:
@@ -3052,6 +3053,9 @@ def _include_operational_routers(
                 compile_id=latest,
                 state="running",
                 complete=False,
+                started_at=getattr(
+                    backend.compile_outcomes.get(latest), "started_at", None
+                ),
                 # What it has actually finished, not a hardcoded nothing. The
                 # run records its own stages and only becomes reachable when
                 # the whole chain returns, so for the several minutes a real
@@ -3079,6 +3083,7 @@ def _include_operational_routers(
                 state="awaiting",
                 complete=False,
                 stages_completed=list(pending.stages_completed),
+                started_at=pending.submitted_at,
             )
 
         stopped_at = getattr(run, "stopped_at", None)
@@ -3115,6 +3120,15 @@ def _include_operational_routers(
                 state="awaiting",
                 complete=False,
                 stages_completed=list(getattr(run, "stages_completed", [])),
+                # The compile's own start where there is one; otherwise when
+                # the batch went off, which is the closest thing this run
+                # knows to a beginning.
+                started_at=getattr(
+                    backend.compile_outcomes.get(latest), "started_at", None
+                )
+                or getattr(
+                    backend.pending_compile_batches.get(latest), "submitted_at", None
+                ),
             )
         record = getattr(run, _STAGE_RECORD.get(stopped_at or "", ""), None)
         if record is None and isinstance(run, _CrashedCompile):
@@ -3146,6 +3160,9 @@ def _include_operational_routers(
             stopped_at=stopped_at,
             reason=reason,
             cause=_stage_failure_cause(stopped_at, reason),
+            started_at=getattr(
+                backend.compile_outcomes.get(latest), "started_at", None
+            ),
         )
 
     app.include_router(
@@ -4447,6 +4464,7 @@ def _outcome_of_stored(stored: Any) -> Any:
         stopped_at=stopped_at,
         reason=reason,
         cause=_stage_failure_cause(stopped_at, reason),
+        started_at=stored.started_at,
     )
 
 

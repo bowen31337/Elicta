@@ -216,3 +216,11 @@ class BankCompileOutcome(BaseModel):
     stopped_at: str | None = None
     reason: str | None = None
     cause: str | None = None
+    #: When this compile was accepted.
+    #:
+    #: The stages are all the service reports and they land twenty seconds and
+    #: then two hundred seconds apart, so a meter that can only step at those
+    #: boundaries stands still for minutes — which is the thing it exists to
+    #: tell apart from being stuck. With this the screen can move within a
+    #: stage against how long one usually takes.
+    started_at: datetime | None = None

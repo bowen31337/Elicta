@@ -89,6 +89,8 @@ export interface PrepScreenProps {
   readonly compileStages?: readonly string[];
   /** How the notice reads: something to wait out, look at, or fix. */
   readonly compileTone?: NoticeTone;
+  /** When the compile began, so the meter can move within a stage. */
+  readonly compileStartedAt?: number | null;
   readonly meetings: readonly PreparedMeeting[];
   readonly actions: PrepActions;
 }
@@ -157,6 +159,7 @@ export function PrepScreen({
   compileState = 'idle',
   compileStages = [],
   compileTone,
+  compileStartedAt = null,
 }: PrepScreenProps) {
   const write = useWrite();
   const [link, setLink] = useState('');
@@ -624,6 +627,7 @@ export function PrepScreen({
             <CompileProgress
               state={compileState}
               stagesCompleted={compileStages}
+              startedAt={compileStartedAt}
               notice={
                 compileNotice
                 ?? (compileState === 'complete'
@@ -670,6 +674,7 @@ export function PrepScreen({
               <CompileProgress
                 state={compileState}
                 stagesCompleted={compileStages}
+                startedAt={compileStartedAt}
                 notice={compileNotice}
                 tone={compileTone}
               />
@@ -1107,6 +1112,7 @@ export default function PrepRoute() {
       compileState={prep.compileState}
       compileStages={prep.compileStages}
       compileTone={prep.compileTone}
+      compileStartedAt={prep.compileStartedAt}
       meetings={prep.meetings}
       actions={actions}
     />
