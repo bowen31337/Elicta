@@ -3094,6 +3094,21 @@ def _include_operational_routers(
         reason = getattr(record, "error", None)
         if reason is None and stopped_at in _STAGE_REASON_FIELD:
             reason = getattr(run, _STAGE_REASON_FIELD[stopped_at], None)
+        if reason is None and stopped_at == "batch-collection":
+            # `batch-collection` maps to the *submission* record, which
+            # succeeded — that is what makes this a collection failure rather
+            # than a submission one — so its error is always `None`. What went
+            # wrong is on the pass that came back, and nothing read it: the
+            # screen said the compile "stopped while collecting the drafted
+            # questions" and stopped there.
+            reason = next(
+                (
+                    getattr(record, "error", None)
+                    for record in getattr(run, "analyst_passes", None) or []
+                    if getattr(record, "error", None)
+                ),
+                None,
+            )
         return BankCompileOutcome(
             engagement_id=engagement_id,
             compile_id=latest,
