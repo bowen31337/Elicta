@@ -1,5 +1,5 @@
 import '../prep/screens.css';
-import './notices.css';
+import '../../ui/notices.css';
 
 import { ScreenEyebrow } from '../../ui/Mark';
 import { ScreenState } from '../../ui/ScreenState';

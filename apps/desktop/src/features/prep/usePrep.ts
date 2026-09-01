@@ -123,6 +123,35 @@ export function compileRunning(outcome: WireCompileOutcome | null | undefined): 
   return outcome?.state === 'running';
 }
 
+/**
+ * The stages the service says are finished, for the meter to draw.
+ *
+ * Reported by the run itself as each one completes, and dropped on the floor
+ * until now — which is why "Compiling" said the same thing at ten seconds and
+ * at six minutes, and why two reports came back saying it took for ever.
+ */
+export function compileStages(
+  outcome: WireCompileOutcome | null | undefined,
+): readonly string[] {
+  return outcome?.stages_completed ?? [];
+}
+
+/**
+ * How a compile's own notice reads: something to wait out, look at, or fix.
+ *
+ * A run that stopped is an error — a stage could not run and somebody has to
+ * do something. A run that *finished* and produced no usable bank is a
+ * warning: nothing broke, and there is still something to look at. Everything
+ * else is work in progress, which is not a problem at all.
+ */
+export function compileTone(
+  outcome: WireCompileOutcome | null | undefined,
+): 'working' | 'warning' | 'error' {
+  if (outcome?.state === 'stopped' || outcome?.stopped_at) return 'error';
+  if (outcome?.complete) return 'warning';
+  return 'working';
+}
+
 export function compileNotice(outcome: WireCompileOutcome | null | undefined): string | null {
   if (compileRunning(outcome)) {
     return 'Compiling now — reading the documents and drafting candidates. Minutes, not seconds.';
@@ -196,6 +225,12 @@ export interface PrepData {
   readonly compileNotice: string | null;
   /** True while a compile is on the wire. */
   readonly compileRunning: boolean;
+  /** Where the compile is, for the meter to draw. */
+  readonly compileState: 'idle' | 'running' | 'awaiting' | 'complete' | 'stopped';
+  /** Which stages the service says are finished. */
+  readonly compileStages: readonly string[];
+  /** How the notice reads: something to wait out, look at, or fix. */
+  readonly compileTone: 'working' | 'warning' | 'error';
   readonly meetings: readonly PreparedMeeting[];
   readonly status: ResourceStatus;
   readonly error: string | null;
@@ -256,6 +291,14 @@ export function usePrep(): PrepData {
     bank: sections.length === 0 ? null : { sections: sections.map(toSection) },
     compileNotice: compileNotice(compile.data),
     compileRunning: compileRunning(compile.data),
+    compileState: (compile.data?.state ?? 'idle') as
+      | 'idle'
+      | 'running'
+      | 'awaiting'
+      | 'complete'
+      | 'stopped',
+    compileStages: compileStages(compile.data),
+    compileTone: compileTone(compile.data),
     meetings: useMemo(
       () =>
         (meetings.data?.meetings ?? []).map((meeting) => ({

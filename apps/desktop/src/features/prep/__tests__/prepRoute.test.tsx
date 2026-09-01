@@ -193,7 +193,7 @@ describe('a compile that ran and stopped', () => {
     stubService({ ...EMPTY_BANK, ...outcome({ cause: 'not_entitled' }) });
     render(<PrepRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice).toHaveTextContent(/reading the documents/i);
     expect(notice).toHaveTextContent(/not permitted/i);
     expect(notice).toHaveTextContent(/waiting will not help/i);
@@ -204,7 +204,7 @@ describe('a compile that ran and stopped', () => {
     stubService({ ...EMPTY_BANK, ...outcome({ cause: 'rate_limited' }) });
     render(<PrepRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice).toHaveTextContent(/throttling/i);
     expect(notice).not.toHaveTextContent(/waiting will not help/i);
   });
@@ -213,7 +213,7 @@ describe('a compile that ran and stopped', () => {
     stubService({ ...EMPTY_BANK, ...outcome({ cause: 'not_configured' }) });
     render(<PrepRoute />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/no ai provider/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no ai provider/i);
   });
 
   it('names the direct drafting route in words, not by its internal name', async () => {
@@ -226,7 +226,7 @@ describe('a compile that ran and stopped', () => {
     });
     render(<PrepRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice).toHaveTextContent(/drafting the questions/i);
     expect(notice.textContent).not.toMatch(/analyst pass direct/i);
   });
@@ -238,7 +238,7 @@ describe('a compile that ran and stopped', () => {
     });
     render(<PrepRoute />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/drafting job/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/drafting job/i);
   });
 
   it('never puts the pipeline\'s own words on the screen', async () => {
@@ -252,7 +252,7 @@ describe('a compile that ran and stopped', () => {
     });
     render(<PrepRoute />);
 
-    const notice = await screen.findByRole('status');
+    const notice = await screen.findByRole('alert');
     expect(notice.textContent).not.toMatch(/any_of|user:batch|workspace:/);
   });
 

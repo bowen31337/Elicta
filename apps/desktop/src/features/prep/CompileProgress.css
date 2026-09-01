@@ -1,0 +1,88 @@
+/* The compile meter, and the notices under it.
+ *
+ * Four segments rather than a sliding bar: the stages are discrete and named,
+ * and a bar at 62% would imply a precision nothing here has.
+ *
+ * Only `transform` and `opacity` are animated. A segment filling scales along
+ * its own inline axis from the left, which is what a thing filling up does;
+ * animating width would lay the row out again on every frame.
+ */
+/* Sits as a child of `.group`, under the row that holds the label and the
+ * button, and takes the row's own horizontal padding so its edges line up
+ * with everything above it. Inside `row-main` it was squeezed beside the
+ * button: a three-line notice in a column half the card wide, with the meter
+ * stopping abruptly short of the control. A block that explains the row
+ * belongs under the row. */
+.compile-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-5) var(--space-4);
+}
+
+/* The separator `.row + .row` draws belongs above this too — it is a band of
+ * the same card, not a floating aside. */
+.row + .compile-progress {
+  padding-block-start: var(--space-4);
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
+.compile-progress__doing {
+  margin: 0;
+  color: var(--label-supporting);
+}
+
+.compile-progress__track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--space-1);
+  inline-size: 100%;
+}
+
+.compile-progress__step {
+  position: relative;
+  block-size: 4px;
+  border-radius: 2px;
+  background: var(--fill-4);
+  overflow: hidden;
+}
+
+/* The fill is a pseudo-element so the track keeps its own geometry and only
+   the fill moves — transform on the segment itself would scale the unfilled
+   ground with it. */
+.compile-progress__step::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.compile-progress__step--done::after {
+  transform: scaleX(1);
+}
+
+/* The stage being worked on: filled part-way and breathing, so a long stage
+   reads as working rather than stuck. The one animation on this screen, and it
+   earns its place — telling working from hung is the whole question an
+   operator has while a compile runs. */
+.compile-progress__step--active::after {
+  transform: scaleX(0.45);
+  animation: compile-progress-breathe 1.8s var(--ease-in-out) infinite;
+}
+
+@keyframes compile-progress-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compile-progress__step::after { transition: none; }
+  /* Gentler, not gone: the segment still shows which stage is running, it
+     simply stops pulsing. */
+  .compile-progress__step--active::after { animation: none; opacity: 0.7; }
+}
