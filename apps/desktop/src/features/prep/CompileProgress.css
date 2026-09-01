@@ -29,7 +29,19 @@
 
 .compile-progress__doing {
   margin: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
   color: var(--label-supporting);
+}
+
+/* Tabular figures, so the number does not shift the line as it climbs from
+ * one digit to three — the same reason a clock uses them. */
+.compile-progress__percent {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--label);
 }
 
 .compile-progress__track {

@@ -1,6 +1,6 @@
 [package]
 name = "elicta-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Elicta desktop shell — Tauri 2 webview over the shared Rust core"
 edition = "2021"
 license = "UNLICENSED"

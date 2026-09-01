@@ -1697,6 +1697,27 @@ class TestTheAnalystPassHasRoomForABank:
         assert "client.messages.stream(" in direct, "a capped request truncates instead"
         assert "max_tokens=ANALYST_MAX_TOKENS" in direct
 
+    def test_the_budget_is_the_most_the_model_will_take(self):
+        """Measured against the provider, not chosen.
+
+            max_tokens=  32,000  accepted
+            max_tokens=  64,000  accepted
+            max_tokens= 128,000  accepted
+            max_tokens= 200,000  REFUSED — "max_tokens: 200000 > 128000,
+                                  which is the maximum allowed number of
+                                  output tokens for claude-opus-5"
+
+        A cap is not a spend: the bill is for what is produced, so setting it
+        at the ceiling costs nothing until an answer actually needs the room.
+        One twenty-eight thousand character document already draws fourteen
+        thousand output tokens, so a handful of documents walks past anything
+        smaller.
+        """
+
+        from app.orchestration.anthropic_engines import ANALYST_MAX_TOKENS
+
+        assert ANALYST_MAX_TOKENS == 128_000
+
     def test_it_leaves_room_for_a_bank_at_its_own_ceiling(self):
         """The contract the pass is held to is what it has to be able to emit.
 
@@ -1710,3 +1731,109 @@ class TestTheAnalystPassHasRoomForABank:
         from app.orchestration.anthropic_engines import ANALYST_MAX_TOKENS
 
         assert ANALYST_MAX_TOKENS >= MAX_CANDIDATES * 50
+
+
+class TestAStageThatCouldNotParseSaysSo:
+    """`'NoneType' object has no attribute 'claims'` is not an explanation.
+
+    Watched on a real engagement. A twenty-eight thousand character document
+    went in, the extraction pass came back unparseable — `parsed_output` is
+    `None` when the model's answer did not fit the schema, and the commonest
+    reason is that it was truncated — and the screen showed the operator an
+    `AttributeError` about a type they have never heard of.
+
+    Extraction returns a claim per fact in the corpus and structuring a
+    candidate per claim, so both grow with their input exactly as the Analyst
+    pass does. They shared a sixteen-thousand token budget with stages that
+    return a handful of lines.
+    """
+
+    def test_extraction_and_structuring_get_the_long_output_budget(self):
+        import inspect
+
+        from app.orchestration import anthropic_engines
+
+        source = inspect.getsource(anthropic_engines.anthropic_compiler_engines)
+        for stage in ("extract", "structure"):
+            body = source[source.index(f"async def {stage}(") :]
+            body = body[: body.index("return ")]
+            assert "ANALYST_MAX_TOKENS" in body, (
+                f"{stage} grows with its input and had the short budget"
+            )
+            assert "client.messages.stream(" in body, (
+                f"{stage} cannot ask for a long answer without streaming"
+            )
+
+    def test_an_unparseable_answer_is_reported_as_one(self):
+        from app.orchestration.anthropic_engines import _parsed_or_refuse
+        from app.orchestration.engines import UpstreamFailure, upstream_failure_in
+
+        class _Unparsed:
+            parsed_output = None
+
+        with pytest.raises(Exception) as caught:
+            _parsed_or_refuse(_Unparsed(), "document claim extraction")
+
+        said = str(caught.value)
+        assert "NoneType" not in said, said
+        assert "document claim extraction" in said
+        assert upstream_failure_in(said) is UpstreamFailure.UNAVAILABLE
+
+    def test_a_parsed_answer_is_handed_straight_back(self):
+        from app.orchestration.anthropic_engines import _parsed_or_refuse
+
+        class _Parsed:
+            parsed_output = "the answer"
+
+        assert _parsed_or_refuse(_Parsed(), "any stage") == "the answer"
+
+
+class TestThinkingDoesNotEatTheAnswer:
+    """Extended thinking spends the same budget the answer comes out of.
+
+    Watched on a twenty-eight thousand character document:
+
+        stop_reason  : max_tokens
+        output_tokens: 32000
+        details      : thinking_tokens=32000
+
+    All of it. The answer stopped a few hundred characters in, the JSON would
+    not parse, and the compile reported an `AttributeError`. Raising the budget
+    only bought more thinking; the truncation point moved and stayed random.
+
+    With thinking off the same call ends `end_turn` on 14,820 tokens and parses
+    — thirty-five thousand characters of it. These stages ask for a
+    schema-shaped answer about text that is already in the prompt, which is the
+    kind of work that needs none.
+    """
+
+    def test_every_structured_call_turns_thinking_off(self):
+        import inspect
+        import re
+
+        from app.orchestration import anthropic_engines
+
+        source = inspect.getsource(anthropic_engines)
+        calls = [
+            match
+            for match in re.finditer(
+                r"client\.messages\.(parse|stream)\((.*?)\n        \)", source, re.S
+            )
+        ]
+        assert calls, "no structured calls found — this test has stopped watching"
+        for call in calls:
+            assert "thinking=" in call.group(2), (
+                "a call that can spend its whole budget thinking:\n"
+                f"{call.group(0)[:200]}"
+            )
+
+    def test_the_batch_request_turns_it_off_too(self):
+        """It is collected hours later, so a wasted budget is found late."""
+
+        import inspect
+
+        from app.orchestration import anthropic_engines
+
+        source = inspect.getsource(anthropic_engines.anthropic_compiler_engines)
+        submit = source[source.index("async def submit_batch") :]
+        assert '"thinking"' in submit

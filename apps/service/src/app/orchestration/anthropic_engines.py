@@ -107,7 +107,60 @@ MAX_TOKENS = 16000
 # back is unparseable and the whole pass is lost — observed live as
 # "Unterminated string starting at: line 1 column 15243", with the batch
 # reported as succeeded by the provider and the bank empty.
-ANALYST_MAX_TOKENS = 32000
+# Measured against the provider rather than chosen: 128,000 is accepted and
+# 200,000 is refused — "max_tokens: 200000 > 128000, which is the maximum
+# allowed number of output tokens for claude-opus-5". So this is the ceiling,
+# not a guess at one.
+#
+# A cap is not a spend. The bill is for tokens produced, so sitting at the
+# maximum costs nothing until an answer actually needs the room — and one
+# twenty-eight thousand character document already draws fourteen thousand
+# output tokens, so a handful of them walks past anything smaller.
+#
+# What this does *not* fix is many documents. That pressure is on the input
+# side — the context window — and no output budget touches it. Extraction
+# sends the whole corpus in one request; the way past that is a request per
+# document, not a bigger answer.
+ANALYST_MAX_TOKENS = 128_000
+
+
+#: Extended thinking, off, for every stage that asks for a schema-shaped
+#: answer about text already in the prompt.
+#:
+#: Thinking spends the same budget the answer comes out of. Measured on a
+#: twenty-eight thousand character document: `stop_reason: max_tokens`,
+#: `output_tokens: 32000`, `thinking_tokens: 32000` — all of it. The answer
+#: stopped a few hundred characters in, the JSON would not parse, and the
+#: compile reported an `AttributeError` about a `NoneType`.
+#:
+#: Raising the budget only bought more thinking: the truncation point moved
+#: and stayed random. With this off the same call ends `end_turn` on 14,820
+#: tokens and parses.
+NO_THINKING: dict[str, str] = {"type": "disabled"}
+
+
+def _parsed_or_refuse(response: Any, stage: str) -> Any:
+    """The parsed answer, or a failure that says what happened.
+
+    `parsed_output` is `None` when the model's answer did not fit the schema,
+    and the commonest reason is that it was truncated. Read straight through,
+    that surfaced as `'NoneType' object has no attribute 'claims'` on the
+    operator's screen — an `AttributeError` about a type they have never heard
+    of, for a document that was simply too long.
+
+    `UNAVAILABLE` rather than a bug, because that is what it is: the provider
+    was reached and did not give a usable answer. The remedy is the same one
+    that kind always has — try again, with less.
+    """
+
+    if getattr(response, "parsed_output", None) is None:
+        raise UpstreamUnavailableError(
+            stage,
+            UpstreamFailure.UNAVAILABLE,
+            "the answer could not be read against the schema, which usually "
+            "means it was cut short. A shorter document set is the way past it.",
+        )
+    return response.parsed_output
 
 
 
@@ -609,6 +662,7 @@ def anthropic_debrief_engines(
             system=_cached_system(system),
             messages=[{"role": "user", "content": prompt}],
             output_format=schema,
+            thinking=NO_THINKING,
         )
         return response.parsed_output
 
@@ -828,13 +882,21 @@ def anthropic_compiler_engines(
         corpus = "\n\n".join(
             f"<document id=\"{d.document_id}\">\n{d.text}\n</document>" for d in documents
         )
-        response = await client.messages.parse(
+        # Streamed with the long-output budget, for the reason the Analyst
+        # pass is: a claim per fact in the corpus grows with the corpus, and
+        # sixteen thousand tokens is a cap a real document set walks past. The
+        # failure is not a shorter list — truncation lands mid-token, the
+        # answer will not parse, and the whole pass is lost.
+        async with client.messages.stream(
             model=model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=ANALYST_MAX_TOKENS,
             system=_cached_system(_EXTRACTION_SYSTEM),
             messages=[{"role": "user", "content": f"Documents:\n\n{corpus}"}],
             output_format=_ExtractionOut,
-        )
+            thinking=NO_THINKING,
+        ) as stream:
+            response = await stream.get_final_message()
+        parsed = _parsed_or_refuse(response, STAGE_EXTRACT)
         return DocumentExtractionOutput(
             claims=[
                 ExtractedClaimDraft(
@@ -846,24 +908,29 @@ def anthropic_compiler_engines(
                         end_char_index=claim.end_char_index,
                     ),
                 )
-                for claim in response.parsed_output.claims
+                for claim in parsed.claims
             ]
         )
 
     @_upstream_aware(STAGE_STRUCTURE)
     async def structure(engagement_id: str, claims: list[Any]) -> ClaimStructuringOutput:
         claim_list = "\n".join(f"[{c.id}] {c.text}" for c in claims)
-        response = await client.messages.parse(
+        # A candidate per claim, so this grows with extraction's output the
+        # same way extraction grows with the corpus.
+        async with client.messages.stream(
             model=model,
-            max_tokens=MAX_TOKENS,
+            max_tokens=ANALYST_MAX_TOKENS,
             system=_cached_system(_STRUCTURING_SYSTEM),
             messages=[{"role": "user", "content": f"Claims:\n\n{claim_list}"}],
             output_format=_StructuringOut,
-        )
+            thinking=NO_THINKING,
+        ) as stream:
+            response = await stream.get_final_message()
+        parsed = _parsed_or_refuse(response, STAGE_STRUCTURE)
         return ClaimStructuringOutput(
             candidates=[
                 ClaimStructuringDraft(**candidate.model_dump())
-                for candidate in response.parsed_output.candidates
+                for candidate in parsed.candidates
             ]
         )
 
@@ -903,10 +970,14 @@ def anthropic_compiler_engines(
             system=_cached_system(_COMPILER_ANALYST_SYSTEM),
             messages=[{"role": "user", "content": _analyst_prompt(context_pack)}],
             output_format=BmadAnalystPassOutput,
+            thinking=NO_THINKING,
         ) as stream:
             response = await stream.get_final_message()
         return [
-            AnalystBatchResult(custom_id=engagement_id, output=response.parsed_output)
+            AnalystBatchResult(
+                custom_id=engagement_id,
+                output=_parsed_or_refuse(response, STAGE_RUN_ANALYST),
+            )
         ]
 
     @_upstream_aware(STAGE_SUBMIT_BATCH)
@@ -918,6 +989,9 @@ def anthropic_compiler_engines(
                     "params": {
                         "model": model,
                         "max_tokens": ANALYST_MAX_TOKENS,
+                        # See `NO_THINKING`. A batch is collected hours later,
+                        # so a budget spent thinking is found late.
+                        "thinking": NO_THINKING,
                         # Schema-enforced here too (§14.4). A batch result is
                         # collected hours later by a different process, so
                         # prose that "looks parseable" is not recoverable —

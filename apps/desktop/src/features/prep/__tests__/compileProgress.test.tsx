@@ -151,3 +151,50 @@ describe('the meter on the route the button actually takes', () => {
     expect(screen.getByText(/sending off/i)).toBeInTheDocument();
   });
 });
+
+describe('the percentage on the meter', () => {
+  it('shows how far through the stages a compile is', () => {
+    render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
+
+    // One of four. The bar carries the shape; the number carries the amount,
+    // and an operator asked for the amount.
+    expect(screen.getByText('25%')).toBeInTheDocument();
+  });
+
+  it('reads 100% only when the compile is done', () => {
+    render(
+      <CompileProgress
+        state="complete"
+        stagesCompleted={['extraction', 'structuring', 'analyst-pass-direct']}
+      />,
+    );
+
+    expect(screen.getByText('100%')).toBeInTheDocument();
+  });
+
+  it('counts the stages of the route actually taken', () => {
+    // Two of the direct route's three, not two of a batch route's four.
+    render(
+      <CompileProgress
+        state="running"
+        stagesCompleted={['extraction', 'structuring', 'analyst-pass-direct']}
+      />,
+    );
+
+    expect(screen.getByText('100%')).toBeInTheDocument();
+  });
+
+  it('says nothing about a percentage once a compile has stopped', () => {
+    // A number frozen at 25% invites the reading that it is still climbing.
+    // What matters then is the reason, which is directly underneath.
+    render(
+      <CompileProgress
+        state="stopped"
+        stagesCompleted={['extraction']}
+        notice="The last compile stopped while sorting what it found in them."
+      />,
+    );
+
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
+  });
+});
