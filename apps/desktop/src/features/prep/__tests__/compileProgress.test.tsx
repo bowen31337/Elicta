@@ -156,9 +156,10 @@ describe('the percentage on the meter', () => {
   it('shows how far through the stages a compile is', () => {
     render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
 
-    // One of four. The bar carries the shape; the number carries the amount,
-    // and an operator asked for the amount.
-    expect(screen.getByText('25%')).toBeInTheDocument();
+    // One done and one under way, of four. The bar carries the shape; the
+    // number carries the amount, and the two have to agree — see the block
+    // below, which is where they were made to.
+    expect(screen.getByText('38%')).toBeInTheDocument();
   });
 
   it('reads 100% only when the compile is done', () => {
@@ -196,5 +197,48 @@ describe('the percentage on the meter', () => {
     );
 
     expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the percentage and the bar agree', () => {
+  it('never reads 0% while a stage is running', () => {
+    // Reported from a screenshot: the first segment part-filled and moving,
+    // the number saying 0%. Counting only *finished* stages meant the whole
+    // of the first one — twenty seconds, and the longest is ten times that —
+    // read as no progress at all.
+    render(<CompileProgress state="running" stagesCompleted={[]} />);
+
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getByText('13%')).toBeInTheDocument();
+  });
+
+  it('counts the stage under way as half, which is what the bar draws', () => {
+    render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
+
+    // One done, one half — of four.
+    expect(screen.getByText('38%')).toBeInTheDocument();
+  });
+
+  it('counts only finished stages while the provider has the job', () => {
+    // Nothing is running here, so nothing is half done.
+    render(
+      <CompileProgress
+        state="awaiting"
+        stagesCompleted={['extraction', 'structuring', 'batch-submission']}
+      />,
+    );
+
+    expect(screen.getByText('75%')).toBeInTheDocument();
+  });
+
+  it('still reaches exactly 100% when it is done', () => {
+    render(
+      <CompileProgress
+        state="complete"
+        stagesCompleted={['extraction', 'structuring', 'analyst-pass-direct']}
+      />,
+    );
+
+    expect(screen.getByText('100%')).toBeInTheDocument();
   });
 });

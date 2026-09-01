@@ -103,6 +103,16 @@ export function CompileProgress({
   ).length;
   const heading = currentlyDoing(state, done, steps);
   const showsPercent = state === 'running' || state === 'awaiting' || state === 'complete';
+  /* The stage under way counts as half, which is what the bar already draws.
+     Counting finished stages alone read 0% for the whole of the first one —
+     twenty seconds of a compile whose longest stage is ten times that — while
+     the segment beside it was visibly filling. A number that disagrees with
+     the bar next to it is worse than no number.
+
+     Half is an estimate and is meant as one: the stages are wildly uneven, so
+     no arithmetic over stage *counts* is going to be accurate. What it has to
+     be is honest about direction and never contradict the bar. */
+  const reached = state === 'running' && done < steps.length ? done + 0.5 : done;
 
   return (
     <div className="compile-progress">
@@ -116,7 +126,7 @@ export function CompileProgress({
               reason directly underneath. */}
           {showsPercent ? (
             <span className="compile-progress__percent">
-              {Math.round((done / steps.length) * 100)}%
+              {Math.round((reached / steps.length) * 100)}%
             </span>
           ) : null}
         </p>
