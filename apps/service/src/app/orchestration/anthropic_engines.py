@@ -123,7 +123,16 @@ _BANK_SCHEMA: dict[str, Any] = {
                     "phrasing": {"type": "string"},
                     "stub": {"type": "string"},
                     "lang": {"type": "string"},
-                    "priority": {"type": "integer", "minimum": 1},
+                    # No `minimum`. The provider refuses numeric bounds on an
+                    # integer outright — "For 'integer' type, property
+                    # 'minimum' is not supported" — and refuses them in the
+                    # batch *result* rather than at submission, so every
+                    # compile was accepted, ended forty-six seconds later with
+                    # one errored request, and left the screen saying the
+                    # drafting job was still with the provider. The bound
+                    # bought nothing that `BankCandidate` does not already
+                    # enforce where the result is parsed.
+                    "priority": {"type": "integer"},
                     "requires": {"type": "array", "items": {"type": "string"}},
                     "authority_match": {"type": "array", "items": {"type": "string"}},
                     "source_doc": {"type": ["string", "null"]},
