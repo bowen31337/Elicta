@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import {
   selectionStatus,
@@ -262,6 +262,31 @@ export function usePrep(): PrepData {
   // put a meeting in it is a dead end: every journey after this one needs one.
   const meetings = useResource<WireMeetingList>(scoped('meetings'));
 
+  /* Asked again while one is running.
+   *
+   * Every read on this screen happens once, at mount. That is right for a
+   * document list and wrong for a compile: it takes minutes, reports each
+   * stage as it finishes, and the screen showed whatever was true when it
+   * opened. Reported as a meter frozen at thirteen per cent while the service
+   * had the compile finished — which reads exactly like one that is stuck.
+   *
+   * Four seconds because stages land about twenty apart, so this catches each
+   * one within a fifth of its life; and only while there is something to
+   * catch, so a settled screen makes no requests at all.
+   *
+   * The bank is re-read with it: when the last stage lands, the questions are
+   * what the operator came for.
+   */
+  const compiling = compile.data?.state === 'running' || compile.data?.state === 'awaiting';
+  useEffect(() => {
+    if (!compiling) return undefined;
+    const timer = window.setInterval(() => {
+      compile.reload();
+      bank.reload();
+    }, 4_000);
+    return () => window.clearInterval(timer);
+  }, [compiling, compile, bank]);
+
   const sections = bank.data?.sections ?? [];
 
   return {
@@ -327,6 +352,9 @@ export function usePrep(): PrepData {
       meetings.reload();
       vocabulary.reload();
       bank.reload();
+      // Missing until now, so nothing an operator pressed refreshed the one
+      // reading that changes on its own.
+      compile.reload();
     },
   };
 }
