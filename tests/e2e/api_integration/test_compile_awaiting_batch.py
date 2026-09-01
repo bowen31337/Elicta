@@ -1,0 +1,174 @@
+"""A compile waiting on its batch is not a compile that stopped.
+
+Driven against the real chain with stub engines, this is what a successful
+compile does:
+
+    [ 0s] state='running'  stages=[]
+    [12s] state='running'  stages=['extraction']
+    [39s] state='running'  stages=['extraction','structuring','batch-submission']
+    [42s] state='stopped'  stopped_at='batch-collection'  reason=None
+
+Nothing went wrong there. The Analyst pass is submitted as a batch and
+collected minutes later -- `fetch_batch` returns `[]` while the provider is
+still processing -- so the chain returning at `batch-collection` is the
+designed halfway point, and `BankCollector` sweeps for it.
+
+The operator was told, forty seconds after pressing Compile: "The last compile
+stopped while collecting the drafted questions. Nothing was refused -- the
+drafting itself did not produce a usable bank." Every clause of that is wrong
+about a submission that had just succeeded, and it arrives while the provider
+is still working.
+
+The second half is worse because it is silent. `compile_runs` is a plain dict
+and the collector sweeps it, so a restart before the batch comes back leaves
+nothing to sweep: the batch is paid for, the bank never updates, and no screen
+ever mentions it. Anthropic batches may take hours, which makes a restart
+inside that window ordinary rather than exceptional.
+"""
+
+from __future__ import annotations
+
+import contextlib
+
+from fastapi.testclient import TestClient
+
+from app.composition import Backend, build_app
+
+
+@contextlib.contextmanager
+def _client(url: str, **kwargs):
+    from app.composition import attach_state_store
+    from app.persistence.store import open_state_store
+
+    store = open_state_store(url)
+    backend = attach_state_store(Backend(), store)
+    with TestClient(build_app(backend, **kwargs)) as client:
+        yield client, backend
+    store.close()
+
+
+def _engagement(client: TestClient) -> str:
+    made = client.post(
+        "/api/engagements",
+        json={"client_organisation": "Batch", "sector": "s", "commercial_context": "c"},
+    )
+    return made.json()["engagement_id"]
+
+
+class _SubmittedRun:
+    """A compile that got as far as sending the drafting job off."""
+
+    def __init__(self, engagement_id: str) -> None:
+        self.engagement_id = engagement_id
+        self.batch_job_id = "batch-abc"
+        self.stages_completed = ["extraction", "structuring", "batch-submission"]
+        self.stopped_at = "batch-collection"
+        self.complete = False
+
+
+def _submitted(backend: Backend, engagement_id: str) -> None:
+    """Register a compile that has sent its batch, as the service does.
+
+    Both halves, because they answer different questions: the in-memory run is
+    what this process is working on, and the durable row is the obligation to
+    go back for a batch that outlives it.
+    """
+
+    from datetime import UTC, datetime
+
+    from app.modules.compiler.api.models import PendingCompileBatch
+
+    backend.bank_compiles.append((engagement_id, "compile-1"))
+    backend.compile_runs["compile-1"] = _SubmittedRun(engagement_id)
+    backend.pending_compile_batches["compile-1"] = PendingCompileBatch(
+        compile_id="compile-1",
+        engagement_id=engagement_id,
+        batch_job_id="batch-abc",
+        stages_completed=["extraction", "structuring", "batch-submission"],
+        submitted_at=datetime.now(UTC),
+    )
+
+
+def test_awaiting_the_provider_is_not_reported_as_a_failure(tmp_path):
+    """The one state a compile spends most of its life in."""
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+        body = client.get(f"/api/engagements/{engagement_id}/bank/compile").json()
+
+    assert body["state"] == "awaiting", (
+        f"a submitted batch reported as {body['state']!r} — the screen then tells "
+        "the operator the drafting produced no usable bank, forty seconds after "
+        "it was sent off successfully"
+    )
+    assert body["complete"] is False
+    assert body["stopped_at"] is None, "nothing stopped it; it is waiting"
+
+
+def test_a_submitted_batch_is_still_there_after_a_restart(tmp_path):
+    """Or nothing ever collects it, and the bank silently never updates."""
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+    with _client(url) as (client, backend):
+        after = client.get(f"/api/engagements/{engagement_id}/bank/compile")
+
+    assert after.status_code == 200, (
+        "the batch was paid for and is now unreachable: the collector sweeps "
+        "`compile_runs`, and a restart empties it"
+    )
+    assert after.json()["state"] == "awaiting"
+
+
+def test_the_collector_goes_back_for_a_batch_it_did_not_submit(tmp_path):
+    """The point of storing it at all.
+
+    `BankCollector` sweeps the in-flight compiles. A batch may take hours, so
+    a restart inside that window is ordinary — and the sweep found nothing to
+    do, for a job that had already been paid for.
+    """
+
+    from app.composition import _compiles_to_sweep
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+    with _client(url) as (_client_after, backend):
+        # A fresh process: nothing in flight, and one batch still owed.
+        assert backend.compile_runs == {}
+
+        sweeping = _compiles_to_sweep(backend)
+
+        assert set(sweeping) == {"compile-1"}
+        run = sweeping["compile-1"]
+        # What `collect_engagement_compile` asks a run for at this point.
+        assert run.engagement_id == engagement_id
+        assert run.batch_job_id == "batch-abc"
+        assert run.stopped_at == "batch-collection"
+        assert run.stages_completed == ["extraction", "structuring", "batch-submission"]
+
+
+def test_an_in_flight_run_is_not_shadowed_by_its_own_stored_row(tmp_path):
+    """The same compile must be swept once, by the object doing the work."""
+
+    from app.composition import _compiles_to_sweep
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+        sweeping = _compiles_to_sweep(backend)
+
+    assert set(sweeping) == {"compile-1"}
+    assert isinstance(sweeping["compile-1"], _SubmittedRun), (
+        "the live run knows more than the row rebuilt from storage"
+    )

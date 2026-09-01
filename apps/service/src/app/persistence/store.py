@@ -1152,6 +1152,45 @@ class StateStore:
             lock=self._lock,
         )
 
+    def compile_batches(
+        self, decode: Callable[[dict[str, Any]], V]
+    ) -> DurableMapping[str, V]:
+        """Analyst batches submitted and not yet collected, by compile id."""
+
+        table = metadata.tables["compile_batches"]
+        loaded: dict[str, V] = {}
+        for row in self._rows(table):
+            loaded[row.compile_id] = decode(
+                {
+                    "compile_id": row.compile_id,
+                    "engagement_id": row.engagement_id,
+                    "batch_job_id": row.batch_job_id,
+                    "stages_completed": row.stages_completed or [],
+                    "submitted_at": row.submitted_at,
+                }
+            )
+
+        def persist(key: str, value: Any) -> None:
+            self._upsert(
+                table,
+                "compile_id",
+                key,
+                {
+                    # `_upsert` supplies the key column itself.
+                    "engagement_id": value.engagement_id,
+                    "batch_job_id": value.batch_job_id,
+                    "stages_completed": list(value.stages_completed or []),
+                    "submitted_at": value.submitted_at,
+                },
+            )
+
+        return DurableMapping(
+            loaded=loaded,
+            persist=persist,
+            forget=lambda key: self._delete(table, "compile_id", key),
+            lock=self._lock,
+        )
+
     def debrief_outcomes(
         self, decode: Callable[[dict[str, Any]], V]
     ) -> DurableMapping[str, V]:
