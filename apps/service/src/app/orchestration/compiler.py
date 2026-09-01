@@ -225,20 +225,31 @@ async def _batch_arrives_within(
     exactly the code that turns one landing outside it into a bank. A second
     implementation of that step is the last thing this needs.
 
-    Answering means results in hand, successful or not: a batch that ended
-    badly has ended, and redrafting it directly would buy a second pass to be
-    told the same thing. Only silence falls through.
+    Answering means a bank in hand. A batch that ended and returned nothing
+    usable has not answered the question that was asked of it — that is the
+    case that was seen: `succeeded=1, errored=0` at the provider, a pass that
+    did not meet the bank's own contract, and a compile stopped with an empty
+    bank because "it ended" was being read as "it answered".
+
+    The direct route is a different request shape against the same model, and
+    has produced a full bank where a batch did not. It costs a second pass,
+    which the run records as `analyst-pass-direct` so the bill is accountable.
     """
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + patience
     while True:
         run = await collect_engagement_compile(run, engines=engines, sinks=sinks)
-        # `stopped_at` alone is not enough: a batch that ended badly also stops
-        # at `batch-collection`, and the passes are what tell the two apart —
-        # an unfinished batch collects nothing at all.
-        if run.stopped_at != "batch-collection" or run.analyst_passes:
+        if run.stopped_at != "batch-collection":
             return True
+        if run.analyst_passes:
+            # It ended, and badly. Not an answer: the caller redrafts. The
+            # passes are also what tell "ended" from "still processing" — an
+            # unfinished batch collects nothing at all — so they are cleared,
+            # or `_analyst_without_a_batch`'s collection would find them
+            # already in hand and return the failure it was called to replace.
+            run.analyst_passes = []
+            return False
         remaining = deadline - loop.time()
         if remaining <= 0:
             return False

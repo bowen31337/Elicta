@@ -354,3 +354,35 @@ def test_one_unswept_batch_does_not_end_the_sweep(tmp_path):
     assert any(o.engagement_id == "eng-boom" for o in outcomes), (
         "and the one that failed has to be reported, not swallowed"
     )
+
+
+def test_a_collection_that_failed_says_why(tmp_path):
+    """`batch-collection` read its reason off the *submission* record.
+
+    Which succeeded — that is what makes it a collection failure rather than a
+    submission one — so the reason was always `None` and the screen said the
+    compile "stopped while collecting the drafted questions" with nothing
+    after it. The account of what went wrong is on the pass that came back.
+    """
+
+    from app.modules.compiler.agent.models import AnalystBatchResult
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        backend.bank_compiles.append((engagement_id, "compile-1"))
+        run = _SubmittedRun(engagement_id)
+        run.analyst_passes = [
+            AnalystBatchResult(
+                custom_id=engagement_id,
+                output=None,
+                error="analyst pass produced 1 candidates, outside the accepted 10-300 range",
+            )
+        ]
+        backend.compile_runs["compile-1"] = run
+
+        body = client.get(f"/api/engagements/{engagement_id}/bank/compile").json()
+
+    assert body["stopped_at"] == "batch-collection"
+    assert body["reason"] is not None, "the pass said what was wrong and nothing read it"
+    assert "10-300" in body["reason"]

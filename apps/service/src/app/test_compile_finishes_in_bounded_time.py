@@ -168,3 +168,60 @@ async def test_waiting_is_bounded_even_when_the_provider_never_answers():
     )
 
     assert asyncio.get_running_loop().time() - began < 5, "the wait was not bounded"
+
+
+def _engines_answering_uselessly(direct: list) -> CompilerEngines:
+    """A batch that succeeds at the provider and returns nothing usable.
+
+    Which is what happened: `succeeded=1, errored=0` at Anthropic, and a
+    compile stopped at `batch-collection` with an empty bank. A batch is only
+    an answer if it answers.
+    """
+
+    from app.modules.compiler.agent.models import AnalystBatchResult
+
+    good = _engines(batch_ready=False, direct=direct)
+
+    async def fetch_batch(_job):
+        return [
+            AnalystBatchResult(
+                custom_id="eng-1",
+                output=None,
+                error="analyst pass produced 1 candidates, outside the accepted 10-300 range",
+            )
+        ]
+
+    return CompilerEngines(
+        name="stub",
+        extract=good.extract,
+        structure=good.structure,
+        submit_batch=good.submit_batch,
+        fetch_batch=fetch_batch,
+        run_analyst=good.run_analyst,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_answers_uselessly_is_still_redrafted_directly():
+    """A batch is only an answer if it answers.
+
+    Treating "ended badly" as an answer left the operator with no bank and a
+    compile that had stopped: the batch succeeded at the provider, returned a
+    pass that did not meet the bank's own contract, and nothing tried the
+    other route. The direct route is a different request shape against the
+    same model, and it has produced a full bank where a batch did not.
+    """
+
+    called: list[str] = []
+    run = await submit_engagement_compile(
+        "eng-1",
+        documents=[],
+        context_pack=_pack(),
+        engines=_engines_answering_uselessly(called),
+        sinks=_sinks(),
+        batch_patience=0.2,
+    )
+
+    assert called == ["called"], "the batch produced no bank and nothing else was tried"
+    assert DIRECT_ANALYST_STAGE in run.stages_completed
+    assert run.stopped_at is None
