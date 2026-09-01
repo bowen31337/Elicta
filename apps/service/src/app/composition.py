@@ -47,6 +47,7 @@ from app.modules.compiler.api.models import (
 from app.modules.compiler.api.models import (
     BankCompileOutcome,
     CandidatePatchRequest,
+    CompileOutcome,
     PendingCompileBatch,
 )
 from app.modules.compiler.api.router import (
@@ -458,6 +459,11 @@ class Backend:
 
     # Context compiler chain (architecture §3.10) records.
     compile_runs: dict[str, Any] = field(default_factory=dict)
+    #: What each compile did, flat enough to store. `compile_runs` holds whole
+    #: stage records and cannot be; this holds the fields the outcome endpoint
+    #: reads, and it is durable — a restart used to answer "no bank compile has
+    #: run for this engagement" about one compiled minutes earlier.
+    compile_outcomes: dict[str, Any] = field(default_factory=dict)
     #: Analyst batches submitted and not yet collected, by compile id. Durable
     #: on purpose: `BankCollector` sweeps the in-flight compiles, and those
     #: live in memory — so a restart inside the window a batch takes left
@@ -1240,6 +1246,9 @@ def attach_state_store(backend: Backend, store: StateStore) -> Backend:
     backend.pending_compile_batches = store.compile_batches(
         lambda row: PendingCompileBatch(**row)
     )
+    # And what each compile did, so the screen does not forget it at the next
+    # launch — which, given how often this app is rebuilt, is most of the time.
+    backend.compile_outcomes = store.compile_outcomes(lambda row: CompileOutcome(**row))
     backend.surfaced_nudges = store.surfaced_nudges(lambda row: SurfacedNudge(**row))
     backend.engagement_vocabulary = store.vocabulary_terms(
         lambda row: VocabularyTermResponse(**row)
@@ -2943,6 +2952,17 @@ def _include_operational_routers(
         compile_id = f"compile-{backend.next_compile_id}"
         backend.bank_compiles.append((engagement_id, compile_id))
 
+        # Opened now, closed when the chain ends. The gap between the two is
+        # what a restart falls into: the task is gone and nothing will finish
+        # it, so a row left open is reported stopped rather than running for
+        # ever. `bank_compiles` is in memory too, which is why the row carries
+        # its engagement — after a restart there is no other way back to it.
+        backend.compile_outcomes[compile_id] = CompileOutcome(
+            compile_id=compile_id,
+            engagement_id=engagement_id,
+            started_at=datetime.now(UTC),
+        )
+
         async def chain() -> None:
             try:
                 run = await _run_engagement_compile(
@@ -2954,6 +2974,7 @@ def _include_operational_routers(
                     ).append(stage),
                 )
                 backend.compile_runs[compile_id] = run
+                _record_compile_outcome(backend, compile_id, engagement_id, run)
                 log_compile_outcome(compile_id, run)
             except Exception as exc:  # noqa: BLE001 — recorded, not handled
                 # Each pass already turns its own failure into a FAILED record;
@@ -2963,7 +2984,9 @@ def _include_operational_routers(
                 # said "Not compiled yet" about a compile that had fallen over,
                 # which is the exact silence this route exists to end.
                 _logger.exception("compile %s for %s crashed", compile_id, engagement_id)
-                backend.compile_runs[compile_id] = _CrashedCompile(engagement_id, exc)
+                crashed = _CrashedCompile(engagement_id, exc)
+                backend.compile_runs[compile_id] = crashed
+                _record_compile_outcome(backend, compile_id, engagement_id, crashed)
             finally:
                 # Whatever happened, this compile is no longer in flight. Left
                 # behind, it would read as "still running" for ever, which is
@@ -2997,8 +3020,9 @@ def _include_operational_routers(
         )
         if latest is None:
             # `bank_compiles` is in-memory as well, so after a restart there
-            # is no id to look up — and a batch still with the provider is
-            # exactly the case that outlives the process that started it.
+            # is no id to look up — and both a batch still with the provider
+            # and a compile that already finished outlive the process that
+            # started them.
             owed = next(
                 (
                     pending
@@ -3008,7 +3032,8 @@ def _include_operational_routers(
                 None,
             )
             if owed is None:
-                return None
+                stored = _stored_compile_outcome(backend, engagement_id)
+                return None if stored is None else _outcome_of_stored(stored)
             return BankCompileOutcome(
                 engagement_id=engagement_id,
                 compile_id=owed.compile_id,
@@ -3044,7 +3069,10 @@ def _include_operational_routers(
             # an operator concludes the button did nothing.
             pending = backend.pending_compile_batches.get(latest)
             if pending is None:
-                return None
+                stored = backend.compile_outcomes.get(latest) or _stored_compile_outcome(
+                    backend, engagement_id
+                )
+                return None if stored is None else _outcome_of_stored(stored)
             return BankCompileOutcome(
                 engagement_id=engagement_id,
                 compile_id=latest,
@@ -4338,6 +4366,97 @@ async def _collect_one_compile(backend: Backend, run: Any, engines: CompilerEngi
             backend.compile_runs.setdefault(compile_id, run)
             backend.bank_compiles.append((engagement_id, compile_id))
     return run
+
+
+def _record_compile_outcome(
+    backend: Backend, compile_id: str, engagement_id: str, run: Any
+) -> None:
+    """Close this compile's row with what it did.
+
+    The run itself carries every stage's own record and cannot be stored;
+    these are the fields the outcome endpoint reads. Closing it — setting
+    `finished_at` — is also what tells this apart from a compile the process
+    died holding.
+    """
+
+    stopped_at = getattr(run, "stopped_at", None)
+    record = getattr(run, _STAGE_RECORD.get(stopped_at or "", ""), None)
+    if record is None and isinstance(run, _CrashedCompile):
+        record = run.orchestration
+    reason = getattr(record, "error", None)
+    if reason is None and stopped_at in _STAGE_REASON_FIELD:
+        reason = getattr(run, _STAGE_REASON_FIELD[stopped_at], None)
+    if reason is None and stopped_at == "batch-collection":
+        reason = next(
+            (
+                getattr(pass_, "error", None)
+                for pass_ in getattr(run, "analyst_passes", None) or []
+                if getattr(pass_, "error", None)
+            ),
+            None,
+        )
+
+    backend.compile_outcomes[compile_id] = CompileOutcome(
+        compile_id=compile_id,
+        engagement_id=engagement_id,
+        stages_completed=list(getattr(run, "stages_completed", []) or []),
+        stopped_at=stopped_at,
+        reason=reason,
+        started_at=getattr(
+            backend.compile_outcomes.get(compile_id), "started_at", None
+        )
+        or datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+    )
+
+
+def _stored_compile_outcome(backend: Backend, engagement_id: str) -> Any:
+    """The latest stored compile for this engagement, if there is one.
+
+    Latest by when it started: compile ids are sequential within a process and
+    a restart resets the counter, so ordering by id would put an old compile
+    after a newer one.
+    """
+
+    theirs = [
+        stored
+        for stored in backend.compile_outcomes.values()
+        if stored.engagement_id == engagement_id
+    ]
+    return max(theirs, key=lambda stored: stored.started_at, default=None)
+
+
+def _outcome_of_stored(stored: Any) -> Any:
+    """A stored compile, as the endpoint reports it.
+
+    An unfinished row is a compile whose process ended while it was running.
+    The task is gone and nothing will finish it, so it is reported stopped —
+    running would be a spinner nobody can stop, and absent would be a lie
+    about work that was done and billed.
+    """
+
+    interrupted = stored.finished_at is None
+    stopped_at = stored.stopped_at or ("the compile itself" if interrupted else None)
+    reason = stored.reason or (COMPILE_INTERRUPTED if interrupted else None)
+    return BankCompileOutcome(
+        engagement_id=stored.engagement_id,
+        compile_id=stored.compile_id,
+        state="stopped" if stopped_at else "complete",
+        complete=stopped_at is None,
+        stages_completed=list(stored.stages_completed),
+        stopped_at=stopped_at,
+        reason=reason,
+        cause=_stage_failure_cause(stopped_at, reason),
+    )
+
+
+#: Said about a compile whose process ended while it was running.
+#:
+#: Not "it failed" — nothing failed, the machine stopped. And not silence: the
+#: work was done and billed, and pressing Compile again is the thing to do.
+COMPILE_INTERRUPTED = (
+    "the app was closed while this compile was running, so it never finished"
+)
 
 
 def _forget_pending_batch(backend: Backend, engagement_id: str) -> list[str]:

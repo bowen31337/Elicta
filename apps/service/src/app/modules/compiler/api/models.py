@@ -151,6 +151,26 @@ class BankCompileTrigger(BaseModel):
     triggered_at: datetime
 
 
+class CompileOutcome(BaseModel):
+    """What one bank compile did, in a shape that stores.
+
+    `CompileRun` carries every stage's own record and is not serialisable in
+    any useful way; these are the fields anyone asks it for.
+
+    `finished_at` is `None` while a compile is in flight, and that is how a
+    compile the process died during is told from one that completed — the task
+    is gone and nothing will finish it.
+    """
+
+    compile_id: str
+    engagement_id: str
+    stages_completed: list[str] = Field(default_factory=list)
+    stopped_at: str | None = None
+    reason: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
 class PendingCompileBatch(BaseModel):
     """An analyst batch submitted and not yet collected.
 
