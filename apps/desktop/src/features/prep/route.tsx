@@ -1,4 +1,9 @@
 import './screens.css';
+import {
+  CompileProgress,
+  type CompileState,
+  type NoticeTone,
+} from './CompileProgress';
 
 import { useCallback, useState } from 'react';
 
@@ -78,6 +83,12 @@ export interface PrepScreenProps {
   readonly compileNotice?: string | null;
   /** True while a compile is running, which is neither empty nor finished. */
   readonly compileRunning?: boolean;
+  /** Where the compile is, for the meter. See `CompileProgress`. */
+  readonly compileState?: CompileState;
+  /** Which stages the service says are finished. */
+  readonly compileStages?: readonly string[];
+  /** How the notice reads: something to wait out, look at, or fix. */
+  readonly compileTone?: NoticeTone;
   readonly meetings: readonly PreparedMeeting[];
   readonly actions: PrepActions;
 }
@@ -143,6 +154,9 @@ export function PrepScreen({
   actions,
   compileNotice = null,
   compileRunning = false,
+  compileState = 'idle',
+  compileStages = [],
+  compileTone,
 }: PrepScreenProps) {
   const write = useWrite();
   const [link, setLink] = useState('');
@@ -586,16 +600,12 @@ export function PrepScreen({
                       ? 'Not compiled yet'
                       : 'The bank is empty'}
                 </span>
-                {compileNotice === null ? (
+                {compileState === 'idle' ? (
                   <span className="t-footnote">
                     Compiling reads the documents and drafts candidates. Minutes,
                     not seconds.
                   </span>
-                ) : (
-                  <span className="t-footnote" role="status">
-                    {compileNotice}
-                  </span>
-                )}
+                ) : null}
               </div>
               <button
                 type="button"
@@ -606,6 +616,26 @@ export function PrepScreen({
                 Compile
               </button>
             </div>
+            {/* Under the row, spanning the card. It carries both what the
+                compile is doing and whatever it has to say about itself: one
+                word — "Compiling" — read the same at ten seconds and at six
+                minutes, which is how working became indistinguishable from
+                stuck. */}
+            <CompileProgress
+              state={compileState}
+              stagesCompleted={compileStages}
+              notice={
+                compileNotice
+                ?? (compileState === 'complete'
+                  ? 'The compile finished and drafted no candidates. Nothing was refused; there was nothing in the documents to draft from.'
+                  : null)
+              }
+              tone={
+                compileNotice === null && compileState === 'complete'
+                  ? 'warning'
+                  : compileTone
+              }
+            />
           </div>
         ) : (
           <>
@@ -622,6 +652,7 @@ export function PrepScreen({
                     Reads the documents as they are now and replaces the bank.
                     Minutes, not seconds.
                   </span>
+
                 </div>
                 <button
                   type="button"
@@ -632,6 +663,16 @@ export function PrepScreen({
                   Recompile
                 </button>
               </div>
+              {/* A recompile is the same minutes-long job as a first compile
+                  and had no meter at all — the bank on screen is the *old* one
+                  throughout, so without this there is nothing to tell a
+                  recompile in progress from one that never started. */}
+              <CompileProgress
+                state={compileState}
+                stagesCompleted={compileStages}
+                notice={compileNotice}
+                tone={compileTone}
+              />
               <div className="row row--form">
                 <div className="row-main">
                   <label className="t-footnote" htmlFor="bank-filter">
@@ -1063,6 +1104,9 @@ export default function PrepRoute() {
       bank={prep.bank}
       compileNotice={prep.compileNotice}
       compileRunning={prep.compileRunning}
+      compileState={prep.compileState}
+      compileStages={prep.compileStages}
+      compileTone={prep.compileTone}
       meetings={prep.meetings}
       actions={actions}
     />

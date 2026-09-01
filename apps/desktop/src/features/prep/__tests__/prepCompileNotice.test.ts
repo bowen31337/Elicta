@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileNotice, compileRunning } from '../usePrep';
+import { compileNotice, compileRunning, compileStages, compileTone } from '../usePrep';
 
 /**
  * A compile waiting on its batch is not a compile that stopped.
@@ -52,5 +52,67 @@ describe('a compile waiting on the provider', () => {
     } as const;
 
     expect(compileNotice(stopped)).toMatch(/stopped while/i);
+  });
+});
+
+describe('what the Preparation screen is given about a compile', () => {
+  it('reports the stages the service says are done', () => {
+    // The meter draws these. Dropping them on the floor is why "Compiling"
+    // said the same thing at ten seconds and at six minutes.
+    expect(
+      compileStages({
+        state: 'running',
+        complete: false,
+        stages_completed: ['extraction', 'structuring'],
+        stopped_at: null,
+        reason: null,
+        cause: null,
+      }),
+    ).toEqual(['extraction', 'structuring']);
+  });
+
+  it('has an empty list to draw before anything has run', () => {
+    expect(compileStages(null)).toEqual([]);
+  });
+
+  it('calls a run that stopped an error', () => {
+    expect(
+      compileTone({
+        state: 'stopped',
+        complete: false,
+        stages_completed: [],
+        stopped_at: 'structuring',
+        reason: null,
+        cause: 'failed',
+      }),
+    ).toBe('error');
+  });
+
+  it('calls a run that finished and drafted nothing a warning', () => {
+    // Nothing broke. The pass ran and produced no usable bank, which an
+    // operator acts on differently from a stage that could not run at all.
+    expect(
+      compileTone({
+        state: 'complete',
+        complete: true,
+        stages_completed: ['extraction'],
+        stopped_at: null,
+        reason: null,
+        cause: null,
+      }),
+    ).toBe('warning');
+  });
+
+  it('calls a compile still going a working notice', () => {
+    expect(
+      compileTone({
+        state: 'awaiting',
+        complete: false,
+        stages_completed: [],
+        stopped_at: null,
+        reason: null,
+        cause: null,
+      }),
+    ).toBe('working');
   });
 });

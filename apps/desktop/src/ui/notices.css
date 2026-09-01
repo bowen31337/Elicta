@@ -1,15 +1,18 @@
-/* Notices on the debrief screen.
+/* Notices, wherever a screen has something to say about itself.
  *
  * The screen used to reach for `.degraded-note`, which lives in the panel's
  * stylesheet and is not imported here — so the one sentence explaining why a
  * recorded, transcribed meeting has no documents rendered as an unstyled grey
  * line above two empty headings.
  *
- * Two kinds, and they are told apart by colour rather than by being read.
- * Red for a run that stopped: something is wrong and there is an action to
- * take. Blue for one in progress: nothing is wrong and there is nothing to
- * do but wait. Both use text ink rather than a vivid fill, solved against the
- * card ground, and both carry a border so the block reads as a notice with
+ * Three kinds, told apart by colour rather than by being read. Red for a run
+ * that stopped: something is wrong and there is an action to take. Orange for
+ * one that finished and produced nothing usable: nothing broke, and there is
+ * still something to look at. Blue for work in progress: nothing is wrong and
+ * there is nothing to do but wait.
+ *
+ * All three use text ink rather than a vivid fill, solved against the card
+ * ground, and all three carry a border so the block reads as a notice with
  * `prefers-contrast: more` or with colour alone unavailable.
  */
 .notice {
@@ -26,6 +29,11 @@
   border-color: color-mix(in srgb, var(--red) 36%, transparent);
 }
 
+.notice--warning {
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 38%, transparent);
+}
+
 .notice--working {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
@@ -33,6 +41,7 @@
 
 @media (prefers-contrast: more) {
   .notice--error { border-color: var(--red-ink); }
+  .notice--warning { border-color: var(--orange-ink); }
   .notice--working { border-color: var(--accent-ink); }
 }
 
