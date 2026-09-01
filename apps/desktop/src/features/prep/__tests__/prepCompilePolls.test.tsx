@@ -59,8 +59,9 @@ describe('a compile the screen is watching', () => {
     });
     render(<PrepRoute />);
 
-    // Reading the documents: nothing finished, one under way.
-    expect(await screen.findByText('13%')).toBeInTheDocument();
+    // Reading the documents: nothing finished, one under way. No start time
+    // in this fixture, so the stage under way counts as half.
+    expect(await screen.findByText('5%')).toBeInTheDocument();
 
     // The service moves on. Nothing on the screen is touched.
     table = serving({
@@ -72,7 +73,7 @@ describe('a compile the screen is watching', () => {
       cause: null,
     });
 
-    await waitFor(() => expect(screen.getByText('63%')).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByText('18%')).toBeInTheDocument(), {
       timeout: 8000,
     });
   }, 12000);

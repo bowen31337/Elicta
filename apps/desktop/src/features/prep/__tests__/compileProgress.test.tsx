@@ -156,10 +156,11 @@ describe('the percentage on the meter', () => {
   it('shows how far through the stages a compile is', () => {
     render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
 
-    // One done and one under way, of four. The bar carries the shape; the
-    // number carries the amount, and the two have to agree — see the block
-    // below, which is where they were made to.
-    expect(screen.getByText('38%')).toBeInTheDocument();
+    // Weighted by how long the stages take rather than by counting them: the
+    // drafting pass is ten times either of the two before it, so finishing
+    // the first is nowhere near a quarter of the work. The bar carries the
+    // shape and the number carries the amount, and both read the one value.
+    expect(screen.getByText('14%')).toBeInTheDocument();
   });
 
   it('reads 100% only when the compile is done', () => {
@@ -203,24 +204,26 @@ describe('the percentage on the meter', () => {
 describe('the percentage and the bar agree', () => {
   it('never reads 0% while a stage is running', () => {
     // Reported from a screenshot: the first segment part-filled and moving,
-    // the number saying 0%. Counting only *finished* stages meant the whole
-    // of the first one — twenty seconds, and the longest is ten times that —
-    // read as no progress at all.
+    // the number saying 0%. This is the case with no start time to creep
+    // from, so the stage under way still counts as half — it cannot move, but
+    // it must not read as nothing while something is running.
     render(<CompileProgress state="running" stagesCompleted={[]} />);
 
     expect(screen.queryByText('0%')).not.toBeInTheDocument();
-    expect(screen.getByText('13%')).toBeInTheDocument();
+    expect(screen.getByText('5%')).toBeInTheDocument();
   });
 
   it('counts the stage under way as half, which is what the bar draws', () => {
     render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
 
-    // One done, one half — of four.
-    expect(screen.getByText('38%')).toBeInTheDocument();
+    // Twenty-five seconds done and ten of the next twenty, out of the two
+    // hundred and fifty-seven a compile costs.
+    expect(screen.getByText('14%')).toBeInTheDocument();
   });
 
   it('counts only finished stages while the provider has the job', () => {
-    // Nothing is running here, so nothing is half done.
+    // Nothing is running here, so nothing is part done — and the drafting
+    // pass, which is all that is left, is most of the work.
     render(
       <CompileProgress
         state="awaiting"
@@ -228,7 +231,7 @@ describe('the percentage and the bar agree', () => {
       />,
     );
 
-    expect(screen.getByText('75%')).toBeInTheDocument();
+    expect(screen.getByText('18%')).toBeInTheDocument();
   });
 
   it('still reaches exactly 100% when it is done', () => {
@@ -240,5 +243,58 @@ describe('the percentage and the bar agree', () => {
     );
 
     expect(screen.getByText('100%')).toBeInTheDocument();
+  });
+});
+
+describe('the bar creeps, and colours toward done', () => {
+  it('is nearly empty a second into a compile, not a stage-sized jump', () => {
+    const started = Date.now() - 1_000;
+    render(
+      <CompileProgress state="running" stagesCompleted={[]} startedAt={started} />,
+    );
+
+    const shown = Number(screen.getByText(/%$/).textContent?.replace('%', ''));
+    expect(shown).toBeLessThan(5);
+  });
+
+  it('carries how far along it is as a number the styling can read', () => {
+    const started = Date.now() - 30_000;
+    const { container } = render(
+      <CompileProgress
+        state="running"
+        stagesCompleted={['extraction']}
+        startedAt={started}
+      />,
+    );
+
+    // The colour walks from the working blue to the finished green as this
+    // climbs, so it has to reach the stylesheet as a value rather than as a
+    // class per bucket — a handful of buckets is a bar that changes colour in
+    // steps, which is the stepping this whole change is removing.
+    const track = container.querySelector('.compile-progress') as HTMLElement;
+    const along = Number(track.style.getPropertyValue('--compile-along'));
+    expect(along).toBeGreaterThan(0);
+    expect(along).toBeLessThan(1);
+  });
+
+  it('is fully along when the compile is done', () => {
+    const { container } = render(
+      <CompileProgress
+        state="complete"
+        stagesCompleted={['extraction', 'structuring', 'analyst-pass-direct']}
+        startedAt={Date.now() - 300_000}
+      />,
+    );
+
+    const track = container.querySelector('.compile-progress') as HTMLElement;
+    expect(Number(track.style.getPropertyValue('--compile-along'))).toBe(1);
+  });
+
+  it('still works when the service did not say when it began', () => {
+    // An older service, or a compile restored from storage. The bar steps at
+    // the boundaries as it used to rather than showing nothing.
+    render(<CompileProgress state="running" stagesCompleted={['extraction']} />);
+
+    expect(screen.getByText(/%$/)).toBeInTheDocument();
   });
 });

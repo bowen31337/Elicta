@@ -63,30 +63,47 @@
 /* The fill is a pseudo-element so the track keeps its own geometry and only
    the fill moves — transform on the segment itself would scale the unfilled
    ground with it. */
+/* The fill walks from the working blue to the finished green as the compile
+ * gets closer to done. `--compile-along` is the whole bar's progress, set on
+ * the block as a number, so the colour is continuous rather than a handful of
+ * buckets — buckets would put steps back into the one thing being made to
+ * creep.
+ *
+ * Colour is never the only indicator: the stage is named, the figure is
+ * beside it, and the bar has length. Somebody who cannot tell blue from green
+ * loses nothing.
+ */
 .compile-progress__step::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: var(--accent);
+  background: color-mix(
+    in oklab,
+    var(--green) calc(var(--compile-along, 0) * 100%),
+    var(--accent)
+  );
   transform: scaleX(0);
   transform-origin: left center;
-  transition: transform var(--duration-slow) var(--ease-out);
+  /* Long and linear, because it is tracking something that moves steadily and
+     is recomputed four times a second: an ease would make each quarter-second
+     step visible as a little lurch. */
+  transition:
+    transform var(--duration-slow) linear,
+    background-color var(--duration-slow) linear;
 }
 
 .compile-progress__step--done::after {
   transform: scaleX(1);
 }
 
-/* The stage being worked on: filled part-way and breathing, so a long stage
-   reads as working rather than stuck. The one animation on this screen, and it
-   earns its place — telling working from hung is the whole question an
-   operator has while a compile runs. */
-/* Half, matching what the percentage counts a stage under way as. They were
-   0.45 and nothing respectively, so the bar and the number disagreed about
-   the same stage. */
+/* The stage being worked on, filled by however much of it is done — the same
+   number the figure reads, so the two cannot disagree the way they once did.
+   It still breathes, which is what separates a stage working slowly from a
+   compile that has stopped: that is the whole question an operator has while
+   one runs, and it is the only animation on this screen. */
 .compile-progress__step--active::after {
-  transform: scaleX(0.5);
+  transform: scaleX(var(--step-fill, 0.5));
   animation: compile-progress-breathe 1.8s var(--ease-in-out) infinite;
 }
 
