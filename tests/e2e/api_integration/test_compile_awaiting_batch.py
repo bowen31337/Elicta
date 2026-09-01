@@ -216,3 +216,66 @@ def test_a_batch_that_ended_badly_is_not_reported_as_still_waiting(tmp_path):
         "the batch ended and returned an error; nothing is coming back"
     )
     assert body["stopped_at"] == "batch-collection"
+
+
+def test_a_restored_batch_that_ends_badly_stops_saying_it_is_waiting(tmp_path):
+    """Otherwise the obligation outlives the thing it was an obligation about.
+
+    A batch restored from storage carries no passes — that is what makes it
+    look like one still processing, correctly, until it is collected. When
+    collection brings back an error, two things have to happen: the row stops
+    being owed, and the outcome stops reporting `awaiting`. Neither did, so a
+    batch that had already failed at the provider went on telling the operator
+    it was on its way for the life of the deployment.
+    """
+
+    from app.composition import _collect_one_compile, _compiles_to_sweep
+    from app.orchestration.engines import CompilerEngines
+
+    from app.modules.compiler.agent.models import AnalystBatchResult
+
+    async def fetch_batch(_job_id):
+        # The shape `fetch_batch` really returns for a request the provider
+        # refused — the schema complaint that made every compile hang.
+        return [
+            AnalystBatchResult(
+                custom_id=engagement_id,
+                output=None,
+                error=(
+                    "output_config.format.schema: For 'integer' type, "
+                    "property 'minimum' is not supported"
+                ),
+            )
+        ]
+
+    async def unused(*_a, **_k):
+        raise AssertionError("not reached")
+
+    engines = CompilerEngines(
+        name="stub",
+        extract=unused,
+        structure=unused,
+        submit_batch=unused,
+        fetch_batch=fetch_batch,
+    )
+
+    url = f"sqlite:///{tmp_path / 'state.db'}"
+    with _client(url) as (client, backend):
+        engagement_id = _engagement(client)
+        _submitted(backend, engagement_id)
+
+    with _client(url) as (client, backend):
+        run = _compiles_to_sweep(backend)["compile-1"]
+        import asyncio
+
+        asyncio.run(_collect_one_compile(backend, run, engines))
+
+        assert backend.pending_compile_batches == {}, (
+            "the batch ended; there is nothing left to go back for"
+        )
+        body = client.get(f"/api/engagements/{engagement_id}/bank/compile").json()
+
+    assert body.get("state") != "awaiting", body
+    assert body.get("stopped_at") == "batch-collection", (
+        "and it must still say where it got to, not 404 as if nothing ran"
+    )

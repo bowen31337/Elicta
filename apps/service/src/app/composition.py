@@ -4296,21 +4296,37 @@ async def _collect_one_compile(backend: Backend, run: Any, engines: CompilerEngi
         run, engines=audited, sinks=_compiler_sinks(backend, engagement_id)
     )
     _store_compiled_candidates(backend, engagement_id, run)
-    if run.stopped_at != "batch-collection":
-        # Collected, or ended for a reason going back again will not change.
-        # The row is an obligation rather than a history, so it goes when
-        # there is nothing left to go back for — and stays while the provider
-        # is still working, which is what `batch-collection` means here.
-        _forget_pending_batch(backend, engagement_id)
+
+    # The batch has ended if anything came back at all, error or not — the
+    # same reading `BankCollector._finished_badly` takes. Only a run that
+    # collected nothing is still owed a visit.
+    #
+    # Written back into `compile_runs` before the row goes, or the outcome
+    # falls through to "no compile has run for this engagement" about a
+    # compile that plainly did. A restored run carries no passes, so without
+    # this a batch that had already failed at the provider went on reporting
+    # itself as on its way for the life of the deployment.
+    if run.analyst_passes or run.stopped_at != "batch-collection":
+        for compile_id in _forget_pending_batch(backend, engagement_id):
+            backend.compile_runs.setdefault(compile_id, run)
+            backend.bank_compiles.append((engagement_id, compile_id))
     return run
 
 
-def _forget_pending_batch(backend: Backend, engagement_id: str) -> None:
-    """Drop every pending batch for this engagement, by whichever id."""
+def _forget_pending_batch(backend: Backend, engagement_id: str) -> list[str]:
+    """Drop every pending batch for this engagement, and say which they were.
 
+    The row is an obligation rather than a history: it exists so somebody goes
+    back for a batch, and stops existing when there is nothing left to go back
+    for.
+    """
+
+    dropped: list[str] = []
     for compile_id, pending in list(backend.pending_compile_batches.items()):
         if pending.engagement_id == engagement_id:
             del backend.pending_compile_batches[compile_id]
+            dropped.append(compile_id)
+    return dropped
 
 
 def build_bank_collector(backend: Backend, engines: CompilerEngines) -> BankCollector:
