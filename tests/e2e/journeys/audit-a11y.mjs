@@ -44,6 +44,10 @@ const SCENES = [
   'nudge-surfaced',
   'code-switched',
   'degraded',
+  // Capture running with no speech credential: the one panel state whose
+  // notice is drawn in ink of its own, and therefore the one whose contrast
+  // nothing else here would check.
+  'transcription-off',
   'prep',
   'consent-pending',
   'consent-confirmed',

@@ -4,6 +4,7 @@ import type {
   SessionStreamEvent,
   SessionStreamLane,
   SessionStreamNudge,
+  SessionStreamUtterance,
 } from './types';
 
 interface WireCoverageSlot {
@@ -39,6 +40,8 @@ export function parseSessionStreamEvent(eventName: string, rawData: string): Ses
       return { type: 'coverage', coverage: parseCoverageSummary(rawData) };
     case 'nudge':
       return { type: 'nudge', nudge: parseSessionStreamNudge(rawData) };
+    case 'utterance':
+      return { type: 'utterance', utterance: parseSessionStreamUtterance(rawData) };
     case 'lane':
       return { type: 'lane', lane: parseSessionStreamLane(rawData) };
     case 'language':
@@ -85,12 +88,53 @@ function parseSessionStreamNudge(rawData: string): SessionStreamNudge {
   };
 }
 
+interface WireSessionStreamUtterance {
+  seq: number;
+  text: string;
+  speaker?: string | null;
+  at?: number | null;
+}
+
+function parseSessionStreamUtterance(rawData: string): SessionStreamUtterance {
+  const payload = JSON.parse(rawData) as WireSessionStreamUtterance;
+  return {
+    seq: payload.seq,
+    text: payload.text,
+    // Absent and explicitly null mean the same thing and must stay that way:
+    // nobody could say who spoke. Defaulting either to a name would put words
+    // in someone's mouth on the one surface read back to settle who said what.
+    speaker: payload.speaker ?? null,
+    at: payload.at ?? null,
+  };
+}
+
 interface WireSessionStreamLane {
   model_reachable: boolean;
   reason: string | null;
+  live_transcription?: boolean;
+  live_transcription_reason?: string | null;
+  live_model?: string | null;
+  receiving_audio?: boolean;
+  capturing_since?: number | null;
 }
 
 function parseSessionStreamLane(rawData: string): SessionStreamLane {
   const payload = JSON.parse(rawData) as WireSessionStreamLane;
-  return { modelReachable: payload.model_reachable, reason: payload.reason ?? null };
+  return {
+    modelReachable: payload.model_reachable,
+    reason: payload.reason ?? null,
+    // Absent means an older service, and absence is read as working. Reading
+    // it as "not configured" would put a permanent notice on a panel that is
+    // transcribing perfectly well, and a notice that cries wolf stops being
+    // read — the same reasoning `modelReachable` starts true for.
+    liveTranscription: payload.live_transcription !== false,
+    liveModel: payload.live_model ?? null,
+    liveTranscriptionReason: payload.live_transcription_reason ?? null,
+    // Absent is read as *not* receiving, the opposite of the line above, and
+    // the asymmetry is deliberate. Claiming a credential where none is
+    // configured cries wolf; claiming a live microphone where none is
+    // capturing is the specific lie this field exists to stop.
+    receivingAudio: payload.receiving_audio === true,
+    capturingSince: payload.capturing_since ?? null,
+  };
 }

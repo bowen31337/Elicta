@@ -544,3 +544,23 @@ label.dropzone-pick { cursor: pointer; }
 .bank-disclosure:active:not(:disabled) {
   background: linear-gradient(var(--fill-2), var(--fill-2)), var(--bg-tertiary);
 }
+
+/* A bank candidate reads in the two tiers the meeting will show it in.
+ *
+ * The headline is the glance the panel will put above the question; the
+ * phrasing beneath it is the wording that gets read aloud, and it is what this
+ * screen exists to let somebody edit. Showing only the second is how a bank
+ * could be approved here without anyone seeing the form they would actually
+ * work from — which, until the stub reached the panel, was empty.
+ *
+ * The hierarchy is weight and size, not colour: `--label` for both, because
+ * `--label-secondary` fails AA at these sizes and the phrasing is the longest
+ * text on the screen. */
+.candidate-headline {
+  color: var(--label);
+  text-wrap: balance;
+}
+.candidate-phrasing {
+  color: var(--label-supporting);
+  text-wrap: pretty;
+}

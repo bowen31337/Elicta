@@ -262,6 +262,83 @@ class SpeechVendor(str, Enum):
     CUSTOM = "custom"
 
 
+class LiveSpeechModel(str, Enum):
+    """Which recogniser the live path runs on.
+
+    It was fixed at `nova-3` in the recogniser's signature, as a
+    keyword-argument default nothing in the product passed — a choice that
+    existed in Python and nowhere an operator could reach.
+
+    **This is the live path's one selector, and that is deliberate.**
+    `live_vendor` was removed from `ConnectorSettings` because the credential
+    pool already decided which vendor served, and two places claiming to
+    select one disagreed in a real deployment — a deployment read AssemblyAI
+    from settings while the live path drove Deepgram regardless. Nothing here
+    reopens that. A cloud model resolves its key through the pool exactly as
+    before; a local model needs no key and resolves an address instead. Model,
+    then provider, then credential — one direction, one decision per step.
+
+    A closed set rather than free text. The name goes straight into the
+    request, so a typo is a 400 in the middle of a client meeting — the one
+    place in this product where a configuration mistake surfaces at the worst
+    possible moment.
+    """
+
+    #: The default, and the only one the engagement vocabulary reaches:
+    #: `keyterm` is a Nova-3 parameter.
+    NOVA_3 = "nova-3"
+    #: The previous generation. Kept because a deployment whose language or
+    #: account is not served by Nova-3 has nowhere else to go.
+    NOVA_2 = "nova-2"
+    #: Older still, and the cheapest to run.
+    ENHANCED = "enhanced"
+
+    # --- run on this machine ------------------------------------------
+    #
+    # These send no audio anywhere, which for some engagements is not a
+    # preference but the condition of holding the meeting at all. What they
+    # cost is accuracy and a machine warm enough to keep up with speech.
+    #
+    # Elicta does not run the model itself and does not pretend to: it posts
+    # to a transcription server the operator is running, addressed by
+    # `local_asr_base_url`. The name below travels as that request's `model`,
+    # so a server hosting several serves the one that is chosen. A server
+    # that hosts exactly one — whisper.cpp's own, which loads its model at
+    # startup — transcribes with what it has whatever is asked of it, and the
+    # Settings screen says so rather than implying this list is a download.
+
+    #: Whisper large v3 turbo. The most accurate of these, and the heaviest.
+    WHISPER_LARGE_V3_TURBO = "whisper-large-v3-turbo"
+    #: The usual compromise on a laptop that is also in a meeting.
+    WHISPER_MEDIUM = "whisper-medium"
+    #: Fast enough on a four-second window almost anywhere.
+    WHISPER_SMALL = "whisper-small"
+    #: NVIDIA's Parakeet. English only, and much faster than Whisper at a
+    #: similar accuracy — which on the live path, where the whole budget is
+    #: the conversational window, is the trade that matters.
+    PARAKEET_TDT_0_6B_V2 = "parakeet-tdt-0.6b-v2"
+
+
+#: The models Elicta transcribes with on this machine rather than at a vendor.
+#: A set rather than a prefix test: "whisper" is also a hosted product name,
+#: and a rule that reads a provider out of a string gets that wrong the first
+#: time somebody adds a cloud-hosted Whisper.
+LOCAL_LIVE_MODELS = frozenset(
+    {
+        LiveSpeechModel.WHISPER_LARGE_V3_TURBO,
+        LiveSpeechModel.WHISPER_MEDIUM,
+        LiveSpeechModel.WHISPER_SMALL,
+        LiveSpeechModel.PARAKEET_TDT_0_6B_V2,
+    }
+)
+
+
+def runs_locally(model: LiveSpeechModel) -> bool:
+    """Whether this model transcribes on this machine, sending no audio out."""
+
+    return model in LOCAL_LIVE_MODELS
+
+
 #: Connector keys that existed in saved settings and no longer exist here.
 #:
 #: `ConnectorSettings` forbids extra keys so a typo fails loudly instead of
@@ -301,6 +378,32 @@ class ConnectorSettings(BaseModel):
         description=(
             "Batch engines for the record path. FR-2.6 requires two, and T3 "
             "requires that they diverge independently."
+        ),
+    )
+    live_model: LiveSpeechModel = Field(
+        default=LiveSpeechModel.NOVA_3,
+        description=(
+            "The recogniser the live path runs on. Chosen separately from the "
+            "record path's engines for the reason this class exists: the live "
+            "path is bought on latency, the record path on divergence. Only "
+            "Nova-3 accepts keyterms, so the engagement vocabulary stops "
+            "reaching the transcriber on anything else — the operator-facing "
+            "control says so rather than leaving the setting above it quietly "
+            "inert."
+        ),
+    )
+    local_asr_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Where the local transcription server is, when `live_model` names "
+            "a model that runs on this machine. An OpenAI-compatible "
+            "transcription API — speaches, LocalAI, whisper.cpp in its "
+            "compatible mode — because that is the one surface that serves "
+            "both Whisper and Parakeet and takes a real model name. No "
+            "default: nothing is assumed to be listening on this operator's "
+            "machine, and a default port would make an unconfigured "
+            "deployment fail as a refused connection rather than as the "
+            "missing setting it is."
         ),
     )
     keyterm_prompting: bool = Field(

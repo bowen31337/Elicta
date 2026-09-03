@@ -26,9 +26,14 @@ from enum import Enum
 
 from fastapi import APIRouter, HTTPException
 
-from .models import SessionStart
+from .models import SessionStart, SessionStop
 
 StartSession = Callable[[str], Awaitable[SessionStart | None]]
+
+#: Ends whatever live session a meeting has open. Answers `None` only when the
+#: meeting itself is unknown -- a meeting with nothing open is not a failure,
+#: and comes back as a `SessionStop` carrying no `session_id`.
+StopSession = Callable[[str], Awaitable[SessionStop | None]]
 
 
 class CaptureAdmission(str, Enum):
@@ -54,7 +59,9 @@ CONSENT_NOT_CONFIRMED = (
 
 
 def build_live_session_router(
-    start_session: StartSession, admit_capture: AdmitCapture
+    start_session: StartSession,
+    admit_capture: AdmitCapture,
+    stop_session: StopSession,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/meetings", tags=["live-session"])
 
@@ -73,5 +80,41 @@ def build_live_session_router(
         if session is None:
             raise HTTPException(status_code=404, detail="meeting not found")
         return session
+
+    @router.post(
+        "/{meeting_id}/session/stop",
+        response_model=SessionStop,
+        status_code=200,
+    )
+    async def stop_session_endpoint(meeting_id: str) -> SessionStop:
+        """End this meeting's live capture session.
+
+        **This route is the fix for a button that did nothing.** The panel has
+        posted here since the recording bar was added, and nothing has ever
+        answered: the path was absent from the service, so every press was a
+        404 that the panel turned into an `error` status it did not render.
+        The operator saw the clock keep running. `stopSession.ts` was fully
+        unit-tested the whole time, against a stubbed `fetch` -- and a stub
+        answers whatever URL it is handed, so the suite was green about a
+        route that did not exist.
+
+        No request body. The panel used to send its own coverage summary here
+        to be flushed as the session's final state, from the days when the
+        panel was where coverage was counted. It is not any more: coverage is
+        derived in the service from the meeting's own nudge dispositions,
+        precisely so there is one answer in one place, and taking a second
+        copy from the client would be re-opening that. A body sent anyway is
+        ignored rather than refused, so an older panel still stops cleanly.
+
+        Consent is deliberately not consulted. `admit_capture` guards
+        *starting*; asking it here would mean a meeting whose consent was
+        withdrawn mid-session could not be stopped, which is precisely
+        backwards.
+        """
+
+        stopped = await stop_session(meeting_id)
+        if stopped is None:
+            raise HTTPException(status_code=404, detail="meeting not found")
+        return stopped
 
     return router

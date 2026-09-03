@@ -4,6 +4,7 @@ export type {
   SessionStopResult,
   SessionStreamEvent,
   SessionStreamNudge,
+  SessionStreamUtterance,
 } from './types';
 
 export { parseSessionStreamEvent } from './sessionStreamEvents';

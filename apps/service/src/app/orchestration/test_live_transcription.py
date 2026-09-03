@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.modules.settings.models import SecretKey
+from app.modules.settings.models import LiveSpeechModel, SecretKey
 from app.orchestration.deepgram_engines import DeepgramUnavailable
 from app.orchestration.live_transcription import deepgram_live_recogniser, transcript_of
 
@@ -29,24 +29,30 @@ class _Secret:
 
 
 class _Connectors:
-    keyterm_prompting = True
-    disable_vendor_retention = True
+    def __init__(self, live_model: str = "nova-3", keyterm_prompting: bool = True) -> None:
+        self.live_model = LiveSpeechModel(live_model)
+        self.keyterm_prompting = keyterm_prompting
+        self.disable_vendor_retention = True
 
 
 class _Settings:
-    connectors = _Connectors()
+    def __init__(self, connectors: _Connectors | None = None) -> None:
+        self.connectors = connectors or _Connectors()
 
 
 class _Store:
-    def __init__(self, secret: object | None) -> None:
+    def __init__(
+        self, secret: object | None, connectors: _Connectors | None = None
+    ) -> None:
         self._secret = secret
+        self._connectors = connectors
 
     def get_secret(self, key: SecretKey) -> object | None:
         assert key is SecretKey.DEEPGRAM_API_KEY
         return self._secret
 
     def read(self) -> _Settings:
-        return _Settings()
+        return _Settings(self._connectors)
 
 
 async def _vocabulary(session_id: str) -> list[str]:
@@ -120,3 +126,138 @@ async def test_a_refused_request_is_reported_rather_than_read_as_silence() -> No
 
     with pytest.raises(DeepgramUnavailable):
         await recognise("meeting-1", b"\x00" * 64)
+
+
+# --- which model the live path runs on ----------------------------------
+#
+# It was a keyword-argument default of `deepgram_live_recogniser` fixed at
+# `nova-3`, which nothing in the product passed: the choice existed in a
+# signature and nowhere an operator could reach it.
+
+
+@pytest.mark.asyncio
+async def test_the_model_comes_from_settings_and_is_read_per_window() -> None:
+    """Per call, not bound when the recogniser was built.
+
+    A restart to change a recogniser is a restart in the middle of a meeting.
+    The credential is already read this way; the model follows it.
+    """
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=SPOKEN)
+
+    connectors = _Connectors(live_model="nova-3")
+    recognise = deepgram_live_recogniser(
+        _Store(_Secret("key"), connectors),
+        _vocabulary,
+        transport=httpx.MockTransport(handle),
+    )
+
+    await recognise("session-1", b"\x00\x00")
+    # The operator changes it on the Settings screen, mid-session.
+    connectors.live_model = LiveSpeechModel.NOVA_2
+    await recognise("session-1", b"\x00\x00")
+
+    assert "model=nova-3" in str(seen[0].url)
+    assert "model=nova-2" in str(seen[1].url)
+
+
+@pytest.mark.asyncio
+async def test_the_vocabulary_is_not_sent_to_a_model_that_ignores_it() -> None:
+    """`keyterm` is Nova-3 only.
+
+    Sent anyway it is discarded by the vendor, and the request log then agrees
+    with the operator's belief that their vocabulary is being used. A
+    silently-ignored vocabulary is indistinguishable from one that worked,
+    which is the worst of the three possible outcomes.
+    """
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=SPOKEN)
+
+    recognise = deepgram_live_recogniser(
+        _Store(_Secret("key"), _Connectors(live_model="nova-2")),
+        _vocabulary,
+        transport=httpx.MockTransport(handle),
+    )
+
+    await recognise("session-1", b"\x00\x00")
+
+    assert "keyterm" not in str(seen[0].url)
+    assert "model=nova-2" in str(seen[0].url)
+
+
+@pytest.mark.asyncio
+async def test_the_vocabulary_is_not_even_looked_up_for_such_a_model() -> None:
+    """One database read per four-second window, for terms nothing can use."""
+
+    asked: list[str] = []
+
+    async def vocabulary(session_id: str) -> list[str]:
+        asked.append(session_id)
+        return ["FROSTLINE"]
+
+    recognise = deepgram_live_recogniser(
+        _Store(_Secret("key"), _Connectors(live_model="enhanced")),
+        vocabulary,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=SPOKEN)),
+    )
+
+    await recognise("session-1", b"\x00\x00")
+
+    assert asked == []
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_model_still_pins_it() -> None:
+    """For a caller that means to — a replay against a fixed recogniser."""
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=SPOKEN)
+
+    recognise = deepgram_live_recogniser(
+        _Store(_Secret("key"), _Connectors(live_model="nova-2")),
+        _vocabulary,
+        model="nova-3",
+        transport=httpx.MockTransport(handle),
+    )
+
+    await recognise("session-1", b"\x00\x00")
+
+    assert "model=nova-3" in str(seen[0].url)
+
+
+@pytest.mark.asyncio
+async def test_the_model_never_reaches_the_url_as_an_enum_repr() -> None:
+    """The failure this would have produced is a vendor 400 mid-meeting.
+
+    `LiveSpeechModel.NOVA_3` formats as `LiveSpeechModel.NOVA_3` in a query
+    parameter, which Deepgram refuses — and a refused request is reported by
+    the lane as the credential being unusable, sending an operator to check a
+    key that was fine.
+    """
+
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=SPOKEN)
+
+    recognise = deepgram_live_recogniser(
+        _Store(_Secret("key"), _Connectors()),
+        _vocabulary,
+        transport=httpx.MockTransport(handle),
+    )
+
+    await recognise("session-1", b"\x00\x00")
+
+    assert "LiveSpeechModel" not in str(seen[0].url)

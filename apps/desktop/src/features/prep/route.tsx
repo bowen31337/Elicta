@@ -1,4 +1,5 @@
 import './screens.css';
+import { CandidateHeadline } from './CandidateHeadline';
 import {
   CompileProgress,
   type CompileState,
@@ -1005,7 +1006,7 @@ function CandidateRow({
   return (
     <div className="row">
       <div className="row-main">
-        <span className="t-body">{candidate.phrasing}</span>
+        <CandidateHeadline candidate={candidate} />
         <span className="t-footnote">
           Priority {candidate.priority} · {provenanceOf(candidate)}
         </span>

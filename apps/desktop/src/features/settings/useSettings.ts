@@ -77,10 +77,52 @@ export interface InferenceSettings {
   resource: string | null;
 }
 
+/**
+ * Which recogniser the live path runs on.
+ *
+ * The live path's one selector: a cloud model resolves its key through the
+ * credential pool, a local model needs no key and resolves an address
+ * instead. Kept as a union of the wire strings rather than a lookup, because
+ * the service holds the same closed set and a value outside it is a request
+ * the vendor refuses mid-meeting.
+ */
+export type LiveSpeechModel =
+  | 'nova-3'
+  | 'nova-2'
+  | 'enhanced'
+  | 'whisper-large-v3-turbo'
+  | 'whisper-medium'
+  | 'whisper-small'
+  | 'parakeet-tdt-0.6b-v2';
+
+/** The models that transcribe on this machine, sending no audio anywhere. */
+export const LOCAL_LIVE_MODELS: readonly LiveSpeechModel[] = [
+  'whisper-large-v3-turbo',
+  'whisper-medium',
+  'whisper-small',
+  'parakeet-tdt-0.6b-v2',
+];
+
+export function runsLocally(model: LiveSpeechModel): boolean {
+  return LOCAL_LIVE_MODELS.includes(model);
+}
+
+/**
+ * Only Nova-3 accepts keyterms, so the engagement vocabulary reaches the
+ * transcriber on that model and no other. The service already drops the
+ * parameter rather than sending it to be ignored; this is what lets the
+ * screen say so, instead of leaving the switch above it quietly inert.
+ */
+export function takesVocabulary(model: LiveSpeechModel): boolean {
+  return model === 'nova-3';
+}
+
 export interface ConnectorSettings {
   readonly custom_vendor_name?: string | null;
   readonly custom_base_url?: string | null;
   readonly record_vendors: readonly SpeechVendor[];
+  readonly live_model: LiveSpeechModel;
+  readonly local_asr_base_url: string | null;
   readonly keyterm_prompting: boolean;
   readonly disable_vendor_retention: boolean;
   readonly region: string | null;

@@ -207,6 +207,12 @@ interface WireBankCandidate {
   readonly pruned: boolean;
   readonly source_doc?: string | null;
   readonly authority_match?: readonly string[];
+  /**
+   * Optional on the wire, because a bank compiled before the compiler's stub
+   * reached the panel carries none — which is every bank compiled to date.
+   * The reviewer derives a short form from the phrasing when it is missing.
+   */
+  readonly stub?: string | null;
 }
 
 interface WireBank {
@@ -388,6 +394,7 @@ function toSection(section: WireBank['sections'][number]) {
       .map((candidate) => ({
         id: candidate.id,
         phrasing: candidate.phrasing,
+        stub: candidate.stub ?? '',
         priority: candidate.priority,
         sourceDoc: candidate.source_doc ?? null,
         authorityMatch: candidate.authority_match ?? [],

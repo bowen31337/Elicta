@@ -68,6 +68,27 @@ class BankCandidate(BaseModel):
     #: The document statuses this question rests on (FR-3.4's taxonomy).
     #: `ground truth` and `hypothesis` are not the same standing to ask from.
     authority_match: list[str] = Field(default_factory=list)
+    #: The same question at a glance — the panel's top tier (FR-6.2), and the
+    #: only part of a candidate an operator reads without breaking eye
+    #: contact with the client.
+    #:
+    #: Declared here because it was not, and pydantic ignores an undeclared
+    #: keyword rather than refusing it: `_store_compiled_candidates` passed
+    #: `stub=candidate.stub`, the value was dropped in silence, and the column
+    #: went to the database `NULL`. Measured on a real state file: 554
+    #: candidates, 554 empty stubs, against phrasings averaging 112
+    #: characters. The panel's glanceable tier had never had anything in it.
+    #:
+    #: Empty is kept as empty rather than defaulted to the phrasing. A bank
+    #: compiled before this carries no stub, and quietly substituting the long
+    #: form would make a bank that needs recompiling indistinguishable from
+    #: one that does not — the caller derives a short form instead, and knows
+    #: that it did.
+    stub: str = ""
+    #: Which live-trigger conditions should surface this question (FR-5).
+    #: Dropped by the same silence as `stub`, and the reason a candidate could
+    #: be compiled with triggers and reach the runtime matching none.
+    trigger_types: list[str] = Field(default_factory=list)
 
 
 class CandidatePatchRequest(BaseModel):

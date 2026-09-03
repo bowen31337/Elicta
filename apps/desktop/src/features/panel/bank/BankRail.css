@@ -1,0 +1,122 @@
+/* The bank rail is a shortlist to glance along, not a list to read.
+ *
+ * It sits between the live question and the dock, and it must lose every
+ * contest with the nudge above it: the nudge is the only thing on this panel
+ * set at reading size. So the chips are caption-sized, one line tall, and the
+ * rail scrolls sideways rather than wrapping — a rail that wrapped would grow
+ * downward as the bank got richer and push the dock off a phone.
+ *
+ * These are real controls, though, not chrome. Each one is a tap target on a
+ * screen used one-handed while looking at somebody else, so the hit area is
+ * held at the 44px minimum even though the ink inside it is small. */
+
+.bank-rail {
+  min-width: 0;
+}
+
+.bank-rail--idle {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--fill-4);
+}
+.bank-rail--idle p {
+  margin: 0;
+  color: var(--label-supporting);
+}
+
+.bank-rail-list {
+  margin: 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  /* The rail keeps its own scroll: thumbing along the questions must never
+     drag the panel, and on a phone those two gestures start identically. */
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  /* The scrollbar is chrome on a surface that is already asking for as little
+     attention as it can. The rail's own overflow still scrolls by touch,
+     wheel and keyboard. */
+  scrollbar-width: none;
+}
+.bank-rail-list::-webkit-scrollbar { display: none; }
+
+.bank-rail-list > li {
+  scroll-snap-align: start;
+  flex: 0 0 auto;
+}
+
+.bank-chip {
+  /* Held at the platform minimum tap target. The label is caption-sized
+     because it is glanced at; the *control* is thumb-sized because it is
+     pressed by someone not looking at it. Those are different measurements
+     and conflating them is how a small label becomes a small button. */
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-capsule);
+  background: var(--fill-3);
+  /* `--label`, not `--label-secondary`: the latter fails WCAG AA at small
+     sizes, and every word on this rail is small. */
+  color: var(--label);
+  font-size: var(--text-caption-1);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  /* One line, always. A chip that wrapped would change the rail's height as
+     the operator scrolled it, and a control that moves under the thumb is a
+     control that gets mis-tapped. */
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.bank-chip:hover { background: var(--fill-2); }
+.bank-chip:active { background: var(--fill-1); }
+
+.bank-chip:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+/* A question carried forward from the last meeting is marked, because its
+ * standing is different: the client already left it unanswered once, and an
+ * operator deciding what to spend the room's time on should see that at the
+ * same glance that reads the words.
+ *
+ * A dot, not an inset rule. An inset left edge on a capsule follows the
+ * capsule — it renders as a crescent sliver that reads as a rendering fault
+ * rather than as a mark, which is exactly what it looked like on screen. A dot
+ * is a shape that is either there or not, so the distinction survives for
+ * anyone who does not separate these two oranges — colour is never the only
+ * indicator here. */
+.bank-chip--inherited {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bank-chip-mark {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--radius-capsule);
+  /* A fill, so the vivid system colour is the right one — `--orange-ink` is
+     for text. Nothing here is text. */
+  background: var(--orange);
+  flex: 0 0 auto;
+}
+
+@media (prefers-contrast: more) {
+  /* At higher contrast the dot alone is doing less work, so the chip takes a
+     ring of its own — a second, non-colour difference. */
+  .bank-chip--inherited { box-shadow: inset 0 0 0 1.5px var(--orange-ink); }
+}
+
+@media (prefers-contrast: more) {
+  .bank-chip { border: 1px solid var(--separator-opaque); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bank-chip { transition: none; }
+  .bank-rail-list { scroll-behavior: auto; }
+}

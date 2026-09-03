@@ -68,6 +68,11 @@ EXPECTED_PATHS_AND_METHODS = {
     ("/api/meetings/{meeting_id}/record/divergences", "get"),
     ("/api/meetings/{meeting_id}/record/transcribe", "post"),
     ("/api/meetings/{meeting_id}/session/start", "post"),
+    # Added late, and that is the point of listing it here: the panel had been
+    # posting to this path since its recording bar shipped, and this inventory
+    # is maintained from the service's side only — so it agreed with itself
+    # about a route the desktop was already calling and nothing served.
+    ("/api/meetings/{meeting_id}/session/stop", "post"),
     ("/api/meetings/{meeting_id}/session/stream", "get"),
     ("/api/meetings/{meeting_id}/live/utterance", "post"),
     ("/api/threads/{thread_id}/park", "post"),

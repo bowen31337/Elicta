@@ -169,6 +169,12 @@
      otherwise reset the clearance `.pane-body` sets. */
   padding: calc(var(--toolbar-height) + var(--space-6)) var(--space-5) var(--space-10);
   box-sizing: border-box;
+  /* Queried below, so the stage can tell whether there is room for the panel's
+     two columns. It has to be measured here rather than on the panel, because
+     the panel's width is what this decides — a box cannot be sized by a
+     question asked about itself. */
+  container-type: inline-size;
+  container-name: stage;
 }
 .pane-body--stage > .panel {
   width: min(420px, 100%);
@@ -177,6 +183,59 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2);
   padding: var(--panel-inset);
+}
+
+/* ---- The panel wide enough to hold both columns ------------------------- */
+
+/* 420px was the whole of the panel for as long as the panel was one question
+   at a time. It now carries the meeting: the transcript runs to hundreds of
+   lines beside a question that must not be pushed off the screen by them, and
+   `route.css` splits those into two columns at `@container panel (min-width:
+   52rem)`.
+   That gate was correct and unreachable. The card is staged at 420px, so the
+   panel's container could never measure 832px however wide the window was, and
+   the side-by-side layout had never once rendered in the shipped app — the
+   columns stacked on a 27-inch display exactly as they did on a phone. A gate
+   is only as true as the box it is asked about.
+
+   54rem is derived, not chosen: the split needs 52rem *inside* the panel, and
+   between this container's content box and `.panel-split` sit the panel's own
+   `--panel-inset` on both edges — 32px, which is 2rem. Below that the card
+   stays 420px, because a card widened to 700px that still stacks is worse than
+   the card it was.
+
+   `(pointer: fine)` matches the split's own gate. In a hand the panel is the
+   screen and is laid out for a thumb; nothing here should reach it. */
+@media (pointer: fine) {
+  @container stage (min-width: 54rem) {
+    .pane-body--stage > .panel {
+      width: 100%;
+      /* The panel stops being a thing that floats and becomes the surface the
+         meeting is held on, so it takes the height it is given: each column
+         scrolls in its own place, and neither the conversation nor the
+         history of questions can move the other. Without this the card sizes
+         to its contents, an hour of transcript grows it, and the pane scrolls
+         both columns together — which is the arrangement the split exists to
+         undo.
+
+         `align-self` on the item rather than `align-items` on the stage,
+         because the stage is this query's own container and a rule for it in
+         here does nothing at all — the same silent no-op that kept the split
+         from ever rendering. Written once as `align-items`, it read as a rule
+         that had simply been ignored. */
+      align-self: stretch;
+      /* No ceiling: the panel takes the whole of the pane it is given.
+         64rem here was a reading-measure argument — that a transcript wider
+         than a column stops being a column and becomes a line of text across
+         a monitor — and it is the wrong argument for this screen, because the
+         panel is not one measure but two, and every pixel the card gave back
+         was a pixel of the *transcript*, which is the thing an operator
+         actually runs out of. The measure is still held, but by the column
+         rather than by the card: the split's `1.2fr` against `1fr` is what
+         keeps the conversation from sprawling while the question keeps its
+         floor. */
+    }
+  }
 }
 
 /* ---- Toolbar ----------------------------------------------------------- */

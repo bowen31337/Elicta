@@ -19,6 +19,12 @@ const BASE: ServiceSettings = {
   },
   vendors: { asr_base_url: null, capture_base_url: null },
   connectors: {
+  // A local model, so the journey screenshots and the accessibility audit
+  // draw both the dropdown and the server address it reveals — a control
+  // only rendered behind a choice nobody makes in a fixture is one the
+  // audit reports clean without drawing.
+  live_model: 'whisper-small',
+  local_asr_base_url: 'http://127.0.0.1:8178/v1',
     record_vendors: ['deepgram', 'assemblyai'],
     keyterm_prompting: true,
     disable_vendor_retention: true,

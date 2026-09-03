@@ -54,17 +54,26 @@ Root `Cargo.toml` mounts `core/crates/*` by glob, so a new crate needs no worksp
 Rust (root workspace; toolchain via rustup, stable — verified on 1.96.1):
 ```bash
 cargo build --workspace --locked
-cargo test --workspace --locked              # 839 tests, all green
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo test --workspace --locked   # 892 tests, all green
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p trigger-gate                   # single crate
 ```
+**On macOS that environment variable is not optional.** Without it the `capture`
+test binary aborts before running a line — `Library not loaded:
+@rpath/libswift_Concurrency.dylib` — because Swift back-deploys the concurrency
+runtime to an `@rpath` the binary carries no `LC_RPATH` for. It is the same
+fault `bundle.macOS.minimumSystemVersion` prevents in the shipped app, and
+`cargo test` has no `tauri.conf.json` to read that from. It fails the run
+rather than one crate, so all 892 results are lost to one crate's link.
+`cargo test -p capture --no-default-features` is the other way past it and
+skips the ScreenCaptureKit backend.
 
 Python service (`uv`, deps in `apps/service/uv.lock`):
 ```bash
 cd apps/service && uv sync --locked
-cd apps/service && uv run pytest             # 706 tests; testpaths = ["src"]
+cd apps/service && uv run pytest             # 1385 tests; testpaths = ["src"]
 cd apps/service && uv run ruff check .
-uv run --project apps/service python -m pytest tests/e2e/api_integration   # 45 tests, from repo root
+uv run --project apps/service python -m pytest tests/e2e/api_integration   # 300 tests, from repo root
 ```
 
 macOS desktop bundle (`.app` + `.dmg`) — **build locally, not in CI**:
@@ -78,6 +87,19 @@ into `src-tauri/binaries/elicta-service-<target>`, declared as an `externalBin`,
 and started by the shell when nothing is already answering on port 8000. The
 build reuses an existing binary; a missing one stops the bundler outright. The
 freeze needs a `python3` and takes minutes.
+
+**Every build gives itself a version number.** `scripts/build-macos.sh` runs
+`scripts/bump-version.sh` (patch + 1; `--set X.Y.Z`, `--minor`, or `--no-bump`
+for a deliberate rebuild of the same code). Before it, every artifact was
+`Elicta_0.1.0_aarch64.dmg`, a rebuild overwrote the last one, and nothing on
+disk said which build it was — which is how a stale install shadowed an
+afternoon of rebuilds. **Three files carry the version and must move
+together**: `tauri.conf.json` names the bundle and is what the updater
+compares, `src-tauri/Cargo.toml` versions the shell binary, `package.json` is
+what `pnpm` reports. Two agreeing and one not is a build whose artifact and
+whose binary disagree about what they are; `src/__tests__/version.test.ts`
+gates that. The script edits each file by its own anchored rule — a blanket
+search-and-replace would move `Cargo.toml`'s dependency versions too.
 
 **Staleness is pruned, not detected at the point of use.**
 `scripts/prune-stale-builds.sh` runs first on every build and deletes a frozen
@@ -170,7 +192,7 @@ it cannot open.
 Desktop (`pnpm`, Node >= 22.13):
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter elicta-desktop test              # 199 tests
+pnpm --filter elicta-desktop test              # 1013 tests
 pnpm --filter elicta-desktop typecheck
 pnpm --filter elicta-desktop build             # tsc --noEmit && vite build
 pnpm dev                                       # tauri dev
@@ -225,7 +247,7 @@ harness wants the `asyncpg` driver and the service strips that marker.
 
 Run the service:
 ```bash
-cd apps/service && uv run uvicorn app.main:app --reload    # serves 55 API paths
+cd apps/service && uv run uvicorn app.main:app --reload    # serves 62 API paths
 ```
 
 Run the whole system as a web app on `0.0.0.0` (service + panel, both processes, network-reachable
@@ -305,7 +327,7 @@ embarrassment gates, plus signing/release workflows.
   PDF via `zlib`) and is best-effort on PDFs — a scanned page yields nothing
   rather than noise.
 - **State is SQLite by default, and everything an operator types is in it.**
-  `persistence/models.py` owns the eleven durable tables; `resolve_database_url`
+  `persistence/models.py` owns the seventeen durable tables; `resolve_database_url`
   decides which database: a URL saved in Settings (secret `state_database_url`,
   shown back with the password stripped) beats `DATABASE_URL`, which beats a
   SQLite file under `ELICTA_STATE_DIR`. A change applies **on restart** — the
@@ -340,19 +362,204 @@ embarrassment gates, plus signing/release workflows.
   is the fabrication check and must stay. What no longer fails a run is model
   arithmetic: a pass of ~150 questions was lost live because a model quoted
   `…cross-dock.` and gave a span one character short of the full stop.
-- **A compile finishes in two visits, and something has to make the second.**
-  The Analyst pass is submitted as a batch and collected minutes later;
-  `fetch_batch` returns `[]` while it is still processing. `BankCollector`
+- **The compile an operator is waiting on sends no batch.**
+  `submit_engagement_compile` takes a `route` and `composition.py` passes
+  `"direct"`. Measured against the provider, every batch that *succeeded* took
+  202s / 307s / 501s against a `BATCH_PATIENCE_SECONDS` window of 180 — so
+  waiting first and drafting directly anyway was the slowest *and* dearest of
+  the three routes: dead time, then a second pass, and the batch billed anyway
+  when it finished. The batch route is untouched and stays the **library's**
+  default; it is right for work nobody is waiting on, and a deployment with no
+  `run_analyst` engine falls back to it. Two traps if you touch the wait:
+  `batch_patience` is resolved at the call, never a default argument (as a
+  default it made every test that submits a batch block for three minutes), and
+  the poll must not sleep past its own deadline or the window is quietly longer
+  than it says.
+- **A batch compile finishes in two visits, and something has to make the second.**
+  `fetch_batch` returns `[]` while the batch is still processing. `BankCollector`
   (`orchestration/bank_collector.py`) sweeps every 30s, and `main`'s lifespan is
   what starts it — deliberately not `build_app`, or every `TestClient` would
   poll a provider. It stops asking about a batch that ended, failed or expired,
-  because the expensive mistake is polling for ever, not missing one. Watch for
-  three traps that each made the bank silently empty: the submission guard once
-  asked `_completed()` of a record whose only states are `SUBMITTED`/`FAILED`;
+  because the expensive mistake is polling for ever, not missing one. Traps that
+  each made the bank silently empty: the submission guard once asked
+  `_completed()` of a record whose only states are `SUBMITTED`/`FAILED`;
   collected candidates land in `analyst_passes` and the bank endpoint reads
-  `compiled_candidates`, so `_store_compiled_candidates` joins them; and a
-  stopped compile writes its reason to a stage record that nothing read until
-  `log_compile_outcome`.
+  `compiled_candidates`, so `_store_compiled_candidates` joins them; a stopped
+  compile writes its reason to a stage record that nothing read until
+  `log_compile_outcome`, and `batch-collection` must read that reason off the
+  *pass*, not off the submission that succeeded. **A batch has ended if anything
+  came back at all, error or not** — but a pass that came back and does not meet
+  the bank's contract is not an *answer*, so the caller redrafts directly and
+  clears the passes first. And `_visit` must swallow its own exceptions: a
+  restored batch whose `submitted_at` came back naive from SQLite raised
+  `TypeError` out of `_expired` and stopped **every** engagement's bank from
+  ever being collected. `composition.py` re-attaches UTC on the way out of the
+  store; everything here is written aware.
+- **Extended thinking spends the same budget the answer comes out of.** Every
+  stage runs with it off (`NO_THINKING`): a 28k-character document reported
+  `'NoneType' object has no attribute 'claims'` because the model thought for
+  all 32,000 output tokens and the JSON came back cut mid-string. Extraction,
+  structuring and the Analyst pass **stream** with `ANALYST_MAX_TOKENS =
+  128_000` — measured, not chosen: the provider accepts it and refuses 200,000
+  — and streaming is not a style choice, because the SDK refuses a
+  non-streaming request whose budget implies more than ten minutes. A cap is
+  not a spend, so sitting at the ceiling costs nothing. `MAX_TOKENS = 16000`
+  remains for the short stages. And `parsed_output` is `None` when the answer
+  does not fit the schema; reading straight through it is what produced that
+  `AttributeError`, so it is named as an upstream failure instead.
+- **What a compile did outlives the process that did it.** `compile_runs` and
+  `bank_compiles` are in memory, so `compile_outcomes` (what the outcome
+  endpoint reads) and `compile_batches` (the obligation the collector goes back
+  for) are the durable halves. The third state is the one worth naming: a row
+  whose `finished_at` is still null at the next launch was *running* when the
+  process died, and is reported stopped, saying so. Reported running it is a
+  spinner nobody can stop; reported never-run it is a lie about work that was
+  done and billed. Find the latest by `started_at`, never by id — ids are
+  sequential within a process and a restart resets the counter.
+- **The Preparation screen polls, and its meter is an estimate that must not
+  lie.** A compile takes minutes and the service reports only stage
+  *boundaries*, about 25s / 20s / 2s / 210s apart — so `usePrep` re-asks every
+  4s (a settled screen makes no requests) and `compileFraction.ts` weights the
+  stages by how long they actually take and creeps within the current one
+  against `started_at`. Reading it once at mount is what made a finished
+  compile show 13% for five minutes; counting *stages* is what made the bar
+  leap then sit. Three properties keep it honest, and a change that breaks one
+  is a regression even if the tests pass: it never completes a stage the
+  service has not reported (the creep is asymptotic), it never goes backwards,
+  and it does not creep at all while `awaiting` — the job is with the provider
+  and a bar advancing through a wait invents work. `awaiting` is deliberately
+  **not** a stage for the same reason. The segments and the percentage must read
+  the same value, not two kept in step; they were not, once. Notices carry three
+  tones from `ui/notices.css` — red plus `role="alert"` for a stopped run,
+  orange for one that drafted nothing, blue for work in progress.
+- **The panel carries the meeting, not only the questions about it.** Three
+  regions ride the one SSE stream now: `coverage`, `nudge` and `utterance`.
+  The transcript needed nothing produced for it — `LiveUtterances` already
+  recognises every window server-side and hands over the text with whoever the
+  verifier believed said it, and both were read for the gate and dropped.
+  `observe_utterance` records **before** the gate is consulted, because every
+  early return below it (the operator's own speech, an utterance that fires
+  nothing, a hit the rate limit refuses) is a line the panel must still show —
+  and those are most of a meeting. Two traps: each line carries a `seq`,
+  because the stream replays its whole backlog on every connect and two people
+  can say the same short sentence an hour apart, so nothing in the text tells a
+  replay from a repetition; and the stream follows the transcript on its own
+  index beside the nudges', since a shared one would advance on every line
+  spoken and skip the nudge that arrived while it did.
+- **The transcript and the question are two columns, and the gate that splits
+  them lives in a different file from the width it measures.** They cannot
+  share a stream — an hour of speech is hundreds of lines and every one of them
+  pushed the question further up the scroll, so they were merged for exactly
+  one build. Split, what is lost is the reason to trust a suggestion, and that
+  is carried by the question quoting the line it reacted to (`provokedBy`),
+  not by adjacency. The layout is `@container panel (min-width: 52rem)` in
+  `panel/route.css`, and **it had never once applied**: `shell.css` stages the
+  panel as a card at `width: min(420px, 100%)`, so the container it asks about
+  was 420px on every display ever built and the columns stacked on a 27-inch
+  monitor exactly as they stacked on a phone. Nothing failed — no test went
+  red, and the screenshots read as a deliberate one-column design. A container
+  query is only as true as the box upstream lets that box be. So the stage is
+  now a container too (`@container stage (min-width: 54rem)` — 52rem plus the
+  panel's own `--panel-inset` on both edges), and
+  `panel/__tests__/panelSplitReachable.test.ts` reads both numbers back out of
+  the stylesheets and checks they still agree. Two traps, and they are the same
+  trap: **a container cannot query itself.** A rule for `.panel` inside
+  `@container panel` does nothing whatsoever, silently, which is how the
+  columns shipped stacked once before; and `align-items` on `.pane-body--stage`
+  inside `@container stage` did nothing either, which is why the panel's height
+  is set with `align-self` on the *panel*. Both read as rules a browser had
+  ignored for some other reason.
+- **A client with tests is not a route.** The panel's Stop button posted to
+  `POST /api/meetings/{id}/session/stop` from the day the recording bar
+  shipped, and the service **never served that path** — the live-session router
+  carried `session/start` and nothing else. Every press was a 404, which
+  `useStopSession` turned into an `error` status that no part of the panel
+  rendered, so the bar stayed on "Recording" with the clock running and the
+  operator's only signal was the absence of one. `stopSession.ts` was fully
+  unit-tested throughout, against a stubbed `fetch` — **a stub answers whatever
+  URL it is handed**, so a green suite says nothing about whether a route
+  exists. Two doc comments described the endpoint in the present tense,
+  including one reasoning about what it does to a meeting. Written about
+  nothing. The guards now are `tests/e2e/api_integration/test_stopping_a_meeting_from_the_panel.py`
+  (which asks the served schema, not a stub) and the path inventory in
+  `test_assembled_app.py` — note that inventory is maintained from the
+  service's side only, so it agreed with itself about a route the desktop was
+  already calling. **Ending a meeting is also two things and was one**: the
+  session closes in the service, and the microphone is `services/captureSession`
+  in this bundle. A stop that only posts leaves the device open and the chunks
+  uploading, which is the identical symptom from a different cause. The device
+  is released **first**, and released even when the post then fails — a session
+  left open is recoverable by the next start; a recording nobody consented to
+  continuing is not.
+- **The live path's recogniser is one setting, and local models are a
+  provider.** `ConnectorSettings.live_model` (`modules/settings/models.py`) is
+  the live path's single selector: a cloud model resolves its Deepgram key
+  through the credential pool, a local model needs no key and resolves
+  `local_asr_base_url` instead. Model, then provider, then credential — one
+  direction, which is what keeps this from re-opening the `live_vendor` bug
+  where two places selected a vendor and disagreed. It was `model: str =
+  "nova-3"` in `deepgram_live_recogniser`'s signature, a keyword default
+  nothing passed, so the choice existed in Python and nowhere an operator
+  could reach. Three traps. **Read it per call**, never bind it at assembly —
+  the model is what somebody reaches for *because* the current one is failing,
+  mid-meeting. **`.value`, never the enum member** — `LiveSpeechModel.NOVA_3`
+  formats as `LiveSpeechModel.NOVA_3` in a query string, and the vendor 400
+  reads as a broken credential. **`_live_transcription_ready` has to ask the
+  right question**: a deployment running Whisper locally has no Deepgram key
+  and never will, so gating the panel's lane frame on one reports the lane
+  down while it works. Local transcription targets the **OpenAI-compatible**
+  `/v1/audio/transcriptions` (`orchestration/local_transcription.py`) rather
+  than whisper.cpp's native server, because that is the one surface taking a
+  real `model` name and serving both Whisper and Parakeet — against a server
+  that loads one model at startup the dropdown would be decoration, and the
+  Settings screen says so. Elicta does not run the model and must not imply it
+  does: no weights ship, and there is no download. And `keyterm` is Nova-3
+  only, so the vocabulary is **dropped rather than sent to be ignored**, with
+  the screen saying which models take it — a silently-inert setting is worse
+  than one that is off.
+  **Being unready has two remedies now, so the lane reports which.**
+  `_live_transcription_blocker()` returns the reason and
+  `_live_transcription_ready()` is `blocker() is None`, from the one branch —
+  a reason computed separately from the flag is the gate-and-report drift that
+  cost an evening, wearing a different hat. The panel prints what the service
+  says. It used to carry one hardcoded sentence written when there was only
+  one way to be unready, so an operator running Parakeet on their own machine
+  was told *"No speech credential is configured"*: true, irrelevant, and
+  pointing at the single action that would cost them money and change nothing.
+  A misreported remedy is worse than no message.
+- **The panel has two accounts of one microphone, and a snapshot is not an
+  account.** The service's comes from audio it has received; the local
+  `captureSession`'s, in the shell, is read **once, on mount** (`refresh()`
+  adopts the Rust session) and never again. A panel that mounted before the
+  recording started stays wrong for the rest of the meeting, and nothing says
+  so: the bar reads "Listening…" from the service while the store believes it
+  holds nothing, so the wave draws empty and Pause — offered only where there
+  is something local to pause — is simply absent. That is what an operator
+  reported, with no state on screen to explain it. The disagreement is now the
+  trigger: `receivingAudio && !holdingTheDevice` re-asks the shell every 4s
+  until they agree, and **only in that direction** — a store holding a device
+  the service has not heard from yet is the ordinary first seconds of a
+  recording. Two traps. `useCapture` returns a fresh object each render, so
+  the effect depends on `microphone.refresh` (a `useCallback`) and never on
+  `microphone`, or the interval is rebuilt every render and never fires. And
+  `receiving_audio` **lags a stop by the freshness window**, so a stop that
+  worked left the bar listening with the clock running for seconds — the exact
+  appearance of one that did nothing; `stopStatus === 'stopped'` now wins over
+  the derivation, because this screen released the device itself and knows
+  better. `OperatorPanel` takes `captureStore` for the same reason it takes
+  `createSource`: reaching for the module singleton is why the one state that
+  mattered was the one no test could set up.
+- **A question is two tiers everywhere it appears, and the short one is the
+  point.** `stub` is the glance — at most five words, no verb, no question mark
+  — and `phrasing` is what gets read aloud. The panel leads with the stub, the
+  bank rail *is* stubs, and the Preparation screen shows both so a reviewer
+  sees the form the room will get. A bank compiled before this carries no stub;
+  `services/questionStub.ts` derives keywords from the phrasing on the client
+  rather than the service defaulting one, deliberately — a server-side default
+  would make a bank that would genuinely read better recompiled
+  indistinguishable from one that would not. `stubFor` prefers a supplied stub
+  whole and never re-derives it: a model-written stub reads better than
+  anything lifted mechanically out of a sentence.
 - **`app/orchestration/` owns pipeline order.** `debrief.py` runs architecture §7 steps 2–8,
   `compiler.py` runs §3.10; `composition.py` decides *when* they run. Stages fail closed — a
   failed stage halts the chain rather than feeding the next one. Add a stage to the orchestrator,
@@ -438,6 +645,18 @@ cd handbook/tools && python3 -m unittest   # pytest does not collect these
   `composition.py` imports those three that way.
 - **A new module needs `__init__.py`** — without it `pkgutil` does not report it as a package
   and `module_loader` never sees it. `engagement` and `replay` were invisible this way.
+- **A DTO between a write and a read drops what it does not declare, silently.**
+  Pydantic's default `extra` policy is `ignore`, so `BankCandidate(..., stub=x)`
+  against a model with no `stub` field raises nothing, type-checks, and loses
+  the value. That is how the panel's glanceable tier stayed empty for every
+  candidate ever compiled: `_store_compiled_candidates` wrote `stub`, the store
+  read `row.stub`, and the model between them never mentioned it — 554
+  candidates on a real state file, 554 empty stubs. It is the documented
+  write-path/read-path split one level subtler, because here both paths agree
+  on the name. When adding a field to a compiled candidate, add it to **both**
+  `compiler/api/models.py` and `compiler/bank/models.py` and to
+  `get_base_candidates` in `composition.py`, which rebuilds each candidate
+  field by field across the package boundary.
 - **Duplicate test basenames across modules** (`test_router.py`, `test_service.py`,
   `test_recompile.py`, …) collide under pytest if a package is missing `__init__.py`. Run the
   **full** service suite after adding one, not just your own directory.
@@ -452,8 +671,8 @@ cd handbook/tools && python3 -m unittest   # pytest does not collect these
 - **`.gitignore` un-ignores two paths** (`apps/desktop/src/features/panel/coverage/`,
   `core/crates/coverage/`) that the generic `coverage/` rule would swallow. New `coverage`-named
   paths need the same treatment.
-- **Formatting is not gated yet.** `cargo fmt --all --check` reports 328 hunks across 65 files
-  and `ruff format --check` 94 files, all pre-existing. Both are deferred to their own
+- **Formatting is not gated yet.** `cargo fmt --all --check` reports 352 hunks
+  and `ruff format --check` 145 files, all pre-existing. Both are deferred to their own
   mechanical commits; `test.yml` says where to re-enable the check.
 
 ## claw-forge Agent Notes

@@ -6,12 +6,15 @@ import { SpeechPool } from './SpeechPool';
 import { ScreenEyebrow } from '../../ui/Mark';
 import {
   AUTH_MODE_SECRET,
+  runsLocally,
+  takesVocabulary,
   useSettings,
   type AuthMode,
   type ConnectorSettings,
   type DocumentSourceSettings,
   type ConsentModelSetting,
   type ConsentSettings,
+  type LiveSpeechModel,
   type StorageSettings,
   type InferenceSettings,
   type LlmProvider,
@@ -847,6 +850,79 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
                   setConnectors({
                     ...currentConnectors,
                     custom_base_url: event.target.value || null,
+                  })
+                }
+              />
+            </div>
+          ) : null}
+
+          <div className="settings-field">
+            <label htmlFor="live-model">Live transcription model</label>
+            <p className="settings-help">
+              What listens during the meeting. This is the only thing standing
+              between somebody speaking and a question reaching you, so it is
+              bought on speed rather than on accuracy — the recording is
+              transcribed again afterwards, properly, by the two engines above.
+            </p>
+            <select
+              id="live-model"
+              value={currentConnectors.live_model}
+              onChange={(event) =>
+                setConnectors({
+                  ...currentConnectors,
+                  live_model: event.target.value as LiveSpeechModel,
+                })
+              }
+            >
+              <optgroup label="At the vendor">
+                <option value="nova-3">Deepgram Nova-3 — most accurate</option>
+                <option value="nova-2">Deepgram Nova-2 — previous generation</option>
+                <option value="enhanced">Deepgram Enhanced — cheapest</option>
+              </optgroup>
+              <optgroup label="On this machine">
+                <option value="whisper-large-v3-turbo">
+                  Whisper large v3 turbo — most accurate, heaviest
+                </option>
+                <option value="whisper-medium">Whisper medium — the usual compromise</option>
+                <option value="whisper-small">Whisper small — fastest Whisper</option>
+                <option value="parakeet-tdt-0.6b-v2">Parakeet 0.6b — English only, fastest</option>
+              </optgroup>
+            </select>
+            {runsLocally(currentConnectors.live_model) ? (
+              <p className="settings-help">
+                No audio leaves this machine on this setting. Elicta does not
+                run the model itself — point it at a transcription server you
+                are running below. A server hosting one model transcribes with
+                that one whatever is chosen here.
+              </p>
+            ) : null}
+            {!takesVocabulary(currentConnectors.live_model) &&
+            currentConnectors.keyterm_prompting ? (
+              <p className="settings-caution" role="status">
+                Your engagement vocabulary is not sent on this model — only
+                Nova-3 accepts it. The recording is still transcribed with it
+                afterwards.
+              </p>
+            ) : null}
+          </div>
+
+          {runsLocally(currentConnectors.live_model) ? (
+            <div className="settings-field">
+              <label htmlFor="local-asr">Local transcription server</label>
+              <p className="settings-help">
+                An OpenAI-compatible transcription API — speaches, LocalAI, or
+                whisper.cpp in its compatible mode. Without one, nothing said
+                in the meeting is written down and no question can react to it.
+              </p>
+              <input
+                id="local-asr"
+                type="text"
+                value={currentConnectors.local_asr_base_url ?? ''}
+                placeholder="http://127.0.0.1:8178/v1"
+                onChange={(event) =>
+                  setConnectors({
+                    ...currentConnectors,
+                    local_asr_base_url: event.target.value || null,
                   })
                 }
               />

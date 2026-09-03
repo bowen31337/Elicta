@@ -1206,6 +1206,28 @@
         }
       }
     },
+    "/api/service/identity": {
+      "get": {
+        "tags": [
+          "service"
+        ],
+        "summary": "Service Identity",
+        "description": "Say which executable is answering, and whether it was frozen.",
+        "operationId": "service_identity_api_service_identity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceIdentity"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meetings/{meeting_id}/artifacts": {
       "get": {
         "tags": [
@@ -1361,6 +1383,51 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequirementsState"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/debrief/run": {
+      "post": {
+        "tags": [
+          "debrief-pipeline"
+        ],
+        "summary": "Run Debrief Now",
+        "description": "Produce the write-up for a meeting that is owed one.\n\nThe pipeline otherwise runs itself once, when the second record-path\nengine finishes, and there is no other way to reach it \u2014\n`/debrief/start` opens the conversation rather than producing the\nartifacts. So a meeting whose run was lost, or whose engines were\nmisconfigured at the time, had transcripts, nothing to show, and\nnothing to press.\n\nRefused rather than run when nothing has been transcribed: the\npipeline over no transcript produces an empty write-up, which reads\nas a meeting where nothing was said.",
+        "operationId": "run_debrief_now_api_meetings__meeting_id__debrief_run_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Run Debrief Now Api Meetings  Meeting Id  Debrief Run Post"
                 }
               }
             }
@@ -2093,6 +2160,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionStart"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{meeting_id}/session/stop": {
+      "post": {
+        "tags": [
+          "live-session"
+        ],
+        "summary": "Stop Session Endpoint",
+        "description": "End this meeting's live capture session.\n\n**This route is the fix for a button that did nothing.** The panel has\nposted here since the recording bar was added, and nothing has ever\nanswered: the path was absent from the service, so every press was a\n404 that the panel turned into an `error` status it did not render.\nThe operator saw the clock keep running. `stopSession.ts` was fully\nunit-tested the whole time, against a stubbed `fetch` -- and a stub\nanswers whatever URL it is handed, so the suite was green about a\nroute that did not exist.\n\nNo request body. The panel used to send its own coverage summary here\nto be flushed as the session's final state, from the days when the\npanel was where coverage was counted. It is not any more: coverage is\nderived in the service from the meeting's own nudge dispositions,\nprecisely so there is one answer in one place, and taking a second\ncopy from the client would be re-opening that. A body sent anyway is\nignored rather than refused, so an older panel still stops cleanly.\n\nConsent is deliberately not consulted. `admit_capture` guards\n*starting*; asking it here would mean a meeting whose consent was\nwithdrawn mid-session could not be stopped, which is precisely\nbackwards.",
+        "operationId": "stop_session_endpoint_api_meetings__meeting_id__session_stop_post",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meeting Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStop"
                 }
               }
             }
@@ -3744,6 +3854,18 @@
               }
             ],
             "title": "Cause"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           }
         },
         "type": "object",
@@ -4126,6 +4248,23 @@
             "title": "Record Vendors",
             "description": "Batch engines for the record path. FR-2.6 requires two, and T3 requires that they diverge independently."
           },
+          "live_model": {
+            "$ref": "#/components/schemas/LiveSpeechModel",
+            "description": "The recogniser the live path runs on. Chosen separately from the record path's engines for the reason this class exists: the live path is bought on latency, the record path on divergence. Only Nova-3 accepts keyterms, so the engagement vocabulary stops reaching the transcriber on anything else \u2014 the operator-facing control says so rather than leaving the setting above it quietly inert.",
+            "default": "nova-3"
+          },
+          "local_asr_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Asr Base Url",
+            "description": "Where the local transcription server is, when `live_model` names a model that runs on this machine. An OpenAI-compatible transcription API \u2014 speaches, LocalAI, whisper.cpp in its compatible mode \u2014 because that is the one surface that serves both Whisper and Parakeet and takes a real model name. No default: nothing is assumed to be listening on this operator's machine, and a default port would make an unconfigured deployment fail as a refused connection rather than as the missing setting it is."
+          },
           "keyterm_prompting": {
             "type": "boolean",
             "title": "Keyterm Prompting",
@@ -4420,6 +4559,11 @@
               }
             ],
             "title": "Cause"
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running",
+            "default": false
           }
         },
         "type": "object",
@@ -5473,6 +5617,20 @@
         ],
         "title": "LiveSessions",
         "description": "Every session this process has started, freshest audio first."
+      },
+      "LiveSpeechModel": {
+        "type": "string",
+        "enum": [
+          "nova-3",
+          "nova-2",
+          "enhanced",
+          "whisper-large-v3-turbo",
+          "whisper-medium",
+          "whisper-small",
+          "parakeet-tdt-0.6b-v2"
+        ],
+        "title": "LiveSpeechModel",
+        "description": "Which recogniser the live path runs on.\n\nIt was fixed at `nova-3` in the recogniser's signature, as a\nkeyword-argument default nothing in the product passed \u2014 a choice that\nexisted in Python and nowhere an operator could reach.\n\n**This is the live path's one selector, and that is deliberate.**\n`live_vendor` was removed from `ConnectorSettings` because the credential\npool already decided which vendor served, and two places claiming to\nselect one disagreed in a real deployment \u2014 a deployment read AssemblyAI\nfrom settings while the live path drove Deepgram regardless. Nothing here\nreopens that. A cloud model resolves its key through the pool exactly as\nbefore; a local model needs no key and resolves an address instead. Model,\nthen provider, then credential \u2014 one direction, one decision per step.\n\nA closed set rather than free text. The name goes straight into the\nrequest, so a typo is a 400 in the middle of a client meeting \u2014 the one\nplace in this product where a configuration mistake surfaces at the worst\npossible moment."
       },
       "LlmProvider": {
         "type": "string",
@@ -6561,6 +6719,25 @@
         "title": "SelectionPolicy",
         "description": "How the pool chooses between the credentials a vendor has.\n\nTwo, deliberately. A third \u2014 weighted, or health-ranked \u2014 is a guess about\na deployment nobody is running yet, and each additional policy is another\nbranch that has to be right when a meeting is in progress."
       },
+      "ServiceIdentity": {
+        "properties": {
+          "executable": {
+            "type": "string",
+            "title": "Executable"
+          },
+          "frozen": {
+            "type": "boolean",
+            "title": "Frozen"
+          }
+        },
+        "type": "object",
+        "required": [
+          "executable",
+          "frozen"
+        ],
+        "title": "ServiceIdentity",
+        "description": "Enough for a caller to tell \"mine\" from \"somebody else's\"."
+      },
       "ServiceSettings": {
         "properties": {
           "inference": {
@@ -6690,6 +6867,38 @@
         ],
         "title": "SessionStart",
         "description": "A newly opened live capture session for one meeting."
+      },
+      "SessionStop": {
+        "properties": {
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "meeting_id": {
+            "type": "string",
+            "title": "Meeting Id"
+          },
+          "stopped_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Stopped At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "meeting_id",
+          "stopped_at"
+        ],
+        "title": "SessionStop",
+        "description": "A live capture session that has been closed for one meeting.\n\n`session_id` is `None` when there was nothing open to close. That is a\nsuccess, not a failure: the operator asked for the recording to be over\nand it is over. The distinction is kept rather than smoothed away because\na caller reconciling what it recorded against what the service saw needs\nto know whether this call is the one that ended a session."
       },
       "SettingsUpdateRequest": {
         "properties": {
@@ -7524,6 +7733,18 @@
             },
             "type": "array",
             "title": "Authority Match"
+          },
+          "stub": {
+            "type": "string",
+            "title": "Stub",
+            "default": ""
+          },
+          "trigger_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Trigger Types"
           }
         },
         "type": "object",
@@ -7559,6 +7780,11 @@
             "type": "boolean",
             "title": "Inherited From Open Question",
             "default": false
+          },
+          "stub": {
+            "type": "string",
+            "title": "Stub",
+            "default": ""
           }
         },
         "type": "object",

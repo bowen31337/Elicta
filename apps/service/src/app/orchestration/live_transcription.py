@@ -27,7 +27,11 @@ import httpx
 from app.modules.settings.models import SpeechVendor
 from app.modules.settings.speech_resolution import resolve_speech_key
 
-from .deepgram_engines import DeepgramUnavailable, deepgram_listen_url
+from .deepgram_engines import (
+    DeepgramUnavailable,
+    deepgram_listen_url,
+    supports_keyterms,
+)
 
 
 def transcript_of(payload: Any) -> str:
@@ -50,15 +54,19 @@ def deepgram_live_recogniser(
     store: Any,
     get_vocabulary: Callable[[str], Awaitable[list[str]]],
     *,
-    model: str = "nova-3",
+    model: str | None = None,
     timeout: float = 8.0,
     transport: Any = None,
 ) -> Callable[[str, bytes], Awaitable[str]]:
     """A recogniser for the live lane, or one that refuses honestly.
 
-    The credential and the operator's switches are read per call, so a key
-    entered on the Settings screen takes effect without a restart -- the same
-    rule the record path follows.
+    The credential, the model and the operator's switches are read per call,
+    so anything set on the Settings screen takes effect without a restart --
+    the same rule the record path follows. `model` was a default argument
+    fixed at `nova-3`, which is a keyword-argument default nothing in the
+    product passed: the choice existed in this signature and nowhere an
+    operator could reach it. Passing one still pins it, for a caller that
+    means to.
     """
 
     async def recognise(session_id: str, pcm: bytes) -> str:
@@ -71,12 +79,20 @@ def deepgram_live_recogniser(
             raise DeepgramUnavailable("no Deepgram credential is configured")
 
         connectors = store.read().connectors
-        keyterms = await get_vocabulary(session_id) if connectors.keyterm_prompting else []
+        # `.value` because the URL builder takes the wire string, and an
+        # `Enum` member formats as `LiveSpeechModel.NOVA_3` in a query
+        # parameter — a 400 from the vendor that reads as a broken credential.
+        chosen = model if model is not None else connectors.live_model.value
+        # Not fetched at all where it cannot be used. The vocabulary lookup is
+        # a database read per four-second window, and on a model that ignores
+        # keyterms it buys nothing.
+        wanted = connectors.keyterm_prompting and supports_keyterms(chosen)
+        keyterms = await get_vocabulary(session_id) if wanted else []
 
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             response = await client.post(
                 deepgram_listen_url(
-                    model,
+                    chosen,
                     list(keyterms),
                     opt_out_of_retention=connectors.disable_vendor_retention,
                 ),

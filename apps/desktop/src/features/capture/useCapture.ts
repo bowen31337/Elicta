@@ -66,6 +66,16 @@ export interface UseCapture {
    * obvious thing — see `CaptureSnapshot.uploadNote`.
    */
   readonly uploadNote: string | null;
+  /**
+   * Re-read the session from the backend that owns it.
+   *
+   * Exposed because the mount-time read is a *snapshot*, and a screen that
+   * takes one can be wrong for the rest of a meeting. The live panel needs
+   * this: it has a second, independent account of whether a microphone is
+   * open — the service's, from audio actually arriving — and when the two
+   * disagree the local one is the one that can be stale.
+   */
+  readonly refresh: () => Promise<void>;
   readonly start: (sourceId?: string) => Promise<void>;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
@@ -99,6 +109,7 @@ export function useCapture(store: CaptureStore = captureSession): UseCapture {
     [store],
   );
 
+  const refresh = useCallback(() => store.refresh(), [store]);
   const pause = useCallback(() => store.pause(), [store]);
   const resume = useCallback(() => store.resume(), [store]);
   const stop = useCallback(() => store.stop(), [store]);
@@ -114,6 +125,7 @@ export function useCapture(store: CaptureStore = captureSession): UseCapture {
     levelUnmeasurable: snapshot.levelUnmeasurable,
     waveform: snapshot.waveform,
     uploadNote: snapshot.uploadNote,
+    refresh,
     start,
     pause,
     resume,

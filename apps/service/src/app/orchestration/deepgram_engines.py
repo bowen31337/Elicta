@@ -36,6 +36,20 @@ class DeepgramUnavailable(Exception):
     """Deepgram could not be reached, or refused the request."""
 
 
+#: The models that accept `keyterm`. Nova-3 only, per Deepgram's API — and
+#: keeping the fact here rather than at each call site is the point: the URL
+#: builder is what would otherwise put the parameter on a request that ignores
+#: it, and a silently-ignored vocabulary is indistinguishable from one that
+#: worked.
+KEYTERM_MODELS = frozenset({"nova-3"})
+
+
+def supports_keyterms(model: str) -> bool:
+    """Whether this model will do anything with the engagement vocabulary."""
+
+    return model in KEYTERM_MODELS
+
+
 def deepgram_listen_url(
     model: str, keyterms: list[str], *, opt_out_of_retention: bool = True
 ) -> str:
@@ -61,7 +75,12 @@ def deepgram_listen_url(
         # NFR-2.3: vendor-side retention is set per request, not left to the
         # contract alone, so an audit can see it on the wire.
         ("mip_opt_out", "true" if opt_out_of_retention else "false"),
-        *(("keyterm", term) for term in keyterms),
+        # Dropped rather than sent and ignored. An operator who switches the
+        # live model away from Nova-3 keeps the "send engagement vocabulary"
+        # switch on and has every reason to believe it still applies; putting
+        # the terms on a request that discards them makes the wire log agree
+        # with that belief. The Settings screen says which models take it.
+        *(("keyterm", term) for term in keyterms if supports_keyterms(model)),
     ]
     return f"{LISTEN_URL}?{urlencode(params)}"
 

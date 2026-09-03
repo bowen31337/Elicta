@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import './route.css';
 import {
@@ -8,13 +8,18 @@ import {
   ParkItChip,
   WhatAmIMissingChip,
 } from './chips';
-import type { CoverageSummary } from './coverage';
-import { CoverageIndicator, useSessionStream } from './coverage';
+import type { CoverageSummary, SessionStreamUtterance } from './coverage';
+import { CoverageIndicator, useSessionStream, useStopSession } from './coverage';
 import type { DetectedLanguage } from './language';
 import { LanguageChrome } from './language';
 import type { Nudge } from './nudge';
-import { NudgeStack } from './nudge';
+import { QuestionPanel, TranscriptPanel } from './feed';
+import { CaptureBar } from './capture';
+import { useCapture } from '../capture/useCapture';
+import type { BankQuestion } from './bank';
+import { BankRail, upcoming, useMeetingBank } from './bank';
 import { recordNudgeDisposition } from '../../services/nudgeDisposition';
+import { stubFor } from '../../services/questionStub';
 import { useCurrentEngagement, useCurrentMeeting } from '../../services/selection';
 
 /**
@@ -50,6 +55,52 @@ export interface PanelState {
   readonly meetingId?: string;
   readonly operatorLanguage?: string;
   readonly activeTier?: 'tier-1' | 'tier-2' | 'tier-3' | null;
+  /**
+   * The meeting so far, for a fixed scene. Live, this comes off the stream.
+   *
+   * Supplied the same way `coverage` and `languages` are, and for the same
+   * reason: the journey screenshots and the accessibility audit render this
+   * panel from props with no service behind them, so a region that could only
+   * be filled by a live stream would be photographed and audited empty for
+   * ever — which is the one state whose colours do not need checking.
+   */
+  readonly transcript?: readonly SessionStreamUtterance[];
+  /** The meeting's bank, for a fixed scene. Live, this is fetched. */
+  readonly bankQuestions?: readonly BankQuestion[];
+  /**
+   * How long capture has been running, in milliseconds, for a fixed scene.
+   *
+   * A duration rather than an instant, and that is not a detail: a scene is a
+   * frozen fixture, so an absolute timestamp in it is measured against a real
+   * clock that moves further from it every day. Set as an instant, the
+   * recording bar in the journey screenshots read `9098:09:34` — the fixture's
+   * age, not a meeting's length.
+   */
+  readonly capturingForMs?: number;
+  /**
+   * Whether anything said will be transcribed, for a fixed scene. Live, this
+   * comes off the stream's lane frame. Defaults to transcribing, so every
+   * other scene renders unchanged.
+   */
+  readonly liveTranscription?: boolean;
+  /** Which recogniser is listening, for a fixed scene. */
+  readonly liveModel?: string | null;
+  /** Why nothing will be transcribed, for a fixed scene. */
+  readonly liveTranscriptionReason?: string | null;
+  /**
+   * Recent input levels, for a fixed scene. Live, these come off the local
+   * capture store.
+   *
+   * A scene supplies them for the reason it supplies the transcript and the
+   * coverage: the journey screenshots and the accessibility audit render this
+   * panel from props with no device anywhere near them, so a region that
+   * could only be filled by an open microphone would be photographed and
+   * audited empty for ever — and the recording bar's controls are the newest
+   * colours on the panel.
+   */
+  readonly waveform?: readonly number[];
+  /** Whether that scene's recording is being held. */
+  readonly paused?: boolean;
 }
 
 const EMPTY: PanelState = {
@@ -77,6 +128,7 @@ function SlotMeter({ summary }: { summary: CoverageSummary | null }) {
 export function OperatorPanel({
   initial = EMPTY,
   createSource,
+  captureStore,
 }: {
   initial?: PanelState;
   /** Overridable so a test can drive the stream without a network. */
@@ -85,8 +137,28 @@ export function OperatorPanel({
     | undefined
     ? F
     : never;
+  /**
+   * The microphone, injectable for the same reason the stream is.
+   *
+   * It was not, and that is why nothing here could be tested: the panel
+   * reached for the module singleton, so a test could not put it in the one
+   * state that mattered — a recording running that this screen had not
+   * noticed — which is precisely the state an operator hit.
+   */
+  captureStore?: Parameters<typeof useCapture>[0];
 }) {
   const [state, setState] = useState<PanelState>(initial);
+  /**
+   * Which bank questions this meeting has finished with.
+   *
+   * Held on the panel rather than read back off the service, because the rail
+   * has to change in the same render pass as the tap. `Asked it` already
+   * reports the disposition and deliberately does not wait for the round trip
+   * (FR-6.6: the confirmation is the card receding), so a rail that waited for
+   * the service to agree would leave a question the operator has just asked
+   * sitting there for as long as the network took.
+   */
+  const [dealtWith, setDealtWith] = useState<ReadonlySet<string>>(() => new Set());
   // The live session drives the panel when there is one. Coverage arrives as
   // the current summary rather than a diff, and each nudge replaces the
   // active one — the previous nudge recedes into history rather than being
@@ -94,6 +166,12 @@ export function OperatorPanel({
   const {
     coverage,
     languages: streamLanguages,
+    transcript,
+    liveTranscription,
+    liveModel,
+    liveTranscriptionReason,
+    receivingAudio,
+    capturingSince,
     modelReachable,
     degradedReason,
   } = useSessionStream(state.meetingId ?? null, {
@@ -124,6 +202,133 @@ export function OperatorPanel({
         };
       }),
   });
+
+  /**
+   * Ending the meeting, from the panel.
+   *
+   * `useStopSession` releases the microphone and then closes the session, in
+   * that order, which is why the stop lives here rather than inside the bar:
+   * the bar knows what the microphone is doing, this knows the meeting it
+   * belongs to.
+   *
+   * Given the empty string when no meeting is selected — the hook is a hook
+   * and cannot be called conditionally, and nothing can press the button in
+   * that state anyway, because the bar is only handed one when there is a
+   * meeting to stop.
+   */
+  const { status: stopStatus, stop } = useStopSession(state.meetingId ?? '');
+
+  /**
+   * The microphone, where it is this window holding it.
+   *
+   * `services/captureSession` is one store per bundle, so when the operator
+   * pressed Capture in this app the panel is already holding the same levels
+   * and the same paused-aware clock the Capture screen draws — which is why
+   * the bar can show a real waveform rather than none. Where the panel is a
+   * genuine second screen the store is simply idle, `waveform` is empty and
+   * the bar draws no wave at all: absence, not a flat line.
+   */
+  const microphone = useCapture(captureStore);
+  const holdingTheDevice =
+    microphone.status.state === 'capturing' || microphone.status.state === 'paused';
+
+  const onStopCapture = () => {
+    // Fire and forget, like every other control on this panel: the operator's
+    // confirmation is the bar changing state, not the round trip. What is
+    // *not* fire and forget any more is the failure — see `stopFailed` on the
+    // bar. This press did nothing at all for as long as the route it posts to
+    // did not exist, and the panel had nowhere to say so.
+    void stop();
+  };
+
+  // What the room has said, from the stream when there is a meeting and from
+  // the prop when a fixed scene is standing in for one — the same rule the
+  // coverage and the languages above already follow.
+  const heard = state.meetingId ? transcript : (state.transcript ?? []);
+
+  /**
+   * Two accounts of one microphone, reconciled rather than left to disagree.
+   *
+   * The panel has the service's word — audio is arriving, from chunks it has
+   * actually received — and the local capture store's, which in the desktop
+   * shell is a *snapshot* taken when this screen mounted. The store only
+   * re-reads the shell's session on mount, so a screen that mounted before
+   * the recording started, or whose read raced it, stays wrong for the rest
+   * of the meeting. Nothing about that is visible: the panel shows
+   * "Listening…" from the service's account while the store believes it holds
+   * nothing, so the wave draws empty and the Pause button — which is only
+   * offered where there is something local to pause — is simply not there.
+   * That is what an operator reported, and there is no state on screen that
+   * explains it.
+   *
+   * So the disagreement is the trigger. When the service says audio is
+   * arriving and the store says nothing is open, ask the shell again; it owns
+   * the session and can settle it. Only in that direction, and only while the
+   * disagreement lasts: the store believing it holds a device the service has
+   * heard nothing from is an ordinary few seconds at the start of a
+   * recording, not a contradiction.
+   */
+  // Not after a stop this screen made: the service's account lags by the
+  // freshness window, and re-asking the shell about a session we have just
+  // closed is asking a settled question.
+  const outOfStep = receivingAudio && !holdingTheDevice && stopStatus !== 'stopped';
+  // `microphone.refresh`, never `microphone`: the hook returns a fresh object
+  // every render, so depending on it would tear down and rebuild the interval
+  // on each one — a timer that never fires, which is the same nothing this
+  // effect exists to fix.
+  const { refresh: refreshMicrophone } = microphone;
+  useEffect(() => {
+    if (!outOfStep) return;
+    void refreshMicrophone();
+    // Re-asked on an interval rather than once, because the first answer can
+    // be "idle" legitimately — the shell's session is opened a moment after
+    // the first chunk is uploaded — and one attempt would then settle on the
+    // wrong answer for the rest of the meeting. Four seconds is the
+    // transcription window; nothing here changes faster than that.
+    const timer = window.setInterval(() => void refreshMicrophone(), 4000);
+    return () => window.clearInterval(timer);
+  }, [outOfStep, refreshMicrophone]);
+
+  // The meeting's own recompile, not the engagement's compile: it puts the
+  // questions the last meeting left open ahead of everything else, which is
+  // the ranking an operator wants at the top of a rail (FR-4.8).
+  const bank = useMeetingBank(state.meetingId ?? null);
+
+  /**
+   * Ask a question the operator chose off the rail.
+   *
+   * It becomes the active nudge rather than being asked in place, so
+   * everything already built around a live question works on it unchanged —
+   * `Asked it` ticks its section, `Park it` files it into the next meeting's
+   * bank, `Go deeper` follows the thread. FR-6.3 constrains prominence to one
+   * question at a time; this changes which one, not how many.
+   *
+   * The same shape the typed escape hatch produces, and for the same reason:
+   * one kind of live question on this panel, with one set of controls, rather
+   * than a second machinery per source.
+   */
+  const onAskFromBank = (question: BankQuestion) => {
+    setDealtWith((current) => new Set(current).add(question.id));
+    setState((current) => ({
+      ...current,
+      active: {
+        id: `bank-${question.id}`,
+        stub: stubFor(question),
+        question: question.phrasing,
+        // The reason line says why this is on screen, and the honest answer
+        // is that the operator picked it — not that anything was heard. A
+        // trigger reason invented here would be the panel claiming the gate
+        // fired when it did not, which is the one thing FR-5.11's reason line
+        // exists to make impossible.
+        triggerReason: question.inherited
+          ? 'from the bank — carried forward from your last meeting'
+          : 'from the bank — chosen by you',
+        createdAt: Date.now(),
+        templateSection: question.templateSection,
+      },
+      history: current.active ? [current.active, ...current.history] : current.history,
+    }));
+  };
 
   /**
    * Mark the live nudge asked.
@@ -319,14 +524,150 @@ export function OperatorPanel({
         </p>
       ) : null}
 
-      <section className="nudge materialize" aria-live="polite">
-        <NudgeStack
+      {/* One region, and that is the point. The proposed question renders
+          inside the conversation, under the line it reacted to — which is
+          what makes it judgeable, and what makes a question reacting to the
+          operator's own sentence visible instead of hidden. */}
+      {/* Two panels, because they scale differently. The transcript runs to
+          hundreds of lines and needs its own scroll; the question is one
+          thing at a time and must never be pushed off the screen by a client
+          who is still talking. What the separation would otherwise cost — the
+          reason a suggestion is worth trusting — is carried by the question
+          quoting the line it reacted to. */}
+      {/* `panel-split` is the grid, and it has to be a *descendant* of the
+          element carrying `container-type` — a container cannot query itself,
+          which is why styling `.panel` inside its own `@container` block did
+          nothing at all. Below the threshold it is `display: contents`, so
+          these four stay direct flex children of `.panel` and every rule
+          already written for them keeps applying, the coarse-pointer layout
+          included. */}
+      <div className="panel-split">
+      {/* Focusable because it scrolls on a touch screen and can hold nothing
+          that takes focus — a live question with no earlier ones under it is
+          exactly that, and it is the ordinary state. Without this a keyboard
+          user can reach every control on the panel and not the question
+          itself. Caught by the audit as `scrollable-region-focusable`. */}
+      <section
+        className="nudge materialize"
+        tabIndex={0}
+        aria-label="The question to ask"
+      >
+        <QuestionPanel
           active={state.active}
           history={[...state.history]}
+          transcript={heard}
           operatorLanguage={state.operatorLanguage}
           onSelect={onSelectNudge}
         />
       </section>
+
+      {/* The recording, on the screen the operator is already on. In the
+          transcript's column rather than the question's: it is about the
+          conversation being captured, and the question column is already the
+          busiest half of this panel. */}
+      <div className="panel-record">
+      <TranscriptPanel
+        transcript={heard}
+        transcribing={
+          state.meetingId ? liveTranscription : (state.liveTranscription ?? true)
+        }
+        // Only a live meeting can report a microphone. A fixed scene has no
+        // stream, and a scene that carries lines was plainly being captured
+        // when they were said — inferring it from the prop keeps every
+        // screenshot honest without a second flag to set.
+        receivingAudio={
+          state.meetingId ? receivingAudio : (state.transcript ?? []).length > 0
+        }
+        model={state.meetingId ? liveModel : (state.liveModel ?? null)}
+        blockedBecause={
+          state.meetingId ? liveTranscriptionReason : (state.liveTranscriptionReason ?? null)
+        }
+      />
+
+      <CaptureBar
+        // The local device wins where there is one: the service's
+        // `receiving_audio` is derived from when a chunk last arrived, which
+        // lags a pause by the freshness window and would leave the bar
+        // claiming to listen for seconds after the operator held it.
+        // A stop that has come back is the end of it, whatever the service
+        // still says. `receiving_audio` is derived from when a chunk last
+        // arrived and stays true for the freshness window after the last one
+        // — so for several seconds after a stop that worked, the bar went on
+        // reading "Listening…" with the clock running, which is
+        // indistinguishable from a Stop that did nothing. This screen knows
+        // better than the derivation does: it released the device itself.
+        capturing={
+          stopStatus === 'stopped'
+            ? false
+            : holdingTheDevice
+              ? true
+              : state.meetingId
+                ? receivingAudio
+                : (state.transcript ?? []).length > 0
+        }
+        since={
+          state.meetingId
+            ? capturingSince
+            : state.capturingForMs === undefined
+              ? null
+              : Date.now() - state.capturingForMs
+        }
+        // Paused time is not recorded time, and only the local store knows
+        // the difference. Absent where the capture is somebody else's, and
+        // the bar falls back to the wall clock from `since`.
+        elapsedSeconds={holdingTheDevice ? microphone.elapsedSeconds : null}
+        waveform={state.waveform ?? microphone.waveform}
+        paused={state.paused ?? microphone.status.state === 'paused'}
+        // Only where something can actually be held: this window holding the
+        // device, or a fixed scene standing in for one. A Pause button that
+        // cannot reach a microphone is the Stop button's old bug waiting to
+        // be written again.
+        onPause={
+          holdingTheDevice
+            ? () => void microphone.pause()
+            : state.waveform === undefined
+              ? undefined
+              : () => {}
+        }
+        onResume={
+          holdingTheDevice
+            ? () => void microphone.resume()
+            : state.waveform === undefined
+              ? undefined
+              : () => {}
+        }
+        transcribing={
+          state.meetingId ? liveTranscription : (state.liveTranscription ?? true)
+        }
+        // Only a live meeting can be stopped. A fixed scene gets the bar
+        // without the button rather than a button that does nothing.
+        onStop={
+          state.meetingId ? onStopCapture : state.waveform === undefined ? undefined : () => {}
+        }
+        stopping={stopStatus === 'pending'}
+        stopFailed={stopStatus === 'error'}
+      />
+      </div>
+
+      {/* The two supporting regions, between the live question and the
+          controls. Both are deliberately quieter than the nudge above them:
+          the nudge is the only thing on this screen set at reading size,
+          because the operator is looking at a client rather than at this.
+
+          The rail comes first because it is actionable and the transcript is
+          reference — a thumb travelling up from the dock reaches the thing it
+          can press before the thing it can only read. */}
+      <BankRail
+        questions={upcoming(
+          // Same rule as the languages and the coverage above: the stream — or
+          // here the fetch — is what the service knows now, and the prop is
+          // what the panel was handed at mount, which is all a fixed scene has.
+          state.meetingId ? bank.questions : (state.bankQuestions ?? []),
+          { asked: dealtWith },
+        )}
+        onAsk={onAskFromBank}
+      />
+
 
       {/* Everything the operator can do, in one region. On a touch screen it
           docks to the foot of the display as a single material (route.css),
@@ -382,6 +723,7 @@ export function OperatorPanel({
             expects a field it has decided to type in. */}
         <EscapeHatchInput onSubmit={onTypedQuestion} />
       </footer>
+      </div>
     </main>
   );
 }

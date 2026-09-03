@@ -1,0 +1,214 @@
+/* The recording bar: a state line, and a floating pill under it, after
+ * meetily.
+ *
+ * A real material rather than a tinted box — translucency, a lit top edge, a
+ * hairline rim and a soft depth shadow — because it floats *over* the
+ * conversation and has to read as being in front of it. `.glass` in
+ * `styles.css` already carries that, including the reduced-transparency and
+ * increased-contrast fallbacks, so this adds only shape and layout.
+ *
+ * The state reads *above* the pill and the controls sit inside it, which is
+ * the arrangement that keeps the pill legible: a pill carrying a wave, a
+ * clock, two buttons and a status phrase runs past its own column at any
+ * realistic width, and the first thing to be pushed out is the word that says
+ * whether anything is recording. */
+
+/* Every class here is prefixed `capture-bar`, and that is not style — CSS is
+   global and `features/capture/capture.css` already owns `.capture-state`,
+   `.capture-elapsed` and `.capture-meter-bar` for the Capture *screen*.
+   Sharing those names, this bar silently inherited that screen's padded,
+   tinted box: a lighter rectangle appeared behind the word "Recording" with
+   nothing in this file to explain it. The repo's existing answer to this is
+   `.nudge-stack__*`; this follows it. */
+.capture-bar-dock {
+  position: sticky;
+  /* Clear of the home indicator on a phone; zero on a desk, where every
+     `env()` is 0 and this collapses to the plain inset. */
+  bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  z-index: 2;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.capture-bar-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--label-supporting);
+  /* The phrase and its dot are one thing; a state broken across two lines
+     reads as two states. */
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.capture-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-radius: var(--radius-capsule);
+  /* Never wider than its column, and never so wide the controls drift apart
+     from the reading beside them. */
+  inline-size: fit-content;
+  max-inline-size: 100%;
+}
+
+/* The one place a dot pulses.
+ *
+ * It earns the animation for the reason the compile meter's breathing does:
+ * "is this still recording" is the question an operator asks most while
+ * looking at somebody else, and a still dot answers it identically whether
+ * capture is running or has silently stopped. */
+.capture-bar__dot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--radius-capsule);
+  background: var(--fill-1);
+  flex: 0 0 auto;
+}
+
+.capture-bar__dot--live {
+  background: var(--red);
+  /* Only `opacity` is animated — never a layout property, and never a colour
+     that would force paint on every frame. */
+  animation: capture-bar-pulse 2s var(--ease-out) infinite;
+}
+
+@keyframes capture-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Gentler, not gone: the dot still marks the state, it simply stops moving. */
+@media (prefers-reduced-motion: reduce) {
+  .capture-bar__dot--live { animation: none; }
+}
+
+/* The wave is the recent history, newest at the right, growing from the
+   centre in both directions — which is what makes it read as a waveform
+   rather than as a bar chart. Fixed width, because a wave that resized as
+   its history filled would move the clock beside it every four seconds. */
+.capture-bar__wave {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  block-size: 22px;
+  inline-size: 96px;
+  flex: 0 0 auto;
+  /* A backstop, not the fix. The bars are sliced to a count that fits and can
+     shrink to nothing, so nothing should reach here — but a row that
+     overflowed this box did not clip, it painted over the clock and both
+     buttons, and the next person to change the bar count should get a clipped
+     wave rather than an unreadable one. */
+  overflow: hidden;
+}
+
+.capture-bar__bar {
+  flex: 1 1 0;
+  /* Zero, deliberately. A floor here is what made the row overflow: flex does
+     not compress past `min-inline-size`, it spills, and the spill landed on
+     top of the controls. */
+  min-inline-size: 0;
+  border-radius: 1px;
+  background: var(--label-supporting);
+  /* Transitioned rather than animated, so the global
+     `prefers-reduced-motion` rule in tokens.css flattens it with no second
+     implementation here. */
+  transition: height 80ms linear;
+}
+
+.capture-bar__note { color: var(--orange-ink); white-space: nowrap; }
+
+/* `--red-ink`, not `--red`: this is text on a material that composites darker
+   than a card, and the vivid system colour is for fills. */
+.capture-bar__failed {
+  color: var(--red-ink);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+/* Tabular figures so the clock does not shimmer as its digits change — a
+   number jiggling in the corner of the eye is motion this screen cannot
+   afford, and this one changes every second for an hour. */
+.capture-bar__elapsed {
+  color: var(--label);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
+  /* Tracking tightens as a figure gains weight, which is the optical
+     correction that stops a bold clock reading as spaced out. */
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+  padding-inline: var(--space-1);
+}
+
+/* Named rather than iconic, with the glyph beside the word: an operator
+   ending a client meeting should not have to recognise a shape, and Pause and
+   Stop are two squares' worth of difference at this size. */
+.capture-bar__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* The platform minimum, even though the label is small: this is pressed by
+     somebody not looking at it. */
+  min-block-size: 44px;
+  min-inline-size: 44px;
+  padding-inline: var(--space-3);
+  border: none;
+  border-radius: var(--radius-capsule);
+  background: var(--fill-2);
+  color: var(--label);
+  font-size: var(--text-footnote);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  /* Feedback on press, not on release. `--duration-fast` on a token easing:
+     this is a fire-and-forget state change, not something the operator can
+     grab, so a spring would be machinery with nothing to interrupt. */
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.capture-bar__glyph { display: inline-flex; flex: 0 0 auto; }
+
+/* Destructive, and marked as such by its own ground rather than by colour
+   alone — the square glyph is the second signal. */
+.capture-bar__button--stop {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red-ink);
+}
+
+@media (hover: hover) {
+  .capture-bar__button:hover:not(:disabled) { background: var(--fill-1); }
+  .capture-bar__button--stop:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--red) 20%, transparent);
+  }
+}
+/* A press the finger can feel before the request returns. */
+.capture-bar__button:active:not(:disabled) { transform: scale(0.96); }
+
+.capture-bar__button:disabled {
+  /* Dimmed by ink rather than by `opacity`: element opacity multiplies the
+     colour it already has and drops this under AA at the size it is set. */
+  color: var(--label-supporting);
+  background: var(--fill-3);
+  cursor: default;
+}
+
+.capture-bar__button:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capture-bar__button { transition: none; }
+  .capture-bar__button:active:not(:disabled) { transform: none; }
+}
+
+@media (prefers-contrast: more) {
+  .capture-bar__button { border: 1px solid var(--separator-opaque); }
+}

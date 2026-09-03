@@ -35,6 +35,20 @@ class BankCandidate(BaseModel):
     phrasing: str
     priority: int = Field(ge=1)
     inherited_from_open_question: bool = False
+    #: The same question at a glance — what the panel renders above the
+    #: phrasing and the only tier an operator reads without breaking eye
+    #: contact with the client (FR-6.2).
+    #:
+    #: Part of the slice after all, because the panel reads *this* bank rather
+    #: than the engagement's compile: a field this package declined to carry
+    #: was a field the panel could never show, however well the compiler
+    #: drafted it.
+    #:
+    #: Empty for an inherited open question, which is prose carried forward
+    #: from the last meeting rather than a drafted candidate — nothing ever
+    #: shortened it. Kept empty rather than defaulted to the phrasing, so a
+    #: caller can tell a question with a short form from one without.
+    stub: str = ""
 
 
 class MeetingQuestionBank(BaseModel):

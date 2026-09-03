@@ -1,0 +1,189 @@
+import { describe, expect, it } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+
+import { useSessionStream } from '../useSessionStream';
+import type { SessionStreamSource, SessionStreamSourceFactory } from '../useSessionStream';
+import { parseSessionStreamEvent } from '../sessionStreamEvents';
+
+class FakeSource implements SessionStreamSource {
+  closed = false;
+  private readonly listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  dispatch(type: string, data: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data } as MessageEvent<string>);
+    }
+  }
+}
+
+function fakeFactory(): { createSource: SessionStreamSourceFactory; sources: FakeSource[] } {
+  const sources: FakeSource[] = [];
+  return {
+    createSource: () => {
+      const source = new FakeSource();
+      sources.push(source);
+      return source;
+    },
+    sources,
+  };
+}
+
+function line(seq: number, text: string, speaker: string | null = null, at = 1_700_000_000_000) {
+  return JSON.stringify({ seq, text, speaker, at: at + seq * 1000 });
+}
+
+describe('parsing an utterance frame', () => {
+  it('reads the wire shape the service sends', () => {
+    const parsed = parseSessionStreamEvent('utterance', line(3, 'Three fifty a day.', 'client'));
+
+    expect(parsed).toEqual({
+      type: 'utterance',
+      utterance: {
+        seq: 3,
+        text: 'Three fifty a day.',
+        speaker: 'client',
+        at: 1_700_000_003_000,
+      },
+    });
+  });
+
+  it('keeps an unattributed line as unattributed rather than inventing a speaker', () => {
+    // Nobody enrolled is the ordinary deployment, and a line put in the wrong
+    // person's mouth is worse than one in nobody's.
+    const parsed = parseSessionStreamEvent('utterance', line(0, 'It depends.', null));
+    expect(parsed).toMatchObject({ utterance: { speaker: null } });
+  });
+});
+
+describe('the transcript the panel holds', () => {
+  it('is empty until the stream says anything', () => {
+    const { createSource } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    expect(result.current.transcript).toEqual([]);
+  });
+
+  it('accumulates every line in the order it was said', () => {
+    const { createSource, sources } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    act(() => {
+      sources[0].dispatch('utterance', line(0, 'How many a day?', 'operator'));
+      sources[0].dispatch('utterance', line(1, 'Three fifty.', 'client'));
+    });
+
+    expect(result.current.transcript.map((entry) => entry.text)).toEqual([
+      'How many a day?',
+      'Three fifty.',
+    ]);
+  });
+
+  it('does not double a line when the stream replays its backlog', () => {
+    // `EventSource` reconnects on its own schedule every few minutes and the
+    // service replays the whole meeting on every connect — that is how a panel
+    // opened mid-meeting catches up. Appending blindly turned three lines into
+    // six, then nine, which is exactly what happened to the nudges.
+    const { createSource, sources } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    act(() => {
+      sources[0].dispatch('utterance', line(0, 'How many a day?', 'operator'));
+      sources[0].dispatch('utterance', line(1, 'Three fifty.', 'client'));
+    });
+    act(() => {
+      sources[0].dispatch('utterance', line(0, 'How many a day?', 'operator'));
+      sources[0].dispatch('utterance', line(1, 'Three fifty.', 'client'));
+      sources[0].dispatch('utterance', line(2, 'More at Christmas.', 'client'));
+    });
+
+    expect(result.current.transcript.map((entry) => entry.text)).toEqual([
+      'How many a day?',
+      'Three fifty.',
+      'More at Christmas.',
+    ]);
+  });
+
+  it('keeps two identical sentences apart, because people repeat themselves', () => {
+    // Deduping on the text would silently swallow the second "Yes." — the
+    // reason the service assigns an index rather than the panel counting.
+    const { createSource, sources } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    act(() => {
+      sources[0].dispatch('utterance', line(0, 'Yes.', 'client'));
+      sources[0].dispatch('utterance', line(1, 'Could you repeat that?', 'operator'));
+      sources[0].dispatch('utterance', line(2, 'Yes.', 'client'));
+    });
+
+    expect(result.current.transcript).toHaveLength(3);
+  });
+
+  it('holds lines in transcript order even if a frame arrives out of turn', () => {
+    const { createSource, sources } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    act(() => {
+      sources[0].dispatch('utterance', line(2, 'Third.', 'client'));
+      sources[0].dispatch('utterance', line(0, 'First.', 'operator'));
+      sources[0].dispatch('utterance', line(1, 'Second.', 'client'));
+    });
+
+    expect(result.current.transcript.map((entry) => entry.text)).toEqual([
+      'First.',
+      'Second.',
+      'Third.',
+    ]);
+  });
+});
+
+describe('whether the room will be transcribed at all', () => {
+  it('is read off the lane frame', () => {
+    const parsed = parseSessionStreamEvent(
+      'lane',
+      JSON.stringify({ model_reachable: true, reason: null, live_transcription: false }),
+    );
+
+    expect(parsed).toMatchObject({ lane: { liveTranscription: false } });
+  });
+
+  it('is assumed working when the service does not say', () => {
+    // An older service sends no such field. Reading absence as "not
+    // configured" would put a permanent notice on a panel that is
+    // transcribing perfectly well, and a notice that cries wolf stops being
+    // read — the same reasoning `modelReachable` starts true for.
+    const parsed = parseSessionStreamEvent(
+      'lane',
+      JSON.stringify({ model_reachable: true, reason: null }),
+    );
+
+    expect(parsed).toMatchObject({ lane: { liveTranscription: true } });
+  });
+
+  it('reaches the panel through the hook', () => {
+    const { createSource, sources } = fakeFactory();
+    const { result } = renderHook(() => useSessionStream('meeting-1', { createSource }));
+
+    expect(result.current.liveTranscription).toBe(true);
+    act(() => {
+      sources[0].dispatch(
+        'lane',
+        JSON.stringify({ model_reachable: true, reason: null, live_transcription: false }),
+      );
+    });
+
+    expect(result.current.liveTranscription).toBe(false);
+  });
+});

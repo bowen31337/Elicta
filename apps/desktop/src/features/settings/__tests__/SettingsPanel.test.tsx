@@ -17,6 +17,8 @@ const CONFIGURED: ServiceSettings = {
   },
   vendors: { asr_base_url: null, capture_base_url: null },
   connectors: {
+  live_model: 'nova-3',
+  local_asr_base_url: null,
     record_vendors: ['deepgram', 'assemblyai'],
     keyterm_prompting: true,
     disable_vendor_retention: true,
@@ -959,5 +961,87 @@ describe('the consent model', () => {
     await openTab('Recording');
 
     expect(screen.getByRole('radio', { name: /ask before every meeting/i })).toBeChecked();
+  });
+});
+
+describe('choosing what listens during the meeting', () => {
+  /**
+   * The model was a keyword-argument default in a Python signature fixed at
+   * `nova-3` — a choice that existed and that no operator could reach. What
+   * these cover is the two things a dropdown can quietly get wrong: offering
+   * a setting whose consequence is hidden, and revealing a dependent control
+   * only in a state no fixture ever renders.
+   */
+  const withModel = (live_model: string, local_asr_base_url: string | null = null) =>
+    controller({
+      settings: {
+        ...CONFIGURED,
+        connectors: { ...CONFIGURED.connectors, live_model, local_asr_base_url },
+      },
+    } as Partial<UseSettingsResult>);
+
+  it('offers the cloud and local models in separate groups', async () => {
+    render(<SettingsPanel controller={withModel('nova-3')} />);
+    await openTab('Speech');
+
+    const select = screen.getByLabelText('Live transcription model');
+
+    expect(within(select).getByRole('group', { name: 'At the vendor' })).toBeInTheDocument();
+    expect(within(select).getByRole('group', { name: 'On this machine' })).toBeInTheDocument();
+  });
+
+  it('says the vocabulary is not sent on a model that cannot take it', async () => {
+    // `keyterm` is Nova-3 only. The service already drops the parameter
+    // rather than sending it to be ignored, and an operator with the
+    // vocabulary switch still on has every reason to believe it applies —
+    // a silently-inert setting is worse than one that is off.
+    render(<SettingsPanel controller={withModel('nova-2')} />);
+    await openTab('Speech');
+
+    expect(screen.getByText(/vocabulary is not sent on this model/i)).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort on the model that does take it', async () => {
+    render(<SettingsPanel controller={withModel('nova-3')} />);
+    await openTab('Speech');
+
+    expect(screen.queryByText(/vocabulary is not sent/i)).not.toBeInTheDocument();
+  });
+
+  it('asks for a server address only where one is needed', async () => {
+    render(<SettingsPanel controller={withModel('nova-3')} />);
+    await openTab('Speech');
+
+    expect(screen.queryByLabelText('Local transcription server')).not.toBeInTheDocument();
+  });
+
+  it('asks for a server address as soon as a local model is chosen', async () => {
+    // Elicta does not run the model. A local option with nowhere to send the
+    // audio is a setting that reports itself configured and transcribes
+    // nothing — which the panel would show as a working lane.
+    render(<SettingsPanel controller={withModel('whisper-small')} />);
+    await openTab('Speech');
+
+    expect(screen.getByLabelText('Local transcription server')).toBeInTheDocument();
+    expect(screen.getByText(/no audio leaves this machine/i)).toBeInTheDocument();
+  });
+
+  it('takes the choice and reveals what that choice now needs', async () => {
+    // Picking a local model without being asked for a server is a setting
+    // that reports itself configured and transcribes nothing — so the
+    // address field appearing *is* the behaviour, not decoration around it.
+    render(<SettingsPanel controller={withModel('nova-3')} />);
+    await openTab('Speech');
+    expect(screen.queryByLabelText('Local transcription server')).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(
+      screen.getByLabelText('Live transcription model'),
+      'parakeet-tdt-0.6b-v2',
+    );
+
+    expect(screen.getByLabelText('Live transcription model')).toHaveValue(
+      'parakeet-tdt-0.6b-v2',
+    );
+    expect(screen.getByLabelText('Local transcription server')).toBeInTheDocument();
   });
 });

@@ -378,6 +378,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/service/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Service Identity
+         * @description Say which executable is answering, and whether it was frozen.
+         */
+        get: operations["service_identity_api_service_identity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meetings/{meeting_id}/artifacts": {
         parameters: {
             query?: never;
@@ -440,6 +460,37 @@ export interface paths {
         get: operations["get_engagement_requirements_state_api_engagements__engagement_id__requirements_state_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/debrief/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Debrief Now
+         * @description Produce the write-up for a meeting that is owed one.
+         *
+         *     The pipeline otherwise runs itself once, when the second record-path
+         *     engine finishes, and there is no other way to reach it —
+         *     `/debrief/start` opens the conversation rather than producing the
+         *     artifacts. So a meeting whose run was lost, or whose engines were
+         *     misconfigured at the time, had transcripts, nothing to show, and
+         *     nothing to press.
+         *
+         *     Refused rather than run when nothing has been transcribed: the
+         *     pipeline over no transcript produces an empty write-up, which reads
+         *     as a meeting where nothing was said.
+         */
+        post: operations["run_debrief_now_api_meetings__meeting_id__debrief_run_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -736,6 +787,48 @@ export interface paths {
         put?: never;
         /** Start Session Endpoint */
         post: operations["start_session_endpoint_api_meetings__meeting_id__session_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meetings/{meeting_id}/session/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Session Endpoint
+         * @description End this meeting's live capture session.
+         *
+         *     **This route is the fix for a button that did nothing.** The panel has
+         *     posted here since the recording bar was added, and nothing has ever
+         *     answered: the path was absent from the service, so every press was a
+         *     404 that the panel turned into an `error` status it did not render.
+         *     The operator saw the clock keep running. `stopSession.ts` was fully
+         *     unit-tested the whole time, against a stubbed `fetch` -- and a stub
+         *     answers whatever URL it is handed, so the suite was green about a
+         *     route that did not exist.
+         *
+         *     No request body. The panel used to send its own coverage summary here
+         *     to be flushed as the session's final state, from the days when the
+         *     panel was where coverage was counted. It is not any more: coverage is
+         *     derived in the service from the meeting's own nudge dispositions,
+         *     precisely so there is one answer in one place, and taking a second
+         *     copy from the client would be re-opening that. A body sent anyway is
+         *     ignored rather than refused, so an older panel still stops cleanly.
+         *
+         *     Consent is deliberately not consulted. `admit_capture` guards
+         *     *starting*; asking it here would mean a meeting whose consent was
+         *     withdrawn mid-session could not be stopped, which is precisely
+         *     backwards.
+         */
+        post: operations["stop_session_endpoint_api_meetings__meeting_id__session_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1453,6 +1546,8 @@ export interface components {
             reason?: string | null;
             /** Cause */
             cause?: string | null;
+            /** Started At */
+            started_at?: string | null;
         };
         /**
          * BankCompileTrigger
@@ -1687,6 +1782,16 @@ export interface components {
              */
             record_vendors?: components["schemas"]["SpeechVendor"][];
             /**
+             * @description The recogniser the live path runs on. Chosen separately from the record path's engines for the reason this class exists: the live path is bought on latency, the record path on divergence. Only Nova-3 accepts keyterms, so the engagement vocabulary stops reaching the transcriber on anything else — the operator-facing control says so rather than leaving the setting above it quietly inert.
+             * @default nova-3
+             */
+            live_model: components["schemas"]["LiveSpeechModel"];
+            /**
+             * Local Asr Base Url
+             * @description Where the local transcription server is, when `live_model` names a model that runs on this machine. An OpenAI-compatible transcription API — speaches, LocalAI, whisper.cpp in its compatible mode — because that is the one surface that serves both Whisper and Parakeet and takes a real model name. No default: nothing is assumed to be listening on this operator's machine, and a default port would make an unconfigured deployment fail as a refused connection rather than as the missing setting it is.
+             */
+            local_asr_base_url?: string | null;
+            /**
              * Keyterm Prompting
              * @description Send the engagement vocabulary as keyterms (FR-2.9). §14.1 ranks this the highest-leverage engine-side accuracy control.
              * @default true
@@ -1879,6 +1984,11 @@ export interface components {
             reason?: string | null;
             /** Cause */
             cause?: string | null;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
         };
         /**
          * DebriefConversationSession
@@ -2420,6 +2530,30 @@ export interface components {
             /** Sessions */
             sessions: components["schemas"]["LiveSession"][];
         };
+        /**
+         * LiveSpeechModel
+         * @description Which recogniser the live path runs on.
+         *
+         *     It was fixed at `nova-3` in the recogniser's signature, as a
+         *     keyword-argument default nothing in the product passed — a choice that
+         *     existed in Python and nowhere an operator could reach.
+         *
+         *     **This is the live path's one selector, and that is deliberate.**
+         *     `live_vendor` was removed from `ConnectorSettings` because the credential
+         *     pool already decided which vendor served, and two places claiming to
+         *     select one disagreed in a real deployment — a deployment read AssemblyAI
+         *     from settings while the live path drove Deepgram regardless. Nothing here
+         *     reopens that. A cloud model resolves its key through the pool exactly as
+         *     before; a local model needs no key and resolves an address instead. Model,
+         *     then provider, then credential — one direction, one decision per step.
+         *
+         *     A closed set rather than free text. The name goes straight into the
+         *     request, so a typo is a 400 in the middle of a client meeting — the one
+         *     place in this product where a configuration mistake surfaces at the worst
+         *     possible moment.
+         * @enum {string}
+         */
+        LiveSpeechModel: "nova-3" | "nova-2" | "enhanced" | "whisper-large-v3-turbo" | "whisper-medium" | "whisper-small" | "parakeet-tdt-0.6b-v2";
         /**
          * LlmProvider
          * @description Where Claude calls are routed.
@@ -3030,6 +3164,16 @@ export interface components {
          */
         SelectionPolicy: "single" | "rotate";
         /**
+         * ServiceIdentity
+         * @description Enough for a caller to tell "mine" from "somebody else's".
+         */
+        ServiceIdentity: {
+            /** Executable */
+            executable: string;
+            /** Frozen */
+            frozen: boolean;
+        };
+        /**
          * ServiceSettings
          * @description Everything an operator can administer, with no secret values in it.
          */
@@ -3103,6 +3247,27 @@ export interface components {
              * Format: date-time
              */
             started_at: string;
+        };
+        /**
+         * SessionStop
+         * @description A live capture session that has been closed for one meeting.
+         *
+         *     `session_id` is `None` when there was nothing open to close. That is a
+         *     success, not a failure: the operator asked for the recording to be over
+         *     and it is over. The distinction is kept rather than smoothed away because
+         *     a caller reconciling what it recorded against what the service saw needs
+         *     to know whether this call is the one that ended a session.
+         */
+        SessionStop: {
+            /** Session Id */
+            session_id: string | null;
+            /** Meeting Id */
+            meeting_id: string;
+            /**
+             * Stopped At
+             * Format: date-time
+             */
+            stopped_at: string;
         };
         /**
          * SettingsUpdateRequest
@@ -3564,6 +3729,13 @@ export interface components {
             source_doc?: string | null;
             /** Authority Match */
             authority_match?: string[];
+            /**
+             * Stub
+             * @default
+             */
+            stub: string;
+            /** Trigger Types */
+            trigger_types?: string[];
         };
         /**
          * BankCandidate
@@ -3592,6 +3764,11 @@ export interface components {
              * @default false
              */
             inherited_from_open_question: boolean;
+            /**
+             * Stub
+             * @default
+             */
+            stub: string;
         };
     };
     responses: never;
@@ -4445,6 +4622,26 @@ export interface operations {
             };
         };
     };
+    service_identity_api_service_identity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceIdentity"];
+                };
+            };
+        };
+    };
     list_meeting_artifacts_api_meetings__meeting_id__artifacts_get: {
         parameters: {
             query?: never;
@@ -4556,6 +4753,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequirementsState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_debrief_now_api_meetings__meeting_id__debrief_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -5089,6 +5319,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_session_endpoint_api_meetings__meeting_id__session_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                meeting_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStop"];
                 };
             };
             /** @description Validation Error */

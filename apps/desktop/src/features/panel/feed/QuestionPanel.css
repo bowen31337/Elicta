@@ -1,0 +1,87 @@
+/* What to ask, beside the transcript rather than inside it.
+ *
+ * Nothing here restyles `.nudge-stack__*`: the type scale, its touch-screen
+ * steps and the trigger reason's ink are already solved there, and re-solving
+ * them under new names is how a contrast regression ships. */
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The line the question reacted to, quoted under it.
+ *
+ * This is what the question carries instead of sitting next to the
+ * conversation, and it is the only place an operator can see the failure the
+ * product is meant to avoid: with no enrolled voiceprint the gate cannot tell
+ * who spoke, so it sometimes reacts to the operator's own sentence. Quoted,
+ * that is obvious at a glance. */
+.ask-because {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--label-supporting);
+  min-width: 0;
+}
+
+/* A short rule rather than a quotation glyph: the mark has to read as
+   "in response to" at caption size, where a curly quote is a speck. */
+.ask-because-mark {
+  inline-size: 2px;
+  block-size: 1em;
+  border-radius: var(--radius-capsule);
+  background: var(--separator-opaque);
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+
+.ask-because-said {
+  font-style: italic;
+  min-width: 0;
+  /* One line. The quote is there to identify the moment, not to re-read the
+     conversation — that is what the transcript panel is for. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `<q>` adds its own quotation marks in some locales on top of the italics
+   and the rule; three markers for one idea is two too many. */
+.ask-because-said::before,
+.ask-because-said::after { content: none; }
+
+.ask-earlier-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--label-supporting);
+}
+
+/* Focusable for the same reason the transcript is: it scrolls, and when no
+   handler is supplied its rows are plain text with nothing to tab to. */
+.ask-earlier:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+.ask-earlier {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* Bounded and scrolling: the questions panel must not grow past the room it
+     has and push the controls under it off the screen. */
+  max-block-size: 12em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ask-earlier .nudge-stack__history-button {
+  /* The whole row is the target: a receded question is reached one-handed
+     while looking at a client. */
+  width: 100%;
+  text-align: start;
+}

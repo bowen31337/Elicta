@@ -64,6 +64,10 @@
 
 /* The nudge is the only thing on this screen set at reading size. */
 .nudge { display: flex; flex-direction: column; gap: var(--space-3); }
+/* It takes focus so it can be scrolled by keyboard; it should not look like a
+   control while doing so, only while focused. */
+.nudge:focus { outline: none; }
+.nudge:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .nudge-stub { margin: 0; color: var(--label); text-wrap: balance; }
 .nudge-question { margin: 0; color: var(--label); text-wrap: pretty; }
 .nudge-reason { margin: 0; color: var(--label-supporting); }
@@ -336,4 +340,140 @@
   .panel-chips { gap: var(--space-3); }
   .panel-chips > .asked-it-chip,
   .panel-chips button { min-height: 44px; }
+}
+
+/* ==========================================================================
+   Two panels, because they scale differently.
+
+   The transcript runs to hundreds of lines in an hour and needs a scroll of
+   its own. The question is one thing at a time and must never be pushed off
+   the screen by a client who is still talking. Merged into a single stream —
+   which this briefly was — every question was buried by the conversation
+   within a minute.
+
+   What the separation would otherwise cost is the link between them, and that
+   is carried by the question quoting the line it reacted to.
+
+   Measured on the **panel**, not the window: this panel lives in a pane beside
+   a sidebar, so the two numbers differ by the width of that sidebar, and
+   gating on the viewport once put the question column at 156px in a 620px
+   pane. `.panel-split` is the grid rather than `.panel` itself because **a
+   container cannot query itself** — styling the container inside its own
+   `@container` block does nothing whatsoever, silently, which is how the
+   columns shipped stacked for one build.
+   ========================================================================== */
+.panel { container-type: inline-size; container-name: panel; }
+
+/* Below the threshold the wrapper is not a box at all, so its children remain
+   direct flex children of `.panel` and every rule above — and the whole
+   coarse-pointer block, which gives `.panel` a height and lets `.nudge` grow
+   inside it — keeps applying untouched. */
+.panel-split { display: contents; }
+
+/* The transcript and the recording bar are one column: the bar is docked to
+   the foot of the conversation it is capturing. */
+.panel-record {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Stacked, the transcript is bounded so a long meeting cannot push the dock
+   off the bottom of the screen. */
+.script { max-block-size: 20em; }
+
+@media (pointer: fine) {
+  /* 26rem for the transcript, the gap, 24rem for the question. Below that
+     there is not room for both, so they stack.
+
+     **The transcript is the left column**, which is the order the room happens
+     in: what was said, and then what to ask about it. Reading it the other way
+     round asks the operator to take the suggestion first and go looking for
+     its cause second, and the cause is the whole reason to trust it.
+
+     Both columns carry a floor and the transcript carries the larger share of
+     what is left over. The first version of this put `minmax(0, 1fr)` on the
+     question, which let the one thing the operator is meant to read shrink to
+     40px in a narrow pane while the column beside it yielded no ground at all.
+     A floor on the important column is not a nicety; it is the difference
+     between two columns and one column with a margin.
+
+     Nothing here fires unless the shell stages the panel wide enough to reach
+     it — see the stage container in `shell.css`, whose threshold is this one
+     plus the panel's own inset. */
+  @container panel (min-width: 52rem) {
+    .panel-split {
+      display: grid;
+      grid-template-columns: minmax(26rem, 1.2fr) minmax(24rem, 1fr);
+      grid-template-rows: minmax(0, 1fr) auto auto;
+      column-gap: var(--space-5);
+      row-gap: var(--space-4);
+      /* Takes the height the panel has left after the chrome, so the two
+         scrolls below are bounded by the window rather than by their own
+         contents. Without the `flex` the grid sizes to its tallest child and
+         an hour of transcript grows the card until the page scrolls it — one
+         scroll for two columns, which is the arrangement the split exists to
+         undo. `min-height: 0` is what lets it shrink at all. */
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    /* Placed into the second column rather than reordered in the markup, and
+       the source order is deliberately left alone: the question column holds
+       every control on this panel — the chips, the bank rail, the typed
+       fallback — and the transcript holds one scroll region and the Stop
+       button. A keyboard user should arrive at what they act in, not at the
+       log they glance at. Where reading order and focus order have to
+       disagree, they disagree over two tab stops rather than over all of
+       them, and the stacked layout below — where source order is the *only*
+       order, and the panel is the whole of a phone screen — keeps the
+       question first untouched. */
+    .panel-split > .nudge { grid-column: 2; grid-row: 1; min-height: 0; overflow-y: auto; }
+    .panel-split > .bank-rail { grid-column: 2; grid-row: 2; }
+    .panel-split > .panel-dock { grid-column: 2; grid-row: 3; }
+
+    /* The transcript column takes the full height and the conversation
+       scrolls inside it, so nothing the room says moves the controls beside
+       it — and the recording bar stays docked at its foot. */
+    .panel-split > .panel-record {
+      grid-column: 1;
+      grid-row: 1 / -1;
+      min-height: 0;
+    }
+    .panel-record > .script { flex: 1 1 auto; max-block-size: none; min-height: 0; }
+
+    /* The recording bar floats over the foot of the conversation, which is
+       what its own stylesheet has always claimed it does and what it did in
+       the stacked layout it was written for. Left in flow in a full-height
+       column it floats over nothing: the transcript ends, and the pill sits
+       alone in the white below the card it belongs to, reading as something
+       that came loose rather than as the state of the panel above it.
+
+       `sticky` cannot do this job here — `.panel-record` is not a scroll
+       container, so the bar has nothing to stick within and is simply the last
+       item in the column.
+
+       The dock, not the pill: the state line reads above the pill and the two
+       move together, so positioning the pill alone would leave "Listening…"
+       behind in the flow below the transcript. */
+    .panel-record { position: relative; }
+    .panel-record > .capture-bar-dock {
+      position: absolute;
+      /* Both edges plus `auto` margins, so the pill stays centred on the
+         column whatever its labels measure — "Recording 12:04 Stop" is a
+         different width from "Not recording". */
+      inset-inline: var(--space-4);
+      inset-block-end: var(--space-4);
+      margin-inline: auto;
+    }
+
+    /* Room at the end of the scroll for the bar to float over. Without it the
+       newest line — the one the panel scrolls itself to, and the only one
+       anybody is reading — lands underneath the pill. The bar is a 44px
+       target in 2 × `--space-2` of padding, and the last line clears it by a
+       further step. */
+    .panel-record .script-body { padding-block-end: calc(60px + var(--space-3)); }
+  }
 }

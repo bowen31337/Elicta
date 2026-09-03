@@ -81,6 +81,7 @@ export const PREP: PrepScreenProps = {
           {
             id: 'c-1',
             phrasing: 'When you say the dashboard has to be fast, what does that mean in seconds?',
+            stub: 'Dashboard, how fast',
             priority: 1,
             sourceDoc: '01-scoping-deck.pptx',
             authorityMatch: ['ground truth'],
@@ -88,6 +89,7 @@ export const PREP: PrepScreenProps = {
           {
             id: 'c-2',
             phrasing: 'Is that response time at median load, or at your Monday morning peak?',
+            stub: 'Median or Monday peak',
             priority: 2,
             sourceDoc: '02-throughput-study.xlsx',
             authorityMatch: ['ground truth'],
@@ -100,6 +102,7 @@ export const PREP: PrepScreenProps = {
           {
             id: 'c-3',
             phrasing: 'Which systems does Zephyr WMS have to talk to on day one?',
+            stub: 'Zephyr, day-one systems',
             priority: 1,
             sourceDoc: '03-integration-assumptions.docx',
             authorityMatch: ['hypothesis'],
@@ -107,6 +110,7 @@ export const PREP: PrepScreenProps = {
           {
             id: 'c-4',
             phrasing: 'Are those integrations real-time, or is a nightly batch acceptable?',
+            stub: 'Real-time or nightly',
             priority: 2,
             sourceDoc: null,
             authorityMatch: [],
@@ -119,6 +123,7 @@ export const PREP: PrepScreenProps = {
           {
             id: 'c-5',
             phrasing: 'How many consignments a day at peak, and how far above average is that?',
+            stub: 'Peak consignments a day',
             priority: 1,
             sourceDoc: '02-throughput-study.xlsx',
             authorityMatch: ['ground truth'],

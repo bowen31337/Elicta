@@ -1,0 +1,174 @@
+/* The transcript, in a panel of its own, after meetily's live view.
+ *
+ * Its own panel because of scale: an hour of speech is hundreds of lines, and
+ * while it shared a stream with the proposed questions it buried every one of
+ * them inside a minute. Two panels, two scrolls — the conversation runs as
+ * long as it likes without pushing the question off the screen.
+ *
+ * Colours come from the token layer with no exceptions. Text is `--label` or
+ * `--label-supporting`: `--label-secondary` fails WCAG AA at these sizes and
+ * every word here is small. */
+
+.script {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+  min-height: 0;
+}
+
+.script-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+}
+.script-head h2 { margin: 0; }
+
+.script-body {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+  /* Its own scroll: a client still talking must never drag the question panel
+     or the controls beside it. */
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Which recogniser is listening. Supporting ink and pushed to the trailing
+   edge: it is something to check, not something to read every time. */
+.script-model {
+  margin-inline-start: auto;
+  color: var(--label-supporting);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-inline-size: 0;
+}
+
+.script-idle, .script-notice { margin: 0; }
+.script-idle { color: var(--label-supporting); }
+/* A state of the tool, not a fault in the meeting — marked, but it does not
+   shout. `--orange-ink` because this is text: the vivid system orange is for
+   fills, and this ink is solved against the glass, which composites darker
+   than a card. */
+.script-notice { color: var(--orange-ink); flex: 0 0 auto; }
+
+.script-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  /* Spaced like paragraphs rather than table rows, after meetily: a wall of
+     tight lines is a transcript you re-read rather than glance at. */
+  gap: var(--space-4);
+}
+
+/* Three columns: when, who, what. The first two are fixed so a glance down the
+   left edge reads the turn order without reading the words — ragged columns
+   turn a scan into a read. */
+.script-line {
+  display: grid;
+  grid-template-columns: minmax(0, 2.6em) minmax(0, 6em) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+/* meetily's `[MM:SS]` gutter. Tabular figures so it does not shimmer as the
+   digits change — a number jiggling in the corner of the eye is motion this
+   screen cannot afford. */
+.script-at {
+  color: var(--label-supporting);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.script-who {
+  color: var(--label-supporting);
+  font-weight: var(--weight-semibold);
+  /* Truncated rather than wrapped: a long name must not push the words it
+     introduces onto the next line and break the scan. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unattributed is marked by style, not by dimming. Element opacity multiplies
+   ink that is already reduced, so dimming supporting text composites toward
+   the background twice and drops under AA. */
+.script-who--unknown {
+  font-style: italic;
+  font-weight: var(--weight-regular);
+}
+
+.script-said {
+  color: var(--label);
+  text-wrap: pretty;
+  min-width: 0;
+  /* A line of prose past about 70 characters is hard to track back to the
+     start of, however wide the panel is. */
+  max-inline-size: 62ch;
+}
+
+/* The live state trails the last line — meetily puts it there, and it is
+   right: that is where new text appears and where the eye already is. */
+.script-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--label-supporting);
+  flex: 0 0 auto;
+}
+
+.script-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--label-supporting);
+  white-space: nowrap;
+}
+.script-state--off { color: var(--orange-ink); }
+/* A meeting nobody has started is not a fault, so it is not marked as one:
+   supporting ink and a still grey dot, where an unconfigured credential gets
+   the orange that says "there is something to go and fix". */
+.script-state--idle { color: var(--label-supporting); }
+
+.script-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-capsule);
+  background: var(--green);
+  flex: 0 0 auto;
+  /* Earns its place for the reason the compile meter's breathing does:
+     telling working from stopped is the whole question while the room is
+     quiet, and every other signal here looks identical in both states. */
+  animation: script-pulse 2.4s var(--ease-out) infinite;
+}
+.script-dot--off { background: var(--orange); animation: none; }
+/* Still, and deliberately. The pulse means "audio is arriving"; on a meeting
+   nobody has started it would be the same false claim in a different form. */
+.script-dot--idle { background: var(--fill-1); animation: none; }
+.script-dot--live { background: var(--green); }
+
+@keyframes script-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .script-dot { animation: none; }
+}
+
+/* On a touch screen the columns tighten. The elapsed stamp goes first: it is
+   the least of the three, and "who said it" must survive. */
+@media (pointer: coarse) {
+  .script-line { grid-template-columns: minmax(0, 5.5em) minmax(0, 1fr); }
+  .script-at { display: none; }
+}

@@ -17,6 +17,17 @@ export interface ReferenceDocument {
 export interface BankCandidate {
   readonly id: string;
   readonly phrasing: string;
+  /**
+   * The question at a glance — what the panel puts above the phrasing during
+   * the meeting, and the only tier an operator reads without breaking eye
+   * contact with the client.
+   *
+   * `''` for a bank compiled before the compiler's stub reached the panel,
+   * which is every bank compiled to date. Kept as empty rather than defaulted
+   * to the phrasing: the reviewer derives a short form from it and can still
+   * tell which banks would genuinely read better recompiled.
+   */
+  readonly stub: string;
   readonly priority: number;
   /**
    * The document this question was drafted from, or `null` where the Analyst

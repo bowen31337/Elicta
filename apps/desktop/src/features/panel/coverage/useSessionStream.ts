@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseSessionStreamEvent } from './sessionStreamEvents';
 import type { DetectedLanguage } from '../language/types';
-import type { CoverageSummary, SessionStreamNudge } from './types';
+import type { CoverageSummary, SessionStreamNudge, SessionStreamUtterance } from './types';
 import { apiUrl } from '../../../services/apiClient';
 
 /**
@@ -30,6 +30,16 @@ export interface UseSessionStreamOptions {
 export interface UseSessionStreamResult {
   /** Languages on the panel strip: expected until something is heard. */
   readonly languages: readonly DetectedLanguage[];
+  /**
+   * The meeting so far, oldest first — every speaker, whether or not the line
+   * earned a nudge.
+   *
+   * Held here rather than forwarded through a callback like the nudges,
+   * because there is no queueing decision to make about it. A nudge competes
+   * for the one prominent slot and is rate-limited; a transcript is simply
+   * the record, and the panel renders all of it.
+   */
+  readonly transcript: readonly SessionStreamUtterance[];
   /** The most recent coverage summary the stream has delivered. */
   coverage: CoverageSummary | null;
   /**
@@ -41,6 +51,22 @@ export interface UseSessionStreamResult {
   modelReachable: boolean;
   /** Why the lane is degraded, when it is. */
   degradedReason: string | null;
+  /**
+   * Whether anything said in the room will be transcribed at all. Starts
+   * `true` and is only ever lowered by the service saying so, for the same
+   * reason `modelReachable` does.
+   */
+  liveTranscription: boolean;
+  liveModel: string | null;
+  liveTranscriptionReason: string | null;
+  /** Whether audio is arriving right now. Starts false: nothing has been
+   *  captured until something has. */
+  receivingAudio: boolean;
+  /**
+   * When this run of capture began, or `null` when nothing is being
+   * captured. The recording's clock, not the meeting's.
+   */
+  capturingSince: number | null;
 }
 
 /**
@@ -66,10 +92,33 @@ export function useSessionStream(
   // them before anything is transcribed; nothing was listening for them, so
   // the panel's language strip stayed empty for every meeting.
   const [languages, setLanguages] = useState<readonly DetectedLanguage[]>([]);
-  const [lane, setLane] = useState<{ reachable: boolean; reason: string | null }>({
+  const [lane, setLane] = useState<{
+    reachable: boolean;
+    reason: string | null;
+    transcribing: boolean;
+    model: string | null;
+    blockedBecause: string | null;
+    hearing: boolean;
+    since: number | null;
+  }>({
     reachable: true,
     reason: null,
+    transcribing: true,
+    model: null,
+    blockedBecause: null,
+    hearing: false,
+    since: null,
   });
+  // Filed by `seq` rather than appended, which is what makes a replay
+  // idempotent. The stream sends the whole meeting on every connect and
+  // `EventSource` reconnects every few minutes on its own schedule, so an
+  // append turned three lines into six and then nine — the same fault the
+  // nudge queue had to be taught to dedupe out of.
+  //
+  // Sparse until the gaps fill: a frame arriving out of turn takes its own
+  // place rather than the end of the line, so the transcript is never briefly
+  // wrong about who answered whom.
+  const [byIndex, setByIndex] = useState<readonly (SessionStreamUtterance | undefined)[]>([]);
 
   // `onNudge` is read through a ref so a caller passing a fresh callback
   // each render does not tear down and reopen the stream connection.
@@ -96,10 +145,31 @@ export function useSessionStream(
       }
     };
 
+    const handleUtterance = (event: MessageEvent<string>) => {
+      const parsed = parseSessionStreamEvent('utterance', event.data);
+      if (parsed?.type !== 'utterance') return;
+      setByIndex((current) => {
+        const { seq } = parsed.utterance;
+        if (current[seq] !== undefined) return current;
+        const next = current.slice();
+        if (seq >= next.length) next.length = seq + 1;
+        next[seq] = parsed.utterance;
+        return next;
+      });
+    };
+
     const handleLane = (event: MessageEvent<string>) => {
       const parsed = parseSessionStreamEvent('lane', event.data);
       if (parsed?.type === 'lane') {
-        setLane({ reachable: parsed.lane.modelReachable, reason: parsed.lane.reason });
+        setLane({
+          reachable: parsed.lane.modelReachable,
+          reason: parsed.lane.reason,
+          transcribing: parsed.lane.liveTranscription,
+          model: parsed.lane.liveModel,
+          blockedBecause: parsed.lane.liveTranscriptionReason,
+          hearing: parsed.lane.receivingAudio,
+          since: parsed.lane.capturingSince,
+        });
       }
     };
 
@@ -116,16 +186,36 @@ export function useSessionStream(
     source.addEventListener('coverage', handleCoverage);
     source.addEventListener('language', handleLanguage);
     source.addEventListener('nudge', handleNudge);
+    source.addEventListener('utterance', handleUtterance);
     source.addEventListener('lane', handleLane);
 
     return () => {
       source.removeEventListener('coverage', handleCoverage);
       source.removeEventListener('language', handleLanguage);
       source.removeEventListener('nudge', handleNudge);
+      source.removeEventListener('utterance', handleUtterance);
       source.removeEventListener('lane', handleLane);
       source.close();
     };
   }, [meetingId, createSource]);
 
-  return { coverage, languages, modelReachable: lane.reachable, degradedReason: lane.reason };
+  // Gaps dropped on the way out: a hole is a frame not yet arrived, and the
+  // panel should render the meeting it has rather than a blank row standing in
+  // for one it does not.
+  const transcript = byIndex.filter(
+    (entry): entry is SessionStreamUtterance => entry !== undefined,
+  );
+
+  return {
+    coverage,
+    languages,
+    transcript,
+    modelReachable: lane.reachable,
+    degradedReason: lane.reason,
+    liveTranscription: lane.transcribing,
+    liveModel: lane.model,
+    liveTranscriptionReason: lane.blockedBecause,
+    receivingAudio: lane.hearing,
+    capturingSince: lane.since,
+  };
 }

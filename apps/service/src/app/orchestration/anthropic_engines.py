@@ -428,8 +428,14 @@ Tag every candidate:
   Name every one the question would genuinely answer; a question that answers
   none of them belongs to no trigger and will only ever be read on the
   preparation screen.
-- `stub`: the same question at a glance, short enough to read without breaking
-  eye contact.
+- `stub`: the question reduced to its keywords — **at most five words**, and
+  three is better. Not a shortened sentence: no verb is needed, no question
+  mark, no leading article. "Monthly arrivals, peak vs trough". "Late vessel:
+  slot holds?". "Who owns the exception". This is the only part an operator
+  reads while looking at a client, so a stub they have to *read* rather than
+  glance at has failed at the one thing it is for. If the keywords do not fit
+  in five words, the question is asking two things and belongs as two
+  candidates.
 - `phrasing`: the exact wording, ready to be read aloud.
 - `priority`: 1 is highest.
 
@@ -466,11 +472,17 @@ citation."""
 _STRUCTURING_SYSTEM = """You turn extracted claims into pre-phrased candidate follow-up questions.
 
 Each candidate carries the template section it serves, the trigger types that
-should surface it, a full phrasing, and a short stub for the panel. Priority
-1 is highest.
+should surface it, a full phrasing, and a stub for the panel. Priority 1 is
+highest.
 
 The phrasing is read aloud by an operator mid-meeting, so it must be short,
-natural, and answerable — not a written survey question."""
+natural, and answerable — not a written survey question.
+
+The stub is not a shorter phrasing. It is the question reduced to keywords, at
+most five words, with no verb, article or question mark required — "Monthly
+arrivals, peak vs trough". It is the only tier an operator reads without
+breaking eye contact, so anything that has to be read rather than glanced at
+has failed at the one thing it is for."""
 
 
 def _numbered(lines: list[str]) -> str:

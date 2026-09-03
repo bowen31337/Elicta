@@ -210,6 +210,7 @@ from app.modules.settings.models import (
     ServiceSettings,
     SettingsUpdateRequest,
     SpeechVendor,
+    runs_locally,
 )
 from app.modules.settings.probes import probe_for_vendor
 from app.modules.settings.router import build_settings_router
@@ -270,6 +271,7 @@ from app.orchestration.engines import (
     upstream_failure_in,
 )
 from app.orchestration.live_transcription import deepgram_live_recogniser
+from app.orchestration.local_transcription import local_live_recogniser
 from app.orchestration.reachability import LaneReachability
 from app.persistence import StateStore
 
@@ -542,6 +544,31 @@ class Backend:
     #: decision and is where it is made — restored nudges land in history —
     #: rather than against remembering it.
     surfaced_nudges: dict[str, list[Any]] = field(default_factory=dict)
+    #: Every finalised utterance a meeting has heard, in order, keyed by
+    #: meeting — the transcript the panel renders while the meeting runs.
+    #:
+    #: The live lane already had all of this and dropped it. `LiveUtterances`
+    #: recognises each window server-side and hands over the text with
+    #: whoever the verifier believed said it; the gate read both, decided
+    #: whether to raise a nudge, and kept neither. So the only thing the panel
+    #: could ever show was a question — and since most of a meeting earns no
+    #: question at all (FR-5.7), a silent panel meant both "nothing worth
+    #: asking" and "nothing heard", which are not a state an operator should
+    #: have to guess between mid-meeting.
+    #:
+    #: Every speaker, including the operator. The gate deliberately skips the
+    #: operator's own speech, but a transcript that skipped it would be a
+    #: record of one half of a conversation, and the operator's question is
+    #: what makes the client's answer mean anything.
+    #:
+    #: Deliberately not durable, and unlike the nudges beside it that is not a
+    #: close call: the record path already writes the meeting's transcript,
+    #: through diarisation and cleaning, and that is the one that outlives the
+    #: meeting. This is the live approximation — recognised a four-second
+    #: window at a time, unpunctuated, attributed by voiceprint where anybody
+    #: enrolled — and keeping it would leave two transcripts of one meeting
+    #: disagreeing, with nothing to say which was authoritative.
+    live_transcript: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     #: When each meeting last had a nudge surfaced (FR-5.8).
     last_nudge_at: dict[str, datetime] = field(default_factory=dict)
     #: Which bank candidates a meeting has already used, so the same question
@@ -559,6 +586,17 @@ class Backend:
     #: from: sessions are never ended, and a meeting's state does not move
     #: while it is being captured.
     last_audio_at: dict[str, datetime] = field(default_factory=dict)
+    #: When the current run of capture began, per meeting.
+    #:
+    #: Not when the session was started: a session is opened and never ended,
+    #: so its `started_at` keeps counting through a meeting nobody is
+    #: recording, and a clock that runs while the microphone is off is the
+    #: same lie as a "Transcribing" label with no audio behind it.
+    #:
+    #: Reset whenever audio resumes after a gap longer than the freshness
+    #: window, so stopping and starting again reads as a new run rather than
+    #: adding the pause to the total.
+    capture_started_at: dict[str, datetime] = field(default_factory=dict)
 
     nudge_dispositions: list[NudgeDispositionResponse] = field(default_factory=list)
 
@@ -2207,6 +2245,12 @@ def build_app(
                 phrasing=candidate.phrasing,
                 priority=candidate.priority,
                 inherited_from_open_question=candidate.inherited_from_open_question,
+                # Rebuilt field by field across the package boundary, so a
+                # field added on one side and not the other is dropped in
+                # silence. That is what happened to the stub: the compiler
+                # drafted it, the store kept it, and the meeting's bank —
+                # the one the panel actually reads — left it behind here.
+                stub=candidate.stub,
             )
             for candidate in backend.compiled_candidates.get(engagement_id, [])
             if not candidate.pruned
@@ -2365,6 +2409,7 @@ _slow_lane_models = importlib.import_module("app.modules.slow-lane.models")
 _slow_lane_router = importlib.import_module("app.modules.slow-lane.router")
 
 SessionStart = _live_session_models.SessionStart
+SessionStop = _live_session_models.SessionStop
 CaptureAdmission = _live_session_router.CaptureAdmission
 SlowLaneTickResult = _slow_lane_models.SlowLaneTickResult
 
@@ -2480,22 +2525,166 @@ def _include_operational_routers(
             return CaptureAdmission.CONSENT_REQUIRED
         return CaptureAdmission.ALLOWED
 
+    async def stop_session(meeting_id: str) -> Any:
+        """End this meeting's live capture session (the panel's Stop button).
+
+        Answers `None` only for a meeting nothing knows about, which the
+        router turns into a 404. A meeting that exists with nothing open is a
+        success carrying no `session_id`: the operator asked for the recording
+        to be over, and it is over. Refusing that would put the button back
+        where it was — doing nothing an operator could see.
+
+        `_end_live_sessions_of` is the same call `start_session` makes before
+        opening a new one, so "what is being recorded right now" stops listing
+        this meeting from here as well. What the session leaves behind — its
+        audio, its transcripts, its engagement — is keyed elsewhere and is
+        deliberately untouched: this ends the recording, it does not dispose
+        of it.
+        """
+
+        if meeting_id not in backend.known_meetings:
+            return None
+        open_session = next(
+            (
+                session
+                for session in backend.live_sessions.values()
+                if session.meeting_id == meeting_id
+            ),
+            None,
+        )
+        _end_live_sessions_of(backend, meeting_id)
+        return SessionStop(
+            session_id=open_session.session_id if open_session else None,
+            meeting_id=meeting_id,
+            stopped_at=datetime.now(UTC),
+        )
+
     app.include_router(
-        _live_session_router.build_live_session_router(start_session, admit_capture)
+        _live_session_router.build_live_session_router(
+            start_session, admit_capture, stop_session
+        )
     )
 
-    def _lane_status() -> dict[str, Any]:
-        """Whether the slow lane can reach a model right now.
+    def _live_transcription_blocker() -> str | None:
+        """What stands between this room and a transcript, or `None`.
 
-        Read from the engines the app was actually built with rather than from
-        a flag someone has to remember to set: an unconfigured credential and a
-        provider outage both land here as "no engine", which is precisely what
-        the operator needs told, and neither can be forgotten about.
+        The same question `feed_live_lane` asks before offering a chunk,
+        answered once. That is the whole point: the gate and the recogniser
+        once asked "is there a credential?" of two different places and
+        disagreed, and an operator who had entered their key on the Settings
+        screen got silence — no error, no log line.
+
+        **It returns the reason rather than a boolean, and that is not
+        decoration.** There are now two ways to be unready and they have
+        opposite remedies: a vendor model wants a key, a local model wants the
+        address of a server the operator is running. The panel had one
+        hardcoded sentence — "No speech credential is configured" — written
+        when there was only one way, and it told an operator running Parakeet
+        on their own machine to go and buy something. A misreported remedy is
+        worse than no message: it is a message that costs money and changes
+        nothing. Reported from the branch that decides, so the two cannot
+        drift apart the way the credential check already did once.
+
+        Resolved per call, because everything on the Settings screen takes
+        effect without a restart everywhere else in this service.
+        """
+
+        if live_utterances is None:
+            return "this build has no live transcription lane"
+        # An injected recogniser answers for its own readiness; only the
+        # settings-backed default is gated on anything here.
+        if live_recogniser is not None:
+            return None
+        if settings_store is None:
+            return "this deployment has no settings store to read"
+        connectors = settings_store.read().connectors
+        if runs_locally(connectors.live_model):
+            if (connectors.local_asr_base_url or "").strip():
+                return None
+            return (
+                "no local transcription server address is configured, and "
+                "this model runs on your machine rather than at a vendor"
+            )
+        if resolve_speech_key(settings_store, SpeechVendor.DEEPGRAM) is None:
+            return "no speech credential is configured"
+        return None
+
+    def _live_transcription_ready() -> bool:
+        """Whether a chunk offered to the live lane would actually be recognised."""
+
+        return _live_transcription_blocker() is None
+
+    def _lane_status(meeting_id: str) -> dict[str, Any]:
+        """What the panel needs to read its own silence correctly.
+
+        Two separate questions, and they have separate remedies, so they are
+        two fields rather than one verdict. `model_reachable` is the slow
+        lane's: read from the engines the app was actually built with rather
+        than from a flag someone has to remember to set, so an unconfigured
+        credential and a provider outage both land here as "no engine".
+
+        `live_transcription` is the live lane's, and it is what stops the
+        panel's transcript region lying. Without it "Nothing heard yet."
+        covers a quiet room, a stopped microphone and a deployment that never
+        bought speech — three states with nothing in common but their
+        appearance, and this project has already lost an evening to the third
+        wearing the face of the first.
         """
 
         configured = debrief_engines is not None and debrief_engines.is_configured
         status = backend.lane_reachability.status(configured=configured)
-        return {"model_reachable": status.model_reachable, "reason": status.reason}
+        heard_at = backend.last_audio_at.get(meeting_id)
+        return {
+            "model_reachable": status.model_reachable,
+            "reason": status.reason,
+            "live_transcription": _live_transcription_ready(),
+            # Why not, in the operator's own terms. `live_transcription`
+            # alone says a room will not be transcribed and leaves the panel
+            # to guess the remedy — which it did, wrongly, for every
+            # deployment running a local model.
+            "live_transcription_reason": _live_transcription_blocker(),
+            # Which recogniser is actually listening, so the panel can say so.
+            # An operator who has just changed this setting because the
+            # transcript was poor has no other way to tell whether the change
+            # took — the model is read per window, so the only evidence is
+            # what the next window was sent to. `None` where the lane is
+            # driven by an injected recogniser, because naming a setting that
+            # is not being consulted would be worse than naming nothing.
+            "live_model": (
+                None
+                if settings_store is None or live_recogniser is not None
+                else settings_store.read().connectors.live_model.value
+            ),
+            # Whether audio is arriving *now*, which is a different question
+            # from whether anything could transcribe it. A credential is not a
+            # microphone: the panel rendered `live_transcription` as a pulsing
+            # "Transcribing" on a screen the operator opens *before* pressing
+            # Capture, which asserted the room was being written down when
+            # nothing was being captured at all.
+            #
+            # Audio arriving is the only evidence that separates a meeting
+            # being recorded from one opened and walked away from — sessions
+            # are never ended and a meeting's state does not move while it is
+            # captured — which is the same reading `GET /api/sessions/live`
+            # already takes, against the same clock and the same window.
+            # When this run of capture began, so the panel's clock counts the
+            # recording rather than the meeting. `None` when nothing is being
+            # captured — a clock with no start is not shown at all, rather
+            # than shown at zero.
+            "capturing_since": (
+                int(started.timestamp() * 1000)
+                if (started := backend.capture_started_at.get(meeting_id)) is not None
+                and heard_at is not None
+                and (datetime.now(UTC) - heard_at).total_seconds()
+                <= _live_sessions.FRESH_AUDIO_SECONDS
+                else None
+            ),
+            "receiving_audio": (
+                heard_at is not None
+                and (datetime.now(UTC) - heard_at).total_seconds()
+                <= _live_sessions.FRESH_AUDIO_SECONDS
+            ),
+        }
 
     async def session_events(meeting_id: str):
         """Replay whatever this meeting has queued, then finish.
@@ -2513,7 +2702,8 @@ def _include_operational_routers(
         (architecture §10, FR-6.8).
         """
 
-        yield "lane", _lane_status()
+        last_lane = _lane_status(meeting_id)
+        yield "lane", last_lane
 
         # Which languages this room is expected to use (FR-2.14). Derived when
         # the engagement was created and written to its row, where nothing has
@@ -2556,6 +2746,13 @@ def _include_operational_routers(
         # blank. `yield None` is "still here, nothing to say", which reaches
         # the panel as a comment frame and costs it nothing.
         delivered = 0
+        # The transcript is followed by its own index, beside the nudges'.
+        #
+        # One counter could not serve both: they grow independently, and most
+        # of a meeting adds to this one and not to the other (FR-5.7). A
+        # shared index would advance on every line spoken and skip the nudge
+        # that arrived while it did.
+        spoken = 0
         # What the meter last showed this connection. Coverage used to be a
         # single frame at stream open, which was adequate while nothing
         # server-side ever moved it — the panel kept its own count. Now that
@@ -2564,6 +2761,17 @@ def _include_operational_routers(
         # which mid-meeting is the whole time it matters.
         last_coverage = opening_coverage
         while True:
+            # Re-sent when it changes, for the reason the coverage below it is.
+            # A panel opens before the meeting does — that is the ordinary
+            # order — so the first lane frame always says no audio. Sent once,
+            # the indicator would stay wrong for the whole meeting: the same
+            # fault the compile meter had, read at mount and never again.
+            current_lane = _lane_status(meeting_id)
+            if current_lane != last_lane:
+                last_lane = current_lane
+                yield "lane", current_lane
+                continue
+
             current_coverage = {
                 "slots": _coverage_slots_for_meeting(backend, meeting_id),
                 "time_remaining_ms": None,
@@ -2571,6 +2779,43 @@ def _include_operational_routers(
             if current_coverage != last_coverage:
                 last_coverage = current_coverage
                 yield "coverage", current_coverage
+                continue
+
+            # Before the nudges, and deliberately: a nudge is *about* a line
+            # somebody said, and an operator reading the two in the order they
+            # arrive should meet the sentence before the question about it.
+            # Within one poll both are already in hand, so this costs nothing
+            # but ordering.
+            said = backend.live_transcript.get(meeting_id, ())
+            if spoken < len(said):
+                utterance = said[spoken]
+                spoken += 1
+                at = utterance.get("at")
+                yield (
+                    "utterance",
+                    {
+                        # Its position in the meeting's transcript, and the
+                        # only thing the panel can dedupe on.
+                        #
+                        # The stream replays its whole backlog on every
+                        # connect — that is how a panel opened mid-meeting
+                        # catches up — and `EventSource` reconnects on its own
+                        # schedule every few minutes. A nudge survives that by
+                        # its id; an utterance has none, and two people can say
+                        # the same short sentence an hour apart, so nothing
+                        # about the text tells a replay from a repetition. The
+                        # panel files each line at its index, which makes a
+                        # replay idempotent rather than merely detectable.
+                        "seq": spoken - 1,
+                        "text": utterance["text"],
+                        "speaker": utterance.get("speaker"),
+                        # Milliseconds since the epoch, matching the nudge's
+                        # `created_at` beside it — the panel interleaves the
+                        # two on one timeline and cannot do that across two
+                        # different time formats.
+                        "at": int(at.timestamp() * 1000) if at is not None else None,
+                    },
+                )
                 continue
 
             produced = [
@@ -2631,6 +2876,33 @@ def _include_operational_routers(
 
         if meeting_id not in backend.known_meetings:
             return None
+
+        # Recorded before the gate is consulted at all, because every early
+        # return below is a line the panel must still show. The operator's own
+        # speech returns immediately; an utterance the gate declines returns a
+        # line later; a hit the rate limit refuses returns after that. Those
+        # are most of a meeting, and recording after any of them would build a
+        # transcript of only the sentences that happened to earn a question.
+        #
+        # Reassigned rather than appended to in place: `live_transcript` is an
+        # ordinary dict today, but every collection on this Backend is one
+        # `attach_state_store` may swap for a `DurableMapping`, which persists
+        # through `__setitem__` alone — `setdefault(k, []).append(v)` writes to
+        # memory and nowhere else.
+        heard = backend.live_transcript.get(meeting_id, [])
+        backend.live_transcript[meeting_id] = [
+            *heard,
+            {
+                "text": payload.text,
+                # Absence, kept as absence. `identify_speaker` answers `None`
+                # whenever nobody is enrolled — almost every deployment — and
+                # a line attributed to the wrong person is worse than a line
+                # attributed to nobody, on a transcript whose whole purpose is
+                # settling who said what.
+                "speaker": payload.speaker,
+                "at": datetime.now(UTC),
+            },
+        ]
 
         # FR-1.6, and architecture section 3.5: the gate evaluates only
         # utterances the operator did not say. A nudge prompting the operator
@@ -3490,7 +3762,21 @@ def _include_operational_routers(
     # ship joined to nothing.
     recognise = live_recogniser
     if recognise is None and settings_store is not None and vocabulary is not None:
-        recognise = deepgram_live_recogniser(settings_store, vocabulary)
+        # Two recognisers, and which one serves is decided per window rather
+        # than here. Bound at assembly, a change from Nova-3 to a local model
+        # would need a restart — in a product whose settings all take effect
+        # live, and for the one setting an operator is most likely to reach
+        # for *because* the current one is not working.
+        at_vendor = deepgram_live_recogniser(settings_store, vocabulary)
+        on_this_machine = local_live_recogniser(settings_store)
+
+        async def recognise_window(session_id: str, pcm: bytes) -> str:
+            chosen = settings_store.read().connectors.live_model
+            if runs_locally(chosen):
+                return await on_this_machine(session_id, pcm)
+            return await at_vendor(session_id, pcm)
+
+        recognise = recognise_window
 
     live_utterances = (
         None
@@ -3518,28 +3804,33 @@ def _include_operational_routers(
         # a deployment that has no live transcription configured — the
         # question "is this meeting being recorded" is not the same question
         # as "can this meeting raise a nudge".
-        backend.last_audio_at[session_id] = datetime.now(UTC)
-
-        if live_utterances is None:
-            return
-        # Only asked of the vendor-backed default. A recogniser handed in by a
-        # caller answers for its own readiness, and gating it on a Deepgram
-        # credential would make an injected one untestable without buying one.
-        #
-        # Through `resolve_speech_key`, which is the function the recogniser
-        # itself calls. That is the point rather than a convenience: these are
-        # two askings of one question, and when they consulted different
-        # places they disagreed — the recogniser moved to the pool, this gate
-        # kept reading the fixed key, and an operator who added their key on
-        # the Settings screen got silence. Not an error and not a log line;
-        # the chunk returned quietly, exactly as on a deployment that has
-        # bought no speech at all.
+        arrived = datetime.now(UTC)
+        previous = backend.last_audio_at.get(session_id)
+        # A new run of capture, rather than the next chunk of one already
+        # going: nothing before, or a gap longer than the window that decides
+        # a meeting is being recorded at all.
         if (
-            live_recogniser is None
-            and settings_store is not None
-            and resolve_speech_key(settings_store, SpeechVendor.DEEPGRAM) is None
+            previous is None
+            or (arrived - previous).total_seconds() > _live_sessions.FRESH_AUDIO_SECONDS
         ):
+            backend.capture_started_at[session_id] = arrived
+        backend.last_audio_at[session_id] = arrived
+
+        # Asked of `_live_transcription_ready`, which is also what the panel's
+        # lane frame reports. That is the point rather than a tidy-up: this
+        # gate and the recogniser once asked "is there a credential?" of two
+        # different places and disagreed — the recogniser moved to the pool,
+        # the gate kept reading the fixed key, and an operator who added their
+        # key on the Settings screen got silence. Not an error and not a log
+        # line; the chunk returned quietly, exactly as on a deployment that
+        # has bought no speech at all.
+        #
+        # Now the panel says which of those it is, and it must not be able to
+        # say one while this does the other — a notice that disagrees with the
+        # behaviour is worse than no notice, because it is believed.
+        if not _live_transcription_ready():
             return
+        assert live_utterances is not None  # narrowed by the check above
         await live_utterances.feed(session_id, pcm)
 
     app.include_router(

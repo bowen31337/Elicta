@@ -299,6 +299,21 @@
   color: var(--label-supporting);
 }
 
+/* A note that a setting above has been made inert by one below it — the
+   vocabulary switch under a model that does not accept vocabulary. Inline
+   ink rather than the padded `.settings-warning` box: it belongs to the
+   field it is inside, and a box here would read as heavier than the control
+   it is explaining.
+
+   `--orange-ink`, never `--orange`: the vivid system colours are for fills,
+   and this is small text on a card. */
+.settings-caution {
+  margin: 0;
+  font-size: var(--text-footnote);
+  line-height: var(--leading-relaxed);
+  color: var(--orange-ink);
+}
+
 .settings-secret-row { display: flex; gap: var(--space-3); align-items: center; }
 .settings-secret-row input { flex: 1; min-width: 0; }
 

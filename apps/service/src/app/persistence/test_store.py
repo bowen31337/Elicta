@@ -1349,3 +1349,41 @@ def test_a_deleted_meeting_cannot_be_renamed_after_a_restart(database: str) -> N
             json={"session_purpose": "Should not resurrect it"},
         )
         assert renamed.status_code == 404, renamed.text
+
+
+def test_the_glanceable_stub_survives_a_restart(database: str) -> None:
+    """The panel's top tier is the stub, and it was arriving empty every time.
+
+    `BankCandidate` never declared `stub` or `trigger_types`, and pydantic
+    ignores an undeclared keyword rather than refusing it — so
+    `_store_compiled_candidates` passed both, both vanished, and the column
+    was written `NULL` for every candidate ever compiled. Measured on a real
+    state file: 554 candidates, 554 empty stubs, while the phrasings beside
+    them averaged 112 characters.
+
+    That is the whole of what an operator reads mid-meeting, so it is the
+    difference between a glance and losing eye contact with the client. The
+    round trip is asserted rather than the field's presence: a model that
+    declares it and a store that drops it fails identically from the panel.
+    """
+
+    from app.modules.compiler.api.models import BankCandidate
+
+    store = open_state_store(database)
+    bank = store.candidates(lambda row: BankCandidate(**row))
+    bank["eng-1"] = [
+        BankCandidate(
+            id="c-1",
+            template_section="Volumes",
+            phrasing="How many arrivals do you handle in a month, across all three sites?",
+            priority=1,
+            stub="Monthly arrivals",
+            trigger_types=["unquantified_amount"],
+        ),
+    ]
+    store.close()
+
+    reloaded = open_state_store(database).candidates(lambda row: BankCandidate(**row))
+    (candidate,) = reloaded["eng-1"]
+    assert candidate.stub == "Monthly arrivals"
+    assert candidate.trigger_types == ["unquantified_amount"]
