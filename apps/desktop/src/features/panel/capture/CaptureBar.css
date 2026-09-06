@@ -123,6 +123,18 @@
 
 .capture-bar__note { color: var(--orange-ink); white-space: nowrap; }
 
+/* A recording that is uploading nothing. Orange rather than red: the audio is
+   being captured and is not lost — what fails is the transcript — and the
+   sentence carries the remedy. Held to a reading measure and centred over the
+   pill it belongs to. */
+.capture-bar-note {
+  margin: 0;
+  max-inline-size: 44ch;
+  text-align: center;
+  text-wrap: pretty;
+  color: var(--orange-ink);
+}
+
 /* `--red-ink`, not `--red`: this is text on a material that composites darker
    than a card, and the vivid system colour is for fills. */
 .capture-bar__failed {
@@ -182,8 +194,22 @@
   color: var(--red-ink);
 }
 
+/* The one affirmative control here, so it carries the accent the rest of the
+   product uses for the action a screen is for. */
+.capture-bar__button--start {
+  background: var(--accent-fill);
+  color: #fff;
+}
+
 @media (hover: hover) {
   .capture-bar__button:hover:not(:disabled) { background: var(--fill-1); }
+  /* Darkened, never `--accent`: the vivid system blue is a fill for large
+     shapes and drops white label text under AA at this size. `--accent-fill`
+     is the value solved for white on it, so hover moves away from the
+     background rather than toward it. */
+  .capture-bar__button--start:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-fill) 88%, black);
+  }
   .capture-bar__button--stop:hover:not(:disabled) {
     background: color-mix(in srgb, var(--red) 20%, transparent);
   }

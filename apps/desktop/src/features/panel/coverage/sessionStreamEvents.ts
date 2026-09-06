@@ -113,6 +113,7 @@ interface WireSessionStreamLane {
   reason: string | null;
   live_transcription?: boolean;
   live_transcription_reason?: string | null;
+  speaker_attribution_reason?: string | null;
   live_model?: string | null;
   receiving_audio?: boolean;
   capturing_since?: number | null;
@@ -130,6 +131,7 @@ function parseSessionStreamLane(rawData: string): SessionStreamLane {
     liveTranscription: payload.live_transcription !== false,
     liveModel: payload.live_model ?? null,
     liveTranscriptionReason: payload.live_transcription_reason ?? null,
+    speakerAttributionReason: payload.speaker_attribution_reason ?? null,
     // Absent is read as *not* receiving, the opposite of the line above, and
     // the asymmetry is deliberate. Claiming a credential where none is
     // configured cries wolf; claiming a live microphone where none is

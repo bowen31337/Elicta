@@ -38,6 +38,22 @@ export interface Destination {
   /** The panel is a floating material, not a document; the pane stages it
    *  at its real width instead of letting it fill the window. */
   readonly floating?: boolean;
+  /**
+   * Kept mounted once visited, and hidden rather than unmounted when the
+   * operator goes elsewhere.
+   *
+   * For the live panel, because a meeting does not pause while somebody looks
+   * something up. Unmounted, its session stream closes and reconnects, its
+   * capture bar's clock restarts from whatever the service last said, and
+   * everything it holds that the stream cannot replay — which bank questions
+   * have been dealt with, which nudge was brought back — is simply gone. An
+   * operator who checked a document mid-meeting came back to a panel that had
+   * forgotten the meeting.
+   *
+   * Deliberately not "always mounted": a screen nobody has opened costs a
+   * stream connection and a consent-gate fetch for nothing.
+   */
+  readonly persistent?: boolean;
 }
 
 export const DESTINATIONS: readonly Destination[] = [
@@ -74,6 +90,7 @@ export const DESTINATIONS: readonly Destination[] = [
     glyph: 'waveform',
     section: 'during',
     floating: true,
+    persistent: true,
   },
   {
     feature: 'capture',

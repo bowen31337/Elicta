@@ -285,6 +285,37 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
     samplesSinceCheck += 1;
   }
 
+  /**
+   * How long a recording may be *digitally* silent before the screen says so.
+   *
+   * Longer than the watch above, because this one is allowed to be wrong in
+   * only one direction: a meeting that opens with half a minute of nobody
+   * speaking is ordinary, and a false alarm here sends an operator to check a
+   * microphone that is working.
+   */
+  const DEAF_CHECK_MS = 20_000;
+
+  /**
+   * Whether a single sample above zero has arrived since the last check.
+   *
+   * The silence watch above counts *arrivals*, which is the wrong question
+   * for the failure this catches: a microphone that is muted, pointed at the
+   * wrong input, or denied permission by the OS still delivers buffers on
+   * time — full of zeros. Every count is met, nothing is ever recognised, and
+   * the whole chain reports success: audio reaches the service, the lane says
+   * it is transcribing, and the recogniser returns "" for every window
+   * because there is nothing in them. An operator watches "Listening…" over a
+   * moving clock beside an empty transcript, for as long as they are willing
+   * to.
+   *
+   * On macOS this is the shape a refused Microphone permission takes.
+   * CoreAudio starts, reports success and hands back silence; nothing in the
+   * capture path is told, and the shipped bundle is ad-hoc signed, so a grant
+   * does not reliably survive a rebuild.
+   */
+  let heardSomething = false;
+  let deafTimer: ReturnType<typeof setInterval> | null = null;
+
   function startSilenceWatch(): void {
     stopSilenceWatch();
     samplesSinceCheck = 0;
@@ -300,9 +331,39 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
       }
       if (snapshot.uploadNote !== NO_AUDIO_READ) publish({ uploadNote: NO_AUDIO_READ });
     }, SILENCE_CHECK_MS);
+    // Started and stopped with its sibling rather than from its own call
+    // sites. The two ask different questions — is audio arriving, and is any
+    // of it above zero — about one condition: whether this recording is
+    // delivering anything a recogniser could use. Two lifecycles would be two
+    // things to keep in step, and pause is the case that would break first,
+    // because a paused recording is *supposed* to be digitally silent.
+    startDeafWatch();
+  }
+
+  function startDeafWatch(): void {
+    stopDeafWatch();
+    heardSomething = false;
+    deafTimer = setInterval(() => {
+      if (heardSomething) {
+        heardSomething = false;
+        if (snapshot.uploadNote === ALL_SILENCE) publish({ uploadNote: null });
+        return;
+      }
+      // Never over the uploader's own note: that one is about audio not
+      // leaving the machine, which is a different and worse problem, and
+      // still true.
+      if (snapshot.uploadNote === null) publish({ uploadNote: ALL_SILENCE });
+    }, DEAF_CHECK_MS);
+  }
+
+  function stopDeafWatch(): void {
+    if (deafTimer === null) return;
+    clearInterval(deafTimer);
+    deafTimer = null;
   }
 
   function stopSilenceWatch(): void {
+    stopDeafWatch();
     if (silenceTimer === null) return;
     clearInterval(silenceTimer);
     silenceTimer = null;
@@ -384,6 +445,11 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    * twice and draw two different waves from it.
    */
   function pushLevel(next: AudioLevel): void {
+    // Exactly zero, not "quiet". A real microphone in a silent room still
+    // carries a noise floor; a peak of literal zero means the samples are
+    // digital silence, which is what a muted input and a refused permission
+    // both deliver. See `deafWatch`.
+    if (next.peak > 0) heardSomething = true;
     publish({
       level: next,
       waveform: pushHistory(snapshot.waveform, meterPosition(next.rms), WAVEFORM_BARS),
@@ -514,6 +580,22 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
    * failures; this is the absence of anything to upload, and the only way to
    * notice it is to wait for it.
    */
+  /**
+   * The microphone is open, delivering on time, and every sample is zero.
+   *
+   * Named for what the operator can act on rather than for the cause, because
+   * there are three and they are indistinguishable from here: the input is
+   * muted, the wrong input is selected, or macOS is refusing this app the
+   * microphone and handing back silence instead of an error. All three are
+   * fixed in the same two places, and the recording is not lost while they
+   * are being checked.
+   */
+  const ALL_SILENCE =
+    'The microphone is delivering complete silence, so this meeting is not ' +
+    'being transcribed. Check that the input is not muted and that the right ' +
+    'one is selected on the Capture screen — and on macOS, that Elicta is ' +
+    'allowed the microphone in System Settings, Privacy & Security.';
+
   const NO_AUDIO_READ =
     'The microphone is open but no audio is being read from it, so nothing is ' +
     'being uploaded and this meeting will not be transcribed. Stop and start ' +
@@ -632,6 +714,30 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
   }
 
   /**
+   * Which input to open when the caller did not say.
+   *
+   * The first the shell lists, which is what the Capture screen preselects —
+   * one rule, so the panel and that screen never open different devices for
+   * the same press. Listed afresh only when nothing has listed them yet: a
+   * screen that has already refreshed is holding the same answer.
+   *
+   * `id ?? label` matches the screen's own key. A backend that reports no
+   * input at all is refused here rather than at the shell, whose message for
+   * a missing key describes an argument the operator never supplied.
+   */
+  async function defaultSourceId(): Promise<string> {
+    const listed =
+      snapshot.sources.length > 0
+        ? snapshot.sources
+        : await invoke<CaptureSourceOption[]>('list_audio_sources').catch(() => []);
+    if (listed.length === 0) {
+      throw new Error('This machine offers no audio input to record from.');
+    }
+    if (snapshot.sources.length === 0) publish({ sources: listed });
+    return listed[0].id ?? listed[0].label;
+  }
+
+  /**
    * Opens one device, on whichever backend this is, and leaves it open.
    *
    * Shared by checking and recording precisely so that the device a check
@@ -646,8 +752,25 @@ export function createCaptureStore(deps: Partial<CaptureDeps> = {}): CaptureStor
     }
 
     if (shellAvailable()) {
+      // `sourceId` is optional in this signature and **required** by the
+      // shell's command, whose `source_id` is a bare `String`. Passing
+      // `undefined` does not mean "you choose" to Tauri — the key is simply
+      // absent and the command is refused before it runs, with
+      // `invalid args \`sourceId\` for command \`start_capture\``. Nothing
+      // caught it because every caller happened to have a source in hand: the
+      // Capture screen preselects `sources[0]` and passes it. The panel's
+      // recording bar has no picker and asks for the default, which is what
+      // the optional parameter has claimed to support all along.
+      //
+      // Resolved to the same source the Capture screen would have shown
+      // selected, so starting from the panel opens the device an operator
+      // would have seen chosen rather than a different one.
+      const chosen = sourceId ?? (await defaultSourceId());
       try {
-        const next = await invoke<CaptureStatus>('start_capture', { sourceId, deviceId });
+        const next = await invoke<CaptureStatus>('start_capture', {
+          sourceId: chosen,
+          deviceId,
+        });
         publish({ status: next, error: null });
       } catch (cause) {
         const message = shellFailureMessage(cause);

@@ -16,6 +16,7 @@ import type { Nudge } from './nudge';
 import { QuestionPanel, TranscriptPanel } from './feed';
 import { CaptureBar } from './capture';
 import { useCapture } from '../capture/useCapture';
+import { useRecordingStart } from '../capture/useRecordingStart';
 import type { BankQuestion } from './bank';
 import { BankRail, upcoming, useMeetingBank } from './bank';
 import { recordNudgeDisposition } from '../../services/nudgeDisposition';
@@ -87,6 +88,8 @@ export interface PanelState {
   readonly liveModel?: string | null;
   /** Why nothing will be transcribed, for a fixed scene. */
   readonly liveTranscriptionReason?: string | null;
+  /** Why no line can be attributed, for a fixed scene. */
+  readonly speakerAttributionReason?: string | null;
   /**
    * Recent input levels, for a fixed scene. Live, these come off the local
    * capture store.
@@ -170,6 +173,7 @@ export function OperatorPanel({
     liveTranscription,
     liveModel,
     liveTranscriptionReason,
+    speakerAttributionReason,
     receivingAudio,
     capturingSince,
     modelReachable,
@@ -229,6 +233,18 @@ export function OperatorPanel({
    * the bar draws no wave at all: absence, not a flat line.
    */
   const microphone = useCapture(captureStore);
+  /**
+   * Beginning the meeting, from the screen the operator is already on.
+   *
+   * The same hook the Capture screen uses, so the consent gate is read the
+   * same way and `goLive` opens the device before it books anything — a
+   * refused microphone must not leave a session against a recording that
+   * never began. The panel could report a recording and end one and not
+   * begin one, and its own empty state said so: "Start the meeting on the
+   * Capture screen", which is a navigation away from the client's face to
+   * press a button that could be here.
+   */
+  const recording = useRecordingStart(captureStore);
   const holdingTheDevice =
     microphone.status.state === 'capturing' || microphone.status.state === 'paused';
 
@@ -582,6 +598,9 @@ export function OperatorPanel({
         blockedBecause={
           state.meetingId ? liveTranscriptionReason : (state.liveTranscriptionReason ?? null)
         }
+        unattributedBecause={
+          state.meetingId ? speakerAttributionReason : (state.speakerAttributionReason ?? null)
+        }
       />
 
       <CaptureBar
@@ -622,6 +641,11 @@ export function OperatorPanel({
         // device, or a fixed scene standing in for one. A Pause button that
         // cannot reach a microphone is the Stop button's old bug waiting to
         // be written again.
+        // Only where there is a meeting to record. A fixed scene gets the bar
+        // without the button rather than a button that does nothing.
+        onStart={state.meetingId ? () => recording.start() : undefined}
+        starting={recording.busy}
+        startBlocked={recording.consentBlocked ?? recording.error}
         onPause={
           holdingTheDevice
             ? () => void microphone.pause()
@@ -646,6 +670,10 @@ export function OperatorPanel({
         }
         stopping={stopStatus === 'pending'}
         stopFailed={stopStatus === 'error'}
+        // Only where this window holds the device. A note about an upload
+        // path belongs to the session that owns it, and a second screen has
+        // no view of somebody else's.
+        note={holdingTheDevice ? microphone.uploadNote : null}
       />
       </div>
 

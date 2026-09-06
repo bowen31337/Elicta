@@ -165,6 +165,16 @@ export interface SessionStreamLane {
    */
   readonly liveTranscriptionReason: string | null;
   /**
+   * Why no line can be attributed to a speaker, or `null` when they can.
+   *
+   * With nothing enrolled, verification answers "cannot tell" for every
+   * window — correctly, and by design. What was not correct was the screen:
+   * every row read "Unattributed" with nothing anywhere saying why or what
+   * would change it, which is a transcript that looks broken rather than one
+   * being careful.
+   */
+  readonly speakerAttributionReason: string | null;
+  /**
    * Whether audio is arriving right now — a different question again from
    * `liveTranscription`, which only says a credential exists.
    *

@@ -527,6 +527,107 @@ embarrassment gates, plus signing/release workflows.
   was told *"No speech credential is configured"*: true, irrelevant, and
   pointing at the single action that would cost them money and change nothing.
   A misreported remedy is worse than no message.
+  `tools/local-asr/` is a **development affordance, not a product feature**: a
+  small OpenAI-compatible server around `parakeet-mlx`, so a Mac can run
+  Parakeet on the Neural Engine rather than on CPU inside a container. Nothing
+  in the bundle knows it exists. Two things it records: HuggingFace's chunked
+  transfer stalls (`HF_HUB_DISABLE_XET=1` is the way past, and the failure
+  looks like a slow network rather than a stuck one), and a one-model server
+  **refuses** a model it has not loaded rather than substituting — silent
+  substitution is what makes a model dropdown decoration.
+- **The recording bar begins the meeting as well as ending it.** The panel
+  could report a recording and stop one and not start one, and its own empty
+  state said "Start the meeting on the Capture screen" — a navigation away
+  from a client's face to press a button that could be in front of you.
+  `useRecordingStart` is the same hook the Capture screen uses, so the consent
+  gate is read the same way and `goLive` opens the device *before* it books a
+  session. Start replaces Pause and Stop rather than joining them; a greyed
+  Stop beside a Start is two controls saying one thing. And where consent is
+  outstanding the reason **replaces** the button — a control that takes the
+  press and then explains is worse than one that is not offered, especially
+  the press made while somebody waits to start talking.
+  **An optional argument in TypeScript is not optional to Tauri.**
+  `openDevice(sourceId?)` passed `undefined` to `start_capture`, whose
+  `source_id` is a bare `String`, and Tauri refuses the call before it runs —
+  ``invalid args `sourceId` for command `start_capture` ``. Nothing caught it
+  because every caller happened to hold a source: the Capture screen
+  preselects `sources[0]` and passes it, and the panel's bar is the first
+  caller with no picker. The store now resolves the default itself, to
+  `sources[0].id ?? label` — the same rule the screen shows selected, so one
+  press cannot open a different device from the one an operator would have
+  seen chosen. Four store tests had faked a shell that listed **no** inputs
+  and accepted a start anyway, which is a shell that does not exist and is
+  what let the hole through.
+  **The bar must also show `uploadNote`.** The store diagnoses three ways a
+  recording runs and uploads nothing — the event channel refused, no way to
+  read the samples, and the device open but delivering silence — each as a
+  sentence with its remedy. The Capture screen has always shown them; the
+  panel's bar showed none, which was survivable while the panel only reported
+  somebody else's recording and is not now that it starts them. A meeting can
+  otherwise run its full hour uploading nothing, with "Listening…" over a
+  moving clock, and **the empty transcript is not a signal** — a quiet room
+  looks identical.
+- **Nothing checks the macOS Microphone permission.** `macos_line_in.rs` opens
+  CoreAudio without consulting TCC, while the ScreenCaptureKit path checks
+  Screen Recording via `screen_recording_permission()`. There is no
+  microphone probe in `macos_permission.rs` at all — it would need an
+  AVFoundation bridge (`AVCaptureDevice.authorizationStatus`). Denied or
+  undetermined, CoreAudio starts and delivers silence with no error, which is
+  a session booked, a clock running and `last_audio_at` staying null for ever.
+  It matters more than it looks: the shipped bundle is **ad-hoc signed**
+  (`TeamIdentifier=not set`), so a TCC grant is not reliably carried across
+  rebuilds — a working build can stop hearing anything for a reason nothing
+  in the product can currently report.
+  **The failure it produces is silence, not an error, and the silence watch
+  cannot see it.** `startSilenceWatch` counts *arrivals*; a muted input, a
+  wrong input, or a refused permission still delivers buffers on schedule,
+  full of zeros. Every count is met, the chunks upload, `receiving_audio` goes
+  true, the lane reports it is transcribing, and the recogniser returns "" for
+  every window — so `feed` skips them and no `utterance` frame is ever
+  produced. Nothing anywhere is wrong. An operator watched "Listening…" over a
+  moving clock beside an empty transcript for eight minutes. `startDeafWatch`
+  is the second question — has any sample been **above zero** in the last 20s
+  — and `ALL_SILENCE` names all three causes, because they are
+  indistinguishable from the client. Two traps: the test is `peak > 0` and not
+  a loudness floor, since a real microphone in a silent room always carries a
+  noise floor and only a *digital* zero is diagnostic; and the two watches
+  share one lifecycle (`startSilenceWatch` starts both) because **pause is
+  supposed to be digitally silent** — separate lifecycles would have raised a
+  false alarm on every pause.
+- **The live panel outlives being looked at.** `Destination.persistent` keeps a
+  screen mounted once visited and `hidden` rather than unmounted when the
+  operator goes elsewhere — a meeting does not pause while somebody checks a
+  document, and unmounted the panel's stream closes and reconnects, its clock
+  restarts, and everything no stream can replay (which bank questions are dealt
+  with, which nudge was brought back) is gone. Three traps. **One keyed list,
+  not "the selected screen plus the kept ones"**: two sibling slots look
+  equivalent, but a screen moving between them changes position among its
+  parent's children and React unmounts and remounts it — undoing the whole
+  arrangement while looking correct. **`hidden` needs `.pane-body[hidden] {
+  display: none }`**, because `[hidden]` is a *user-agent* rule and
+  `.pane-body--stage`'s author `display: flex` beats it, so the kept panel
+  would stay fully on screen while its markup claimed otherwise. And it is
+  mounted **on first visit, not up front** — a panel nobody opened would hold a
+  stream connection and fetch a consent gate for nothing. Assert this by **DOM
+  node identity**: a screen rendered afresh looks identical, and a render count
+  answers a different question since React re-renders a mounted component
+  freely.
+- **Speaker attribution is two-way, and "Unattributed" is the correct answer
+  almost everywhere.** `identify_speaker` compares one window against **one**
+  enrolled operator print and answers `operator` / `other` / `None` — it is
+  not diarisation and will never name a third person. With nothing enrolled
+  (`GET /api/operator/voiceprint` → `enrolled: false`) every window is `None`
+  by design, and the gate then behaves exactly as it does with no
+  verification at all. What was wrong was only the screen: every row read
+  "Unattributed" with nothing saying why, which looks like a broken
+  transcript rather than a careful one. `speaker_attribution_reason` on the
+  lane frame now carries it, shown **once under the header and only when
+  there are lines** — on an empty transcript it is a warning about nothing,
+  and it would be the first thing on a meeting that has not started. The
+  remedy is Capture → *Your voice*. Note `MATCH_THRESHOLD = 0.97` is
+  deliberately high and **uncalibrated against real speech**: an unsure answer
+  comes back `other`, because mistaking a client for the operator silently
+  drops their requirement while the reverse costs one dismissable nudge.
 - **The panel has two accounts of one microphone, and a snapshot is not an
   account.** The service's comes from audio it has received; the local
   `captureSession`'s, in the shell, is read **once, on mount** (`refresh()`

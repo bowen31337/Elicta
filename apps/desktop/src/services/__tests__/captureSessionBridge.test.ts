@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createCaptureStore } from '../captureSession';
+import { createCaptureStore, type CaptureDeps } from '../captureSession';
 import type { AudioBridge } from '../audioBridge';
 import type { PcmContextLike, ScriptProcessorLike } from '../../features/capture/pcmTap';
 
@@ -449,5 +449,133 @@ describe('checking a microphone in the desktop shell', () => {
 
     expect(store.getSnapshot().status.state).toBe('checking');
     expect(bridge.pushed).toEqual([]);
+  });
+});
+
+describe('a recording that hears nothing at all', () => {
+  /**
+   * A microphone that is open, delivering on time, and completely silent.
+   *
+   * The silence watch beside this one counts *arrivals*, which is the wrong
+   * question for this failure: an input that is muted, pointed at the wrong
+   * device, or denied permission by the OS still delivers buffers on schedule
+   * — full of zeros. Every count is met, so nothing warns; audio reaches the
+   * service, so the lane reports it is transcribing; and the recogniser
+   * returns "" for every window because there is nothing in them. The
+   * operator watches "Listening…" over a moving clock beside an empty
+   * transcript for as long as they are willing to. This ran for eight
+   * minutes, with every part of the chain reporting success.
+   *
+   * On macOS it is the shape a refused Microphone permission takes:
+   * CoreAudio starts, reports success, and hands back silence rather than an
+   * error.
+   */
+  function hearing(level: { byte: number }) {
+    const context = fakeContext();
+    // 128 is the zero line of a byte-domain waveform, so a frame filled with
+    // 128 is digital silence and anything else is signal.
+    const audioContext = () => () => ({
+      createAnalyser: () => ({
+        fftSize: 0,
+        getByteTimeDomainData: (into: Uint8Array) => into.fill(level.byte),
+      }),
+      createMediaStreamSource: () => ({ connect: () => undefined, disconnect: () => undefined }),
+      close: async () => undefined,
+    });
+    const store = createCaptureStore(
+      deps({
+        audioContext,
+        pcmContext: () => () => context.context,
+        createBridge: () => fakeBridge(),
+      }) as Partial<CaptureDeps>,
+    );
+    return { store, context };
+  }
+
+  /**
+   * Run the recording for `ms`, delivering a buffer every second throughout.
+   *
+   * The buffers are the point: this failure is buffers arriving *and* being
+   * empty, so a fixture that stopped delivering them would be modelling the
+   * other failure and would raise the other warning.
+   */
+  async function record(context: ReturnType<typeof fakeContext>, ms: number) {
+    for (let elapsed = 0; elapsed < ms; elapsed += 1_000) {
+      context.emit(new Float32Array(320));
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+  }
+
+  it('says so when every sample is zero', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, context } = hearing({ byte: 128 });
+
+      await store.start('mic-1');
+      await record(context, 25_000);
+
+      const note = store.getSnapshot().uploadNote ?? '';
+      expect(note).toMatch(/complete silence/i);
+      // Three causes, indistinguishable from here, so the remedy names all of
+      // them rather than guessing one.
+      expect(note).toMatch(/muted/i);
+      expect(note).toMatch(/privacy & security/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing about a quiet room that still has a noise floor', async () => {
+    // A real microphone in a silent room is never digitally zero. Warning
+    // here would send an operator to check hardware that is working.
+    vi.useFakeTimers();
+    try {
+      const { store, context } = hearing({ byte: 130 });
+
+      await store.start('mic-1');
+      await record(context, 25_000);
+
+      expect(store.getSnapshot().uploadNote).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops saying it once the microphone is heard from', async () => {
+    vi.useFakeTimers();
+    try {
+      const level = { byte: 128 };
+      const { store, context } = hearing(level);
+
+      await store.start('mic-1');
+      await record(context, 25_000);
+      expect(store.getSnapshot().uploadNote).toMatch(/complete silence/i);
+
+      // The operator unmutes, or grants the permission and speaks.
+      level.byte = 200;
+      await record(context, 25_000);
+
+      expect(store.getSnapshot().uploadNote).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing while the recording is paused', async () => {
+    // Pausing disables the track, which does not stop the graph — it makes it
+    // produce digital silence. This is the case a second watch lifecycle
+    // would have got wrong first, which is why both watches share one.
+    vi.useFakeTimers();
+    try {
+      const { store, context } = hearing({ byte: 128 });
+      await store.start('mic-1');
+      await store.pause();
+
+      await record(context, 25_000);
+
+      expect(store.getSnapshot().uploadNote).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

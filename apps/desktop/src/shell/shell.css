@@ -155,6 +155,15 @@
   padding-top: var(--toolbar-height);
   box-sizing: border-box;
 }
+/* `hidden` has to win, and on its own it does not.
+ *
+ * `[hidden] { display: none }` is a *user-agent* rule, and any author
+ * `display` beats it on specificity — `.pane-body--stage` sets `display:
+ * flex`, so a kept screen would stay fully on screen while its markup claimed
+ * to be hidden. Silently, and only for the one screen this shell keeps
+ * mounted. */
+.pane-body[hidden] { display: none; }
+
 .pane-body--stage {
   /* The panel is a floating material that sits over the operator's screen
      during a meeting. Filling a desk-width window with it would misrepresent

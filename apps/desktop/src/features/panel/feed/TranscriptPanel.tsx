@@ -74,6 +74,17 @@ export interface TranscriptPanelProps {
    * predates the field still says something rather than nothing.
    */
   readonly blockedBecause?: string | null;
+  /**
+   * Why every line reads "Unattributed", or `null` when they do not.
+   *
+   * Shown **once, under the header** rather than repeated per line. Verifying
+   * a speaker is two-way — one window against one enrolled print, answering
+   * the operator, not the operator, or cannot tell — and with nothing
+   * enrolled every window is the third. That is the right answer; a column of
+   * rows all saying so, with nothing to explain it, is not the right screen.
+   * The remedy is something the operator can actually do, so it says what.
+   */
+  readonly unattributedBecause?: string | null;
 }
 
 const DEFAULT_LIMIT = 120;
@@ -191,6 +202,7 @@ export function TranscriptPanel({
   limit = DEFAULT_LIMIT,
   model = null,
   blockedBecause = null,
+  unattributedBecause = null,
 }: TranscriptPanelProps) {
   const state = scriptState({ transcribing, receivingAudio });
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -242,6 +254,13 @@ export function TranscriptPanel({
         </p>
       ) : null}
 
+      {/* Only where there is something to attribute. On an empty transcript
+          it is a warning about nothing, and it would be the first thing an
+          operator saw on a screen that has not started yet. */}
+      {unattributedBecause !== null && shown.length > 0 ? (
+        <p className="script-note t-caption">{sentenceCase(unattributedBecause)}.</p>
+      ) : null}
+
       <div
         ref={scroller}
         className="script-body"
@@ -259,10 +278,14 @@ export function TranscriptPanel({
           state === 'live' ? (
             <p className="script-idle t-subhead">Nothing heard yet.</p>
           ) : state === 'idle' ? (
-            // Not "nothing heard yet", which implies something is listening.
+            // Not "nothing heard yet", which implies something is
+            // listening. It named the Capture screen for as long as this
+            // screen could not begin a recording; the recording bar below
+            // can, so sending an operator away from the client's face to
+            // press a button that is in front of them is now simply wrong.
             <p className="script-idle t-subhead">
-              Nothing is being captured. Start the meeting on the Capture
-              screen and what is said will appear here.
+              Nothing is being captured. Start the recording and what is said
+              will appear here.
             </p>
           ) : null
         ) : (

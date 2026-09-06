@@ -61,6 +61,29 @@ export interface CaptureBarProps {
   readonly transcribing?: boolean;
   /** Paused: the device is held, and nothing is being recorded through it. */
   readonly paused?: boolean;
+  /**
+   * Begin recording. Absent where this window cannot — no meeting selected,
+   * or a fixed scene.
+   *
+   * The bar could report a recording and end one, and not begin one: the
+   * panel's own empty state said "Start the meeting on the Capture screen",
+   * which is a navigation away from the client's face to press a button that
+   * could have been here. It is the same journey the Stop button already
+   * makes in the other direction.
+   */
+  readonly onStart?: () => void;
+  /** True while the microphone is being opened and the meeting booked. */
+  readonly starting?: boolean;
+  /**
+   * Why recording cannot begin — consent outstanding, a refused device, a
+   * meeting the service would not book.
+   *
+   * A reason **replaces** the button rather than sitting beside it where the
+   * reason is consent: a control that takes the press and then explains is
+   * worse than one that is not offered, and this is the press an operator
+   * makes while somebody is waiting to start talking.
+   */
+  readonly startBlocked?: string | null;
   /** Hold the recording. Absent where there is no local session to hold. */
   readonly onPause?: () => void;
   /** Take it off hold. */
@@ -80,6 +103,21 @@ export interface CaptureBarProps {
    * again, and then presses harder.
    */
   readonly stopFailed?: boolean;
+  /**
+   * What the operator needs to know about where this recording is going, or
+   * `null` when it is going where they would expect.
+   *
+   * The store diagnoses three ways a recording can be running and uploading
+   * nothing — the event channel refused, no way to read the samples, and the
+   * device open but delivering silence — and says each in a sentence with the
+   * remedy in it. The Capture screen has shown these from the start. **This
+   * bar showed none of them**, which was survivable while the panel could
+   * only report a recording somebody else had started and is not now that it
+   * starts them: a meeting can run its full hour here, uploading nothing,
+   * with "Listening…" above a moving clock and no other sign at all. The
+   * transcript's own emptiness is not a sign — a quiet room looks the same.
+   */
+  readonly note?: string | null;
   /** Overridable so a test and a fixed scene need no wall clock. */
   readonly now?: () => number;
 }
@@ -126,11 +164,15 @@ export function CaptureBar({
   waveform = [],
   transcribing = true,
   paused = false,
+  onStart,
+  starting = false,
+  startBlocked = null,
   onPause,
   onResume,
   onStop,
   stopping = false,
   stopFailed = false,
+  note = null,
   now = () => Date.now(),
 }: CaptureBarProps) {
   const [tick, setTick] = useState(() => now());
@@ -172,6 +214,11 @@ export function CaptureBar({
         {capturing && !transcribing ? (
           <span className="capture-bar__note">Not transcribing</span>
         ) : null}
+        {startBlocked === null ? null : (
+          <span className="capture-bar__failed" role="alert">
+            {startBlocked}
+          </span>
+        )}
         {stopFailed ? (
           // Red and announced, because it is a failed action rather than a
           // state: the operator asked for the recording to end and it has
@@ -183,6 +230,15 @@ export function CaptureBar({
           </span>
         ) : null}
       </p>
+
+      {/* Below the pill and full width, because these are sentences with a
+          remedy in them rather than a word of state — and `alert`, because
+          every one of them means this meeting will not be transcribed. */}
+      {note === null ? null : (
+        <p className="capture-bar-note t-footnote" role="alert">
+          {note}
+        </p>
+      )}
 
       <section className="capture-bar glass" aria-label="Recording">
         {/* Decorative: it is the same reading as the state above it, and a
@@ -206,12 +262,32 @@ export function CaptureBar({
           </time>
         )}
 
-        {onPause === undefined && onResume === undefined ? null : (
+        {/* Start where nothing is running, Pause and Stop where something is.
+            Not all three: a disabled Stop beside a Start is two controls
+            saying the same thing, and this bar is read at a glance by
+            somebody looking at a client. */}
+        {!capturing && onStart !== undefined ? (
+          <button
+            type="button"
+            className="capture-bar__button capture-bar__button--start"
+            onClick={onStart}
+            disabled={starting}
+          >
+            <span className="capture-bar__glyph" aria-hidden="true">
+              <svg viewBox="0 0 12 12" width="11" height="11" focusable="false">
+                <circle cx="6" cy="6" r="4.2" fill="currentColor" />
+              </svg>
+            </span>
+            {starting ? 'Starting…' : 'Start recording'}
+          </button>
+        ) : null}
+
+        {!capturing || (onPause === undefined && onResume === undefined) ? null : (
           <button
             type="button"
             className="capture-bar__button"
             onClick={paused ? onResume : onPause}
-            disabled={!capturing || stopping}
+            disabled={stopping}
           >
             <span className="capture-bar__glyph" aria-hidden="true">
               {paused ? (
@@ -229,12 +305,12 @@ export function CaptureBar({
           </button>
         )}
 
-        {onStop === undefined ? null : (
+        {onStop === undefined || !capturing ? null : (
           <button
             type="button"
             className="capture-bar__button capture-bar__button--stop"
             onClick={onStop}
-            disabled={!capturing || stopping}
+            disabled={stopping}
           >
             <span className="capture-bar__glyph" aria-hidden="true">
               <svg viewBox="0 0 12 12" width="11" height="11" focusable="false">

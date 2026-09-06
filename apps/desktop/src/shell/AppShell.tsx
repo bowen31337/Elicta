@@ -59,6 +59,33 @@ export function AppShell({ destinations, renderScreen, selector }: AppShellProps
   const selected =
     destinations.find((destination) => destination.feature === fragment) ?? destinations[0] ?? null;
 
+  /**
+   * Which screens this shell is keeping mounted.
+   *
+   * Grown on arrival rather than filled up front: a persistent screen nobody
+   * has opened costs a stream connection and a consent-gate fetch for
+   * nothing, and "persistent" means it survives leaving, not that it starts
+   * before anyone asks for it.
+   *
+   * Never shrunk, which is the whole point — the moment it shrank would be
+   * the moment the meeting was forgotten.
+   */
+  const [keeping, setKeeping] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (selected === null || selected.persistent !== true) return;
+    setKeeping((previous) =>
+      previous.has(selected.feature) ? previous : new Set(previous).add(selected.feature),
+    );
+  }, [selected]);
+
+  // Everything mounted right now: whatever is selected, plus every screen
+  // being kept. Ordered by the destination list rather than by when each was
+  // first visited, so the rendered order is stable and React reorders rather
+  // than remounts.
+  const showing = destinations.filter(
+    (destination) => keeping.has(destination.feature) || destination === selected,
+  );
+
   // A new screen starts at its own top. Carrying the previous screen's scroll
   // position over drops the reader into the middle of a document they have
   // not seen the start of.
@@ -185,15 +212,39 @@ export function AppShell({ destinations, renderScreen, selector }: AppShellProps
           role="region"
           aria-label={selected.title}
         >
-          {/* Keyed on the destination so a screen change is an arrival — the
+          {/* **One keyed list, not a selected screen plus a kept one.**
+              Two sibling slots looked equivalent and are not: a screen that
+              moves between them changes position in its parent's children,
+              and React unmounts and remounts it — which is exactly what
+              keeping it mounted was for. Keyed on the destination and listed
+              in a stable order, a screen only ever changes its attributes.
+
+              Keyed on the destination so a screen change is an arrival: the
               material settles into place rather than the old screen's pixels
-              being overwritten in situ. */}
-          <div
-            className={`pane-body materialize${selected.floating ? ' pane-body--stage' : ''}`}
-            key={selected.feature}
-          >
-            {renderScreen(selected)}
-          </div>
+              being overwritten in situ. A kept screen gets no `materialize`
+              — it is the same DOM node, so nothing would replay anyway, and a
+              screen that was never gone should not announce itself as an
+              arrival.
+
+              `hidden` and not a class, because it has to take the subtree out
+              of the accessibility tree and the tab order as well as off the
+              screen: a keyboard user must not tab into a meeting they are not
+              looking at. */}
+          {showing.map((destination) => (
+            <div
+              key={destination.feature}
+              className={[
+                'pane-body',
+                keeping.has(destination.feature) ? '' : 'materialize',
+                destination.floating ? 'pane-body--stage' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              hidden={destination.feature !== selected.feature}
+            >
+              {renderScreen(destination)}
+            </div>
+          ))}
         </div>
       </div>
     </div>

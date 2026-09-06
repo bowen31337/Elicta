@@ -59,6 +59,7 @@ export interface UseSessionStreamResult {
   liveTranscription: boolean;
   liveModel: string | null;
   liveTranscriptionReason: string | null;
+  speakerAttributionReason: string | null;
   /** Whether audio is arriving right now. Starts false: nothing has been
    *  captured until something has. */
   receivingAudio: boolean;
@@ -98,6 +99,7 @@ export function useSessionStream(
     transcribing: boolean;
     model: string | null;
     blockedBecause: string | null;
+    unattributedBecause: string | null;
     hearing: boolean;
     since: number | null;
   }>({
@@ -106,6 +108,7 @@ export function useSessionStream(
     transcribing: true,
     model: null,
     blockedBecause: null,
+    unattributedBecause: null,
     hearing: false,
     since: null,
   });
@@ -167,6 +170,7 @@ export function useSessionStream(
           transcribing: parsed.lane.liveTranscription,
           model: parsed.lane.liveModel,
           blockedBecause: parsed.lane.liveTranscriptionReason,
+          unattributedBecause: parsed.lane.speakerAttributionReason,
           hearing: parsed.lane.receivingAudio,
           since: parsed.lane.capturingSince,
         });
@@ -215,6 +219,7 @@ export function useSessionStream(
     liveTranscription: lane.transcribing,
     liveModel: lane.model,
     liveTranscriptionReason: lane.blockedBecause,
+    speakerAttributionReason: lane.unattributedBecause,
     receivingAudio: lane.hearing,
     capturingSince: lane.since,
   };

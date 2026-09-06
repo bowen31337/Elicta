@@ -2565,6 +2565,37 @@ def _include_operational_routers(
         )
     )
 
+    def _attribution_blocker() -> str | None:
+        """Why no line can be attributed to a speaker, or `None`.
+
+        Verification here is two-way and not diarisation: one window compared
+        against one enrolled print answers "the operator", "not the operator",
+        or "cannot tell". With nothing enrolled every window is the third, and
+        `identify_speaker` returns `None` by design — the honest answer, and
+        the one that leaves the gate behaving exactly as it does with no
+        verification at all.
+
+        What was not honest was the screen. Every line read "Unattributed"
+        with nothing anywhere saying why or what would change it, which is a
+        transcript that looks broken rather than one that is being careful.
+        The two ways to be unusable have different remedies — nothing enrolled
+        is enrolled, a print from a superseded embedder is re-recorded — so
+        this reports which rather than a bare flag.
+        """
+
+        voiceprint = backend.operator_voiceprints.get(DEFAULT_OPERATOR_ID)
+        if voiceprint is None:
+            return (
+                "no voiceprint is enrolled, so no line can be attributed to "
+                "anyone"
+            )
+        if not is_usable(voiceprint):
+            return (
+                "the enrolled voiceprint was recorded by a superseded "
+                "recogniser and cannot be compared against this meeting"
+            )
+        return None
+
     def _live_transcription_blocker() -> str | None:
         """What stands between this room and a transcript, or `None`.
 
@@ -2643,6 +2674,11 @@ def _include_operational_routers(
             # to guess the remedy — which it did, wrongly, for every
             # deployment running a local model.
             "live_transcription_reason": _live_transcription_blocker(),
+            # Whether a line can be attributed to anyone. A transcript where
+            # every row reads "Unattributed" with nothing to explain it looks
+            # broken rather than careful — and the remedy, enrolling a
+            # voiceprint, is a thing the operator can actually do.
+            "speaker_attribution_reason": _attribution_blocker(),
             # Which recogniser is actually listening, so the panel can say so.
             # An operator who has just changed this setting because the
             # transcript was poor has no other way to tell whether the change

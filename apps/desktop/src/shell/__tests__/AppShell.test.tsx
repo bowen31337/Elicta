@@ -189,3 +189,89 @@ describe('the pane as somewhere a keyboard can go', () => {
     expect(await screen.findByRole('region', { name: 'About' })).toBeInTheDocument();
   });
 });
+
+describe('a screen that outlives being looked at', () => {
+  /**
+   * A meeting does not pause while somebody looks something up.
+   *
+   * Unmounted, the live panel's session stream closes and reconnects, its
+   * clock restarts from whatever the service last said, and everything it
+   * holds that no stream can replay — which bank questions have been dealt
+   * with, which nudge was brought back — is gone. An operator who checked a
+   * document mid-meeting came back to a panel that had forgotten the meeting.
+   *
+   * Asserted by **DOM node identity**, not by appearance and not by a render
+   * count. A screen rendered afresh looks identical and is not the same, and
+   * only the one that was never unmounted still holds a stream open; a render
+   * count answers a different question, since React re-renders a mounted
+   * component freely. The same element object is the claim that matters.
+   *
+   * `engagements` leads this list so the shell's default landing is not the
+   * panel — otherwise every case here starts already visited.
+   */
+  const WITH_PANEL = buildDestinations(['engagements', 'panel', 'settings']);
+
+  function renderKeeping() {
+    return render(
+      <AppShell
+        destinations={WITH_PANEL}
+        renderScreen={(destination) => <p data-testid={destination.feature}>{destination.title}</p>}
+      />,
+    );
+  }
+
+  const go = (name: RegExp) => userEvent.click(screen.getByRole('link', { name }));
+
+  it('keeps the live panel mounted, and the same one, after navigating away', async () => {
+    renderKeeping();
+    await go(/live panel/i);
+    const panel = screen.getByTestId('panel');
+
+    await go(/settings/i);
+
+    expect(screen.getByTestId('panel')).toBe(panel);
+  });
+
+  it('hides it rather than showing two screens at once', async () => {
+    renderKeeping();
+    await go(/live panel/i);
+
+    await go(/settings/i);
+
+    // `hidden` and not a class: it has to leave the accessibility tree and
+    // the tab order too — a keyboard user must not tab into a meeting they
+    // are not looking at.
+    expect(screen.getByTestId('panel').closest('.pane-body')).toHaveAttribute('hidden');
+    expect(screen.getByTestId('settings')).toBeVisible();
+  });
+
+  it('shows that same instance again on the way back', async () => {
+    renderKeeping();
+    await go(/live panel/i);
+    const panel = screen.getByTestId('panel');
+    await go(/settings/i);
+
+    await go(/live panel/i);
+
+    expect(screen.getByTestId('panel')).toBe(panel);
+    expect(screen.getByTestId('panel').closest('.pane-body')).not.toHaveAttribute('hidden');
+  });
+
+  it('mounts nothing until the screen has been visited', () => {
+    // "Persistent" means it survives leaving, not that it starts before
+    // anybody asks: an unopened panel would hold a stream connection and
+    // fetch a consent gate for nothing.
+    renderKeeping();
+
+    expect(screen.queryByTestId('panel')).not.toBeInTheDocument();
+  });
+
+  it('does not keep an ordinary screen', async () => {
+    renderKeeping();
+    await go(/settings/i);
+
+    await go(/engagements/i);
+
+    expect(screen.queryByTestId('settings')).not.toBeInTheDocument();
+  });
+});

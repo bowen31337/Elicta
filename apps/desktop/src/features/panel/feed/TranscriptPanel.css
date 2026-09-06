@@ -51,6 +51,15 @@
   min-inline-size: 0;
 }
 
+/* A standing condition of the transcript rather than a failure — the lines
+   below are real and correct, they simply cannot be attributed. Supporting
+   ink, not orange: this is not something going wrong. */
+.script-note {
+  margin: 0;
+  color: var(--label-supporting);
+  text-wrap: pretty;
+}
+
 .script-idle, .script-notice { margin: 0; }
 .script-idle { color: var(--label-supporting); }
 /* A state of the tool, not a fault in the meeting — marked, but it does not

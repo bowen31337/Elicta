@@ -61,9 +61,12 @@ describe('ending the meeting', () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it('refuses to stop what is not running', () => {
+  it('offers no Stop for what is not running', () => {
+    // Absent rather than disabled, now that Start takes its place: a greyed
+    // Stop beside a Start is two controls saying the same thing, on a bar
+    // read at a glance by somebody looking at a client.
     render(<CaptureBar capturing={false} since={null} onStop={() => {}} />);
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 
   it('says the request is in flight, and cannot be sent twice', () => {
@@ -180,5 +183,108 @@ describe('holding the recording', () => {
 
     expect(screen.getByText('01:01')).toBeInTheDocument();
     expect(screen.queryByText('10:00')).toBeNull();
+  });
+});
+
+describe('beginning the meeting from the panel', () => {
+  /**
+   * The bar could report a recording and end one, and not begin one — the
+   * panel's own empty state sent the operator to the Capture screen, which is
+   * a navigation away from a client's face to press a button that could be
+   * here. It is the same journey Stop already makes in the other direction.
+   */
+  it('offers Start where nothing is running', async () => {
+    const start = vi.fn();
+    render(<CaptureBar capturing={false} since={null} onStart={start} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /start recording/i }));
+
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers Pause and Stop instead once something is', () => {
+    render(
+      <CaptureBar
+        capturing
+        since={START}
+        onStart={() => {}}
+        onPause={() => {}}
+        onStop={() => {}}
+        now={() => START}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /start recording/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /pause/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it('says the request is in flight, and cannot be sent twice', () => {
+    // Opening a microphone and booking a meeting is not instant, and a button
+    // that looks unpressed while its request is in flight gets pressed again
+    // — which on this path books a second session.
+    render(<CaptureBar capturing={false} since={null} onStart={() => {}} starting />);
+
+    expect(screen.getByRole('button', { name: /starting/i })).toBeDisabled();
+  });
+
+  it('replaces the button with the reason it cannot start', () => {
+    // A control that takes the press and then explains is worse than one that
+    // is not offered, and this is the press an operator makes while somebody
+    // is waiting to start talking.
+    render(
+      <CaptureBar
+        capturing={false}
+        since={null}
+        onStart={() => {}}
+        startBlocked="Consent has not been confirmed for this meeting."
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/consent has not been confirmed/i);
+  });
+
+  it('offers nothing to press where there is no meeting to record', () => {
+    render(<CaptureBar capturing={false} since={null} />);
+
+    expect(screen.queryByRole('button', { name: /start recording/i })).toBeNull();
+  });
+});
+
+describe('a recording that is uploading nothing', () => {
+  /**
+   * The store diagnoses three of these — the event channel refused, no way to
+   * read the samples, and the device open but delivering silence — and says
+   * each in a sentence with the remedy in it. The Capture screen has shown
+   * them from the start; this bar showed none, which was survivable while the
+   * panel could only report somebody else's recording and is not now that it
+   * starts them. A meeting can otherwise run its full hour here uploading
+   * nothing, with "Listening…" above a moving clock and no other sign — and
+   * the transcript's emptiness is not a sign, because a quiet room looks
+   * exactly the same.
+   */
+  it('shows the store note, and announces it', () => {
+    render(
+      <CaptureBar
+        capturing
+        since={START}
+        now={() => START}
+        note="The microphone is open but no audio is being read from it, so nothing is being uploaded and this meeting will not be transcribed."
+      />,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent(/no audio is being read/i);
+    // The remedy travels with it, or the operator is told only that they have
+    // a problem.
+    expect(alert).toHaveTextContent(/will not be transcribed/i);
+  });
+
+  it('says nothing when the recording is going where it should', () => {
+    const { container } = render(
+      <CaptureBar capturing since={START} now={() => START} note={null} />,
+    );
+
+    expect(container.querySelector('.capture-bar-note')).toBeNull();
   });
 });

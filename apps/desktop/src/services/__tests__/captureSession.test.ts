@@ -338,6 +338,73 @@ describe('in the desktop shell', () => {
     };
   }
 
+  it('picks an input when the caller did not name one', async () => {
+    // `sourceId` is optional in `check`/`start` and **required** by the
+    // shell's command, whose `source_id` is a bare `String`. Passing
+    // `undefined` does not mean "you choose" to Tauri: the key is absent and
+    // the command is refused before it runs, with `invalid args \`sourceId\`
+    // for command \`start_capture\``.
+    //
+    // Nothing caught it because every caller happened to hold a source — the
+    // Capture screen preselects `sources[0]` and passes it. The panel's
+    // recording bar has no picker and asks for the default, which is exactly
+    // what this optional parameter has claimed to support all along.
+    const calls: { command: string; args?: Record<string, unknown> }[] = [];
+    const deps = shellDeps(async (command: string, args?: Record<string, unknown>) => {
+      calls.push({ command, args });
+      if (command === 'list_audio_sources') {
+        return [
+          { id: 'line-in', label: 'Line in', degraded: false },
+          { id: 'loopback', label: 'System audio', degraded: false },
+        ];
+      }
+      if (command === 'start_capture') {
+        return { state: 'checking', source: null, frames: 0 };
+      }
+      return null;
+    });
+    const store = createCaptureStore(deps);
+
+    await store.check();
+
+    const started = calls.find((call) => call.command === 'start_capture');
+    // The same source the Capture screen would have shown selected, so
+    // starting from the panel opens the device an operator would have seen
+    // chosen rather than a different one.
+    expect(started?.args?.sourceId).toBe('line-in');
+  });
+
+  it('refuses in its own words when there is no input to fall back to', async () => {
+    // The shell's message for a missing key describes an argument the
+    // operator never supplied, which is unusable to them.
+    const deps = shellDeps(async (command: string) => {
+      if (command === 'list_audio_sources') return [];
+      return null;
+    });
+    const store = createCaptureStore(deps);
+
+    await expect(store.check()).rejects.toThrow(/no audio input/i);
+  });
+
+  it('does not re-list inputs it has already been told about', async () => {
+    const calls: string[] = [];
+    const deps = shellDeps(async (command: string) => {
+      calls.push(command);
+      if (command === 'list_audio_sources') {
+        return [{ id: 'line-in', label: 'Line in', degraded: false }];
+      }
+      if (command === 'capture_status') return null;
+      if (command === 'start_capture') return { state: 'checking', source: null, frames: 0 };
+      return null;
+    });
+    const store = createCaptureStore(deps);
+
+    await store.refresh();
+    await store.check();
+
+    expect(calls.filter((command) => command === 'list_audio_sources')).toHaveLength(1);
+  });
+
   it('surfaces what the shell refused with instead of swallowing it', async () => {
     // `start_capture` returns `Result<CaptureStatus, String>` and has three
     // real refusals to offer. `callShell` used to catch every one and return
@@ -404,7 +471,12 @@ describe('in the desktop shell', () => {
         command === 'capture_status'
           ? { state: 'capturing', source: null, frames: 7 }
           : command === 'list_audio_sources'
-            ? []
+            ? // At least one, because these drive a *successful* start and a
+              // shell that accepts one always has an input to open. Listing
+              // none here modelled a shell that does not exist, and hid that
+              // `sourceId` is optional in this signature and required by the
+              // command underneath it.
+              [{ id: 'line-in', label: 'Line in', degraded: false }]
             : null,
       ),
       listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
@@ -437,7 +509,12 @@ describe('in the desktop shell', () => {
         command === 'start_capture'
           ? { state: 'capturing', source: null, frames: 0 }
           : command === 'list_audio_sources'
-            ? []
+            ? // At least one, because these drive a *successful* start and a
+              // shell that accepts one always has an input to open. Listing
+              // none here modelled a shell that does not exist, and hid that
+              // `sourceId` is optional in this signature and required by the
+              // command underneath it.
+              [{ id: 'line-in', label: 'Line in', degraded: false }]
             : null,
       ),
       listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
@@ -480,7 +557,12 @@ describe('in the desktop shell', () => {
         command === 'start_capture'
           ? { state: 'capturing', source: null, frames: 0 }
           : command === 'list_audio_sources'
-            ? []
+            ? // At least one, because these drive a *successful* start and a
+              // shell that accepts one always has an input to open. Listing
+              // none here modelled a shell that does not exist, and hid that
+              // `sourceId` is optional in this signature and required by the
+              // command underneath it.
+              [{ id: 'line-in', label: 'Line in', degraded: false }]
             : null,
       ),
       listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
@@ -524,7 +606,12 @@ describe('in the desktop shell', () => {
         command === 'start_capture'
           ? { state: 'capturing', source: null, frames: 0 }
           : command === 'list_audio_sources'
-            ? []
+            ? // At least one, because these drive a *successful* start and a
+              // shell that accepts one always has an input to open. Listing
+              // none here modelled a shell that does not exist, and hid that
+              // `sourceId` is optional in this signature and required by the
+              // command underneath it.
+              [{ id: 'line-in', label: 'Line in', degraded: false }]
             : null,
       ),
       listen: async () => {

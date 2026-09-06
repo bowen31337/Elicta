@@ -41,12 +41,18 @@ describe('what it says before Capture is pressed', () => {
     expect(screen.queryByText('Transcribing')).not.toBeInTheDocument();
   });
 
-  it('says nothing is being captured, and where to start it', () => {
+  it('says nothing is being captured, and to start the recording', () => {
     // "Nothing heard yet" implies something is listening. Nothing is.
+    //
+    // It named the Capture screen for as long as this screen could not begin
+    // a recording. The bar below it can now, so sending an operator away from
+    // the client's face to press a button that is in front of them would be a
+    // sentence that is simply wrong.
     render(<TranscriptPanel transcript={[]} transcribing receivingAudio={false} />);
 
     expect(screen.getByText('Not capturing')).toBeInTheDocument();
-    expect(screen.getByText(/capture screen/i)).toBeInTheDocument();
+    expect(screen.getByText(/start the recording/i)).toBeInTheDocument();
+    expect(screen.queryByText(/capture screen/i)).not.toBeInTheDocument();
   });
 
   it('says it is transcribing once audio arrives', () => {
@@ -208,5 +214,55 @@ describe('why nothing is being written down', () => {
     );
 
     expect(container.querySelector('.script-notice')).toBeNull();
+  });
+});
+
+describe('why every line reads Unattributed', () => {
+  /**
+   * Verification is two-way — one window against one enrolled print,
+   * answering the operator, not the operator, or cannot tell — and with
+   * nothing enrolled every window is the third. That is the correct answer.
+   * A column of rows all saying so with nothing to explain it is not a
+   * correct screen: it reads as a transcript that is broken rather than one
+   * being careful, and the remedy is something the operator can do.
+   */
+  const WITH_LINES = [said(0, 'So how are arrivals booked in today?', 0)];
+
+  it('says once why, rather than leaving a column of Unattributed unexplained', () => {
+    render(
+      <TranscriptPanel
+        transcript={WITH_LINES}
+        transcribing
+        receivingAudio
+        unattributedBecause="no voiceprint is enrolled, so no line can be attributed to anyone"
+      />,
+    );
+
+    expect(screen.getByText(/no voiceprint is enrolled/i)).toBeInTheDocument();
+    // Once, under the header — not repeated on every row.
+    expect(screen.getAllByText(/no voiceprint is enrolled/i)).toHaveLength(1);
+  });
+
+  it('says nothing on a transcript with nothing in it', () => {
+    // A warning about nothing, and it would be the first thing on a screen
+    // whose meeting has not started.
+    const { container } = render(
+      <TranscriptPanel
+        transcript={[]}
+        transcribing
+        receivingAudio
+        unattributedBecause="no voiceprint is enrolled, so no line can be attributed to anyone"
+      />,
+    );
+
+    expect(container.querySelector('.script-note')).toBeNull();
+  });
+
+  it('says nothing once lines can be attributed', () => {
+    const { container } = render(
+      <TranscriptPanel transcript={WITH_LINES} transcribing receivingAudio />,
+    );
+
+    expect(container.querySelector('.script-note')).toBeNull();
   });
 });

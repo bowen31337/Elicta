@@ -338,3 +338,27 @@ def test_a_run_of_capture_keeps_its_own_start() -> None:
     _capture(client, meeting_id, windows=2)
 
     assert _lane(client, meeting_id)["capturing_since"] == first
+
+
+def test_the_panel_is_told_why_every_line_is_unattributed() -> None:
+    """A whole transcript reading "Unattributed", explained.
+
+    Verification is two-way — one window against one enrolled print, answering
+    the operator, not the operator, or cannot tell — and with nothing enrolled
+    every window is the third. `identify_speaker` returning `None` is the
+    honest answer and the gate behaves exactly as it does with no verification
+    at all. What was wrong was the screen: every row said "Unattributed" with
+    nothing anywhere saying why or what would change it, which reads as a
+    transcript that is broken rather than one being careful.
+    """
+
+    client = TestClient(build_app(Backend()))
+    meeting_id = _meeting(client)
+
+    reason = _lane(client, meeting_id)["speaker_attribution_reason"]
+
+    assert reason is not None
+    assert "voiceprint" in reason
+    # The remedy has to be nameable. "Attribution unavailable" is a fact an
+    # operator can do nothing with.
+    assert "enrolled" in reason
