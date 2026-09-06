@@ -19,7 +19,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.modules.trigger.listener import LiveUtterances
+from app.modules.trigger.listener import (
+    BYTES_PER_SECOND,
+    WINDOW_BYTES,
+    WINDOW_SECONDS_ENV,
+    LiveUtterances,
+    window_bytes_from_env,
+)
 
 
 class _Recogniser:
@@ -200,3 +206,87 @@ async def test_with_no_verifier_the_utterance_is_untagged_and_still_arrives() ->
 
     assert observed.seen == [("meeting-1", "It should be quick.")]
     assert observed.speakers == [None]
+
+
+# --- the window, which is the live path's latency floor ------------------
+
+
+def test_the_window_is_long_enough_to_hold_a_clause() -> None:
+    """It was briefly one second, and that was measured afterwards.
+
+    Shortening the window is the obvious move against latency and it makes
+    this path *worse*, not merely coarser: the same 2.4 seconds of speech came
+    back from Nova-3 as `'How are arrivals' / 'Today at the death'` at one
+    second and `'How are arrivals booked in today at the'` at two — "depot"
+    mis-heard as "death", because the recogniser had no context either side of
+    the cut. A gate reading that is worse than a gate reading nothing.
+
+    Latency is not solved here any more. It is solved by not having a window:
+    the streamed lane ends a turn where the speaker does.
+    """
+
+    assert WINDOW_BYTES == BYTES_PER_SECOND * 4
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_the_size_of_the_window_leaves_no_remainder() -> None:
+    """The flat-lag property, as behaviour rather than arithmetic.
+
+    Stated in windows rather than in chunks, because the uploader's chunk is
+    smaller than this now and simply fills a window in pieces. What must never
+    return is the *unequal* case that oscillated: a remainder that grows until
+    two windows fire at once.
+    """
+
+    heard: list[str] = []
+    sizes: list[int] = []
+
+    async def recognise(session_id: str, window: bytes) -> str:
+        sizes.append(len(window))
+        return "a clause"
+
+    async def observe(session_id: str, text: str, speaker: str | None) -> None:
+        heard.append(text)
+
+    utterances = LiveUtterances(recognise, observe)
+    for _ in range(5):
+        await utterances.feed("session-1", b"\x01\x02" * (WINDOW_BYTES // 2))
+
+    # One window per chunk, every time — never none, never two at once.
+    assert len(heard) == 5
+    assert sizes == [WINDOW_BYTES] * 5
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected_seconds"),
+    [("", 4.0), ("2.5", 2.5), ("nonsense", 4.0), ("-1", 4.0), ("0", 4.0)],
+)
+def test_the_window_is_tunable_and_refuses_to_be_broken(
+    monkeypatch: pytest.MonkeyPatch, configured: str, expected_seconds: float
+) -> None:
+    """The right window is a judgement about a room rather than a constant, so
+    it is tunable without a rebuild — a pair finishing each other's sentences
+    wants it short, a formal walkthrough wants the context.
+
+    A value that cannot be read falls back rather than raising: refusing to
+    start the whole service over a malformed tuning knob trades a
+    slightly-wrong window for no service at all.
+    """
+
+    monkeypatch.setenv(WINDOW_SECONDS_ENV, configured)
+
+    assert window_bytes_from_env() == BYTES_PER_SECOND * expected_seconds
+
+
+def test_a_window_can_never_be_shorter_than_one_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A window shorter than a single 16-bit sample would spin the drain loop
+    forever on a buffer it can never empty — a hung request per chunk, for
+    every meeting, out of one mistyped environment variable."""
+
+    monkeypatch.setenv(WINDOW_SECONDS_ENV, "0.00001")
+
+    assert window_bytes_from_env() >= 2
+    # Whole samples, so a window never splits one down the middle.
+    assert window_bytes_from_env() % 2 == 0

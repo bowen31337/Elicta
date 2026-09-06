@@ -594,40 +594,75 @@ embarrassment gates, plus signing/release workflows.
   share one lifecycle (`startSilenceWatch` starts both) because **pause is
   supposed to be digitally silent** — separate lifecycles would have raised a
   false alarm on every pause.
-- **The live panel outlives being looked at.** `Destination.persistent` keeps a
-  screen mounted once visited and `hidden` rather than unmounted when the
-  operator goes elsewhere — a meeting does not pause while somebody checks a
-  document, and unmounted the panel's stream closes and reconnects, its clock
-  restarts, and everything no stream can replay (which bank questions are dealt
-  with, which nudge was brought back) is gone. Three traps. **One keyed list,
-  not "the selected screen plus the kept ones"**: two sibling slots look
-  equivalent, but a screen moving between them changes position among its
-  parent's children and React unmounts and remounts it — undoing the whole
-  arrangement while looking correct. **`hidden` needs `.pane-body[hidden] {
-  display: none }`**, because `[hidden]` is a *user-agent* rule and
-  `.pane-body--stage`'s author `display: flex` beats it, so the kept panel
-  would stay fully on screen while its markup claimed otherwise. And it is
-  mounted **on first visit, not up front** — a panel nobody opened would hold a
-  stream connection and fetch a consent gate for nothing. Assert this by **DOM
-  node identity**: a screen rendered afresh looks identical, and a render count
-  answers a different question since React re-renders a mounted component
-  freely.
-- **Speaker attribution is two-way, and "Unattributed" is the correct answer
-  almost everywhere.** `identify_speaker` compares one window against **one**
-  enrolled operator print and answers `operator` / `other` / `None` — it is
-  not diarisation and will never name a third person. With nothing enrolled
-  (`GET /api/operator/voiceprint` → `enrolled: false`) every window is `None`
-  by design, and the gate then behaves exactly as it does with no
-  verification at all. What was wrong was only the screen: every row read
-  "Unattributed" with nothing saying why, which looks like a broken
-  transcript rather than a careful one. `speaker_attribution_reason` on the
-  lane frame now carries it, shown **once under the header and only when
-  there are lines** — on an empty transcript it is a warning about nothing,
-  and it would be the first thing on a meeting that has not started. The
-  remedy is Capture → *Your voice*. Note `MATCH_THRESHOLD = 0.97` is
-  deliberately high and **uncalibrated against real speech**: an unsure answer
-  comes back `other`, because mistaking a client for the operator silently
-  drops their requirement while the reverse costs one dismissable nudge.
+- **One question about the microphone gets one answer for the whole panel.**
+  The recording bar read "Listening…" over a running clock while the
+  transcript header beside it read "Not capturing", at the same moment, about
+  the same microphone. Neither reading was wrong — the bar preferred the local
+  capture store, the header took the service's `receiving_audio`, and those
+  disagree constantly and legitimately, since the service's is derived from
+  when a chunk last arrived and lags both edges. The mistake was two
+  expressions where one belonged. `listening` in `panel/route.tsx` resolves it
+  once (a stop this screen made wins; then holding the device; then the
+  service) and every region is handed the result. Tested as a **property** over
+  every combination of the two inputs rather than as another example: the bug
+  was not any one combination, so a case-by-case test would only have caught
+  the case somebody thought of.
+- **Coverage is measurable here**, `@vitest/coverage-v8`:
+  `pnpm --filter elicta-desktop exec vitest run --coverage
+  --coverage.provider=v8 --coverage.include='<glob>'`. It is worth running on
+  a seam that has just gained a second caller. `useRecordingStart` sat at 81%
+  branch with its *failure* paths uncovered, because the capture screen always
+  had a picker, a source and a selected meeting in front of it; the panel's
+  recording bar has none of those and walks exactly those branches. High
+  coverage of the paths that work says nothing about the paths that report.
+- **The live path's latency was the buffering, not the model.** Measured on a
+  real machine: recognising a window costs ~0.2s, and the buffers either side
+  cost five to nine seconds — the model was about four per cent of the wait,
+  so no model swap could have fixed it. Two changes, in order. The **window**
+  (`trigger/listener.py`) is 1s and the **upload chunk**
+  (`chunkUploader.ts`) is 1s, and *equal lengths are the property*: at 5s
+  chunks against a 4s window the remainder grew a second per chunk until two
+  windows fired at once, so the lag oscillated instead of staying flat.
+  `ELICTA_LIVE_WINDOW_SECONDS` tunes it without a rebuild, floored at one
+  whole sample — a window shorter than one would spin the drain loop for ever.
+  Then **Flux** (`orchestration/deepgram_flux.py`): a socket on `/v2/listen`
+  that endpoints on turns, so a sentence arrives once, whole, instead of cut
+  wherever the clock landed. Traps. The **model decides the transport** and it
+  is not a preference — Flux is `/v2/listen`-only and a Nova model there never
+  produces a turn — so `is_streamed` holds the mapping and
+  `_live_lane_for` picks one lane, never both. An **injected `live_recogniser`
+  outranks the setting**, or every test that supplies its own engine silently
+  reaches Deepgram. Only `event: "EndOfTurn"` is a sentence somebody
+  finished; `EagerEndOfTurn` and friends are guesses for a voice agent. And
+  the transport is the one live-path setting that **cannot** be re-read per
+  chunk: a socket carries a meeting, so it takes effect on the next one.
+  What remains is the chunk — Deepgram wants 80ms and we post 1s to our own
+  service.
+  service.
+  **The window went to 1s and came back.** Shortening it is the obvious move
+  against latency and it was measured afterwards rather than before, which was
+  the mistake — the same 2.4s of speech through Nova-3 came back as
+  `'How are arrivals' / 'Today at the death'` at 1s and
+  `'How are arrivals booked in today at the'` at 2s. A short window does not
+  merely split a sentence, it **mis-hears** it ("depot" → "death"), because
+  the recogniser has no context either side of the cut, and a gate reading
+  that is worse than a gate reading nothing. So the window is 4s again and the
+  latency is **not solved there**: it is solved by not having a window, which
+  is what Flux does.
+  **The recogniser sits inside the audio-chunk request**, and that is a known
+  cost rather than a fixed one. Measured: chunk median 4ms, p95 over a second
+  when a window completes. A `BackgroundLane` (queue + worker per meeting) was
+  built to decouple it and **reverted** — under it, `_identify_speaker`'s
+  `asyncio.to_thread` never resumed, so an enrolled deployment recorded no
+  transcript at all, silently, with nothing logged. It is not needed at the
+  current sizes: against Flux `on_chunk` is a socket send, and against a
+  windowed model the recogniser fires once per 4s. Anyone re-attempting it
+  must check `test_operator_enrolment.py` first — it is the only test that
+  exercises identify-then-observe end to end, and it is the one that caught it.
+  Finally, `LIVE_POLL_SECONDS` is a ceiling rather than a floor now:
+  `_wake_watchers` signals every open panel the moment a line exists, and the
+  timeout only catches a missed signal — the event is an accelerator, never a
+  correctness requirement.
 - **The panel has two accounts of one microphone, and a snapshot is not an
   account.** The service's comes from audio it has received; the local
   `captureSession`'s, in the shell, is read **once, on mount** (`refresh()`

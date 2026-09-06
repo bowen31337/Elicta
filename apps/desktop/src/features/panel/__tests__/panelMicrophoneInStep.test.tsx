@@ -214,3 +214,164 @@ describe('the panel and the microphone it reports on', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('the panel never contradicts itself about the microphone', () => {
+  /**
+   * Two regions on one screen answered the same question differently, and an
+   * operator saw both at once: the recording bar read "Listening…" over a
+   * running clock while the transcript header beside it read "Not capturing".
+   *
+   * Neither reading was wrong. The bar preferred the local capture store; the
+   * header took the service's `receiving_audio`, which is derived from when a
+   * chunk last arrived and so lags both edges. They disagree constantly and
+   * legitimately — the mistake was putting both on screen.
+   *
+   * **Asserted as a property rather than as another example.** The bug was
+   * not any one of these combinations; it was that two expressions existed
+   * where one belonged, so a case-by-case test would only ever have caught
+   * the case somebody thought of. Every combination of the two inputs is
+   * enumerated, and the only claim is that the screen agrees with itself.
+   */
+  const said = (holding: boolean, receiving: boolean) =>
+    `store ${holding ? 'holds' : 'idle'} / service ${receiving ? 'hears' : 'silent'}`;
+
+  for (const holding of [true, false]) {
+    for (const receiving of [true, false]) {
+      it(`agrees with itself when the ${said(holding, receiving)}`, async () => {
+        const store = fakeStore(
+          holding ? { status: { state: 'capturing', source: null, frames: 4 } } : {},
+        );
+        render(
+          <OperatorPanel
+            initial={MEETING}
+            createSource={() => laneSaying(receiving) as never}
+            captureStore={store}
+          />,
+        );
+        // Let the lane frame land and any reconciliation settle.
+        await waitFor(() => expect(store.refreshes()).toBeGreaterThan(0));
+
+        const barSaysListening = screen.queryByText('Listening…') !== null;
+        const headerSaysNotCapturing = screen.queryByText('Not capturing') !== null;
+
+        expect(barSaysListening).toBe(!headerSaysNotCapturing);
+      });
+    }
+  }
+
+  it('agrees with itself after a stop, while the service still says it hears', async () => {
+    // The lagging edge, and the one an operator reads as "Stop did nothing".
+    // The stream goes on reporting `receiving_audio: true` for the whole
+    // freshness window after the last chunk.
+    const store = fakeStore({ status: { state: 'capturing', source: null, frames: 4 } });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        session_id: 'session-1',
+        meeting_id: 'meeting-1',
+        stopped_at: '2026-09-06T02:00:00Z',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+    render(
+      <OperatorPanel
+        initial={MEETING}
+        createSource={() => laneSaying(true) as never}
+        captureStore={store}
+      />,
+    );
+    expect(await screen.findByText('Listening…')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /^stop$/i }));
+
+    await waitFor(() => expect(screen.queryByText('Listening…')).toBeNull());
+    expect(screen.getByText('Not capturing')).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('what the store knows reaches the screen', () => {
+  /**
+   * The gap this closes is the one this project keeps falling into: two
+   * halves, each with tests, and nothing asserting they are joined.
+   *
+   * `captureSession` diagnoses a recording that is uploading nothing and
+   * writes the sentence into `uploadNote`; `CaptureBar` renders whatever
+   * `note` it is handed. Both were tested. Whether the panel passes one to
+   * the other was not — and a recording that uploads nothing is exactly the
+   * state where the operator has no other signal, because the transcript
+   * being empty looks identical to a quiet room.
+   */
+  it('shows a store note about a recording that is uploading nothing, once', async () => {
+    const store = fakeStore({
+      status: { state: 'capturing', source: null, frames: 4 },
+      uploadNote:
+        'The microphone is delivering complete silence, so this meeting is not being transcribed.',
+    });
+
+    render(
+      <OperatorPanel
+        initial={MEETING}
+        createSource={() => laneSaying(true) as never}
+        captureStore={store}
+      />,
+    );
+
+    // Once. Rendered by both the transcript's empty state and the recording
+    // bar, the same sentence appeared twice on one screen — which is how the
+    // first version of this shipped, and what `findByText` refuses.
+    expect(await screen.findByText(/delivering complete silence/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/delivering complete silence/i)).toHaveLength(1);
+  });
+
+  it('moves the reason to the bar once the transcript has lines in it', async () => {
+    // The empty state is gone by then, so the transcript cannot carry it —
+    // and a recording that breaks mid-meeting is exactly when it still needs
+    // saying.
+    const store = fakeStore({
+      status: { state: 'capturing', source: null, frames: 4 },
+      uploadNote: 'The microphone is delivering complete silence.',
+    });
+
+    // Through the stream, not the prop: `transcript` on the initial state is
+    // only read for a fixed scene, and a live meeting takes its lines from
+    // the session stream — so a prop here would leave the transcript empty
+    // and quietly assert the case above instead of this one.
+    const source = laneSaying(true);
+    render(
+      <OperatorPanel
+        initial={MEETING}
+        createSource={() => source as never}
+        captureStore={store}
+      />,
+    );
+    await screen.findByText('Listening…');
+    source.emit(
+      'utterance',
+      JSON.stringify({ seq: 0, text: 'Three fifty a day.', speaker: null, at: 1 }),
+    );
+    expect(await screen.findByText('Three fifty a day.')).toBeInTheDocument();
+
+    const shown = await screen.findAllByText(/delivering complete silence/i);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].closest('.capture-bar-dock')).not.toBeNull();
+  });
+
+  it('does not attribute a note to a recording this window does not hold', async () => {
+    // A second screen has no view of somebody else's upload path, and a note
+    // shown there would describe a machine the operator is not sitting at.
+    const store = fakeStore({ uploadNote: 'The microphone is delivering complete silence.' });
+
+    render(
+      <OperatorPanel
+        initial={MEETING}
+        createSource={() => laneSaying(true) as never}
+        captureStore={store}
+      />,
+    );
+    await waitFor(() => expect(store.refreshes()).toBeGreaterThan(0));
+
+    expect(screen.queryByText(/delivering complete silence/i)).toBeNull();
+  });
+});

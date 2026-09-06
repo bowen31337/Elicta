@@ -22,7 +22,12 @@ from fastapi.testclient import TestClient
 
 from app import composition
 from app.composition import Backend, build_app
-from app.modules.settings.models import SecretKey, SpeechVendor
+from app.modules.settings.models import (
+    ConnectorSettings,
+    LiveSpeechModel,
+    SecretKey,
+    SpeechVendor,
+)
 from app.modules.settings.speech_admin import SpeechCredentialCreate, add_credential
 from app.modules.settings.store import InMemorySettingsStore
 from app.modules.trigger.listener import WINDOW_BYTES
@@ -50,6 +55,20 @@ def offered(monkeypatch) -> list[str]:
     return seen
 
 
+def _windowed(store: InMemorySettingsStore) -> InMemorySettingsStore:
+    """Pin the store to a model the *windowed* lane serves.
+
+    The default is Flux, which is streamed over a socket and never calls
+    `deepgram_live_recogniser` at all — so without this the fixture patches a
+    function nothing reaches and the gate goes untested while reporting
+    green. Which transport serves is a separate question from whether a chunk
+    is offered, and this file is about the second one.
+    """
+
+    store.write_connectors(ConnectorSettings(live_model=LiveSpeechModel.NOVA_3))
+    return store
+
+
 def _post(store: InMemorySettingsStore) -> TestClient:
     """One chunk, through the routes a real capture actually walks.
 
@@ -74,7 +93,7 @@ def test_a_pooled_key_opens_the_gate(offered) -> None:
         SpeechCredentialCreate(vendor=SpeechVendor.DEEPGRAM, label="Northwind", value="dg-key"),
     )
 
-    _post(store)
+    _post(_windowed(store))
 
     assert offered == ["meeting-1"]
 
@@ -85,7 +104,7 @@ def test_the_fixed_key_still_opens_it(offered) -> None:
     store = InMemorySettingsStore(read_environment=False)
     store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg-key")
 
-    _post(store)
+    _post(_windowed(store))
 
     assert offered == ["meeting-1"]
 

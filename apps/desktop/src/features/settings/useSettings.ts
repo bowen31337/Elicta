@@ -87,6 +87,8 @@ export interface InferenceSettings {
  * the vendor refuses mid-meeting.
  */
 export type LiveSpeechModel =
+  | 'flux-general-en'
+  | 'flux-general-multi'
   | 'nova-3'
   | 'nova-2'
   | 'enhanced'
@@ -94,6 +96,22 @@ export type LiveSpeechModel =
   | 'whisper-medium'
   | 'whisper-small'
   | 'parakeet-tdt-0.6b-v2';
+
+/**
+ * The models driven over a socket rather than a request per fixed window.
+ *
+ * Not a preference: Flux is `/v2/listen`-only and a Nova model on that
+ * endpoint never produces a turn, so the model decides the transport. The
+ * same set is held in the service and asserted equal there.
+ */
+export const STREAMED_LIVE_MODELS: readonly LiveSpeechModel[] = [
+  'flux-general-en',
+  'flux-general-multi',
+];
+
+export function isStreamed(model: LiveSpeechModel): boolean {
+  return STREAMED_LIVE_MODELS.includes(model);
+}
 
 /** The models that transcribe on this machine, sending no audio anywhere. */
 export const LOCAL_LIVE_MODELS: readonly LiveSpeechModel[] = [

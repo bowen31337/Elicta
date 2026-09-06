@@ -12,9 +12,16 @@ import { apiUrl } from './apiClient';
  * time, and a failure that cannot be corrected stops the upload and is
  * reported rather than being stepped over.
  *
- * Chunks rather than one upload at the end, because a five-second slice that
- * never arrives costs five seconds — a browser that dies mid-meeting holding
- * the whole recording costs the meeting.
+ * Chunks rather than one upload at the end, because a tenth-of-a-second slice
+ * that never arrives costs a tenth of a second — a browser that dies
+ * mid-meeting holding the whole recording costs the meeting.
+ *
+ * **The chunk is also the live path's latency floor**, which is what set this
+ * size. Nothing is recognised until the chunk holding it has been filled,
+ * uploaded and buffered into a window on the other side, so a five-second
+ * chunk meant a question could not reach the operator for five seconds before
+ * the recogniser had seen a byte. Measured against the model itself — 0.2s to
+ * recognise a window — the chunk was over ninety per cent of the delay.
  *
  * Written over an injected `post` for the same reason everything else in this
  * directory is: the failure paths are the interesting ones, and they are not
@@ -63,7 +70,7 @@ export interface ChunkUploaderOptions {
   readonly meetingId: string;
   readonly post?: PostChunk;
   readonly open?: OpenRecording;
-  /** Samples per chunk. Five seconds at 16kHz, by default. */
+  /** Samples per chunk. A tenth of a second at 16kHz, by default. */
   readonly chunkSamples?: number;
   /** Tries per chunk, including the first. */
   readonly attempts?: number;
@@ -72,7 +79,31 @@ export interface ChunkUploaderOptions {
   readonly onFailure?: (message: string) => void;
 }
 
-const FIVE_SECONDS_AT_16KHZ = 16_000 * 5;
+/**
+ * A tenth of a second of 16kHz mono.
+ *
+ * **This is the live path's remaining latency floor**, and it is now the
+ * whole of it: with a streaming recogniser there is no window to fill on the
+ * other side, so nothing is transcribed until the chunk holding it has been
+ * filled and posted. Every millisecond here is a millisecond an operator
+ * waits, and it has come down 5s → 1s → this as each larger cost above it was
+ * removed.
+ *
+ * A tenth of a second because Deepgram asks for eighty milliseconds and this
+ * is the nearest round number above it that divides a second — ten posts a
+ * second, to a service on this machine, each carrying about four kilobytes.
+ * Smaller buys single-digit milliseconds against a real cost: the uploader
+ * sends strictly one chunk at a time, so the round trip has to stay
+ * comfortably shorter than the chunk or the queue grows for the rest of the
+ * meeting.
+ *
+ * It no longer has to match the service's window. That mattered when the
+ * window was the floor — unequal, the remainder grew a second per chunk until
+ * two windows fired at once and the lag oscillated — but a chunk *smaller*
+ * than the window simply fills it in several pieces, and against a stream
+ * there is no window at all.
+ */
+const A_TENTH_OF_A_SECOND_AT_16KHZ = 1_600;
 const DEFAULT_ATTEMPTS = 3;
 
 /** The real `POST` that opens the recording, for callers that are not a test. */
@@ -121,7 +152,7 @@ export function createChunkUploader(options: ChunkUploaderOptions): ChunkUploade
     meetingId,
     post = postAudioChunk,
     open = openAudioRecording,
-    chunkSamples = FIVE_SECONDS_AT_16KHZ,
+    chunkSamples = A_TENTH_OF_A_SECOND_AT_16KHZ,
     attempts = DEFAULT_ATTEMPTS,
     wait = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms)),
     onFailure,

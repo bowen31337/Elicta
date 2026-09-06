@@ -54,8 +54,10 @@
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Cdp } from './live-driver.mjs';
 
@@ -71,11 +73,32 @@ const EXPECT_WORDS = (process.env.EXPECT_WORDS ?? '')
   .split(',')
   .map((word) => word.trim().toLowerCase())
   .filter((word) => word !== '');
-/** Long enough for two whole five-second chunks and a tail. */
+/** Long enough for many whole chunks and a tail. */
 const RECORD_MS = Number(process.env.RECORD_MS ?? 13_000);
 
-/** What the uploader cuts a chunk at: five seconds of 16kHz mono linear16. */
-const CHUNK_BYTES = 16_000 * 5 * 2;
+/**
+ * What the uploader cuts a chunk at, **read from the uploader** rather than
+ * written down again.
+ *
+ * It was `16_000 * 5 * 2` — five seconds, correct on the day it was typed. The
+ * chunk has since come down to a tenth of a second, because it was the live
+ * path's latency floor, and this assertion went on checking a number the
+ * product had stopped using: it failed, which was the good outcome, but it
+ * would just as happily have *passed* on a chunk size that had silently
+ * doubled.
+ */
+const CHUNK_BYTES = await (async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const source = await readFile(
+    path.join(here, '..', '..', '..', 'apps', 'desktop', 'src', 'services', 'chunkUploader.ts'),
+    'utf8',
+  );
+  const declared = /const A_TENTH_OF_A_SECOND_AT_16KHZ = ([\d_]+);/.exec(source);
+  if (declared === null) {
+    throw new Error('the uploader no longer declares its chunk size where this can read it');
+  }
+  return Number(declared[1].replaceAll('_', '')) * 2;
+})();
 const SAMPLE_RATE = 16_000;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -296,7 +319,7 @@ async function main() {
     );
     expect(
       chunks.slice(0, -1).every((chunk) => (chunk.body?.received_bytes ?? 0) % CHUNK_BYTES === 0),
-      'every chunk but the last was a whole five seconds',
+      `every chunk but the last was a whole ${CHUNK_BYTES / 2 / SAMPLE_RATE}s`,
     );
     expect(
       calls.some((call) => call.path.endsWith('/record/transcribe') && call.status === 202),

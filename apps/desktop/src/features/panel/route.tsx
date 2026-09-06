@@ -263,6 +263,22 @@ export function OperatorPanel({
   const heard = state.meetingId ? transcript : (state.transcript ?? []);
 
   /**
+   * Why this recording is producing nothing, and **which region says so**.
+   *
+   * One sentence, in the place the operator is looking. While the transcript
+   * is empty that is the transcript — an empty transcript is the thing being
+   * stared at, and "Nothing heard yet." would otherwise sit there reassuring
+   * them in large type. Once there are lines it is the recording bar, which
+   * is what covers a recording that breaks mid-meeting.
+   *
+   * Decided here rather than in both components, for the reason `listening`
+   * is: rendered in both at once it appeared twice on one screen, which is
+   * how the first version of this shipped.
+   */
+  const notUploading = holdingTheDevice ? microphone.uploadNote : null;
+  const transcriptIsEmpty = heard.length === 0;
+
+  /**
    * Two accounts of one microphone, reconciled rather than left to disagree.
    *
    * The panel has the service's word — audio is arriving, from chunks it has
@@ -287,6 +303,37 @@ export function OperatorPanel({
   // Not after a stop this screen made: the service's account lags by the
   // freshness window, and re-asking the shell about a session we have just
   // closed is asking a settled question.
+  /**
+   * Whether this meeting is being listened to — **one answer, for the whole
+   * screen**.
+   *
+   * It was two, and they contradicted each other in front of an operator: the
+   * recording bar read "Listening…" over a running clock while the transcript
+   * header beside it read "Not capturing", at the same moment, about the same
+   * microphone. The bar preferred the local capture store and the header took
+   * the service's `receiving_audio`, and the two disagree constantly and
+   * legitimately — the service's reading is derived from when a chunk last
+   * arrived and lags both edges, and the store knows nothing about a
+   * recording running on another machine.
+   *
+   * Neither reading is wrong; having both on screen is. So the disagreement
+   * is resolved once, here, and every region is handed the result:
+   *
+   *  - a stop this screen made wins outright, because it released the device
+   *    itself and the service's reading lags by the freshness window;
+   *  - otherwise this window holding the device is the stronger evidence, as
+   *    it is first-hand and immediate;
+   *  - otherwise the service's, which is the only account a second screen has.
+   */
+  const listening =
+    stopStatus === 'stopped'
+      ? false
+      : holdingTheDevice
+        ? true
+        : state.meetingId
+          ? receivingAudio
+          : (state.transcript ?? []).length > 0;
+
   const outOfStep = receivingAudio && !holdingTheDevice && stopStatus !== 'stopped';
   // `microphone.refresh`, never `microphone`: the hook returns a fresh object
   // every render, so depending on it would tear down and rebuild the interval
@@ -591,9 +638,7 @@ export function OperatorPanel({
         // stream, and a scene that carries lines was plainly being captured
         // when they were said — inferring it from the prop keeps every
         // screenshot honest without a second flag to set.
-        receivingAudio={
-          state.meetingId ? receivingAudio : (state.transcript ?? []).length > 0
-        }
+        receivingAudio={listening}
         model={state.meetingId ? liveModel : (state.liveModel ?? null)}
         blockedBecause={
           state.meetingId ? liveTranscriptionReason : (state.liveTranscriptionReason ?? null)
@@ -601,29 +646,13 @@ export function OperatorPanel({
         unattributedBecause={
           state.meetingId ? speakerAttributionReason : (state.speakerAttributionReason ?? null)
         }
+        // The same value the recording bar is handed, so the two regions
+        // cannot say different things about one recording.
+        notHeardBecause={transcriptIsEmpty ? notUploading : null}
       />
 
       <CaptureBar
-        // The local device wins where there is one: the service's
-        // `receiving_audio` is derived from when a chunk last arrived, which
-        // lags a pause by the freshness window and would leave the bar
-        // claiming to listen for seconds after the operator held it.
-        // A stop that has come back is the end of it, whatever the service
-        // still says. `receiving_audio` is derived from when a chunk last
-        // arrived and stays true for the freshness window after the last one
-        // — so for several seconds after a stop that worked, the bar went on
-        // reading "Listening…" with the clock running, which is
-        // indistinguishable from a Stop that did nothing. This screen knows
-        // better than the derivation does: it released the device itself.
-        capturing={
-          stopStatus === 'stopped'
-            ? false
-            : holdingTheDevice
-              ? true
-              : state.meetingId
-                ? receivingAudio
-                : (state.transcript ?? []).length > 0
-        }
+        capturing={listening}
         since={
           state.meetingId
             ? capturingSince
@@ -673,7 +702,7 @@ export function OperatorPanel({
         // Only where this window holds the device. A note about an upload
         // path belongs to the session that owns it, and a second screen has
         // no view of somebody else's.
-        note={holdingTheDevice ? microphone.uploadNote : null}
+        note={transcriptIsEmpty ? null : notUploading}
       />
       </div>
 

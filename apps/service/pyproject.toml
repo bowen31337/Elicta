@@ -18,6 +18,11 @@ dependencies = [
     # dependency, which made a production import depend on somebody else's
     # dependency tree not changing.
     "httpx>=0.27",
+    # The streamed live lane's socket. It was already here, transitively,
+    # through `uvicorn[standard]` — which is the same mistake `httpx` above
+    # records: a production import resting on somebody else's dependency
+    # tree, and one that would disappear the day uvicorn's extras changed.
+    "websockets>=13",
 ]
 
 [dependency-groups]

@@ -69,11 +69,21 @@ def _lane(client: TestClient, meeting_id: str) -> dict:
 
 
 def test_the_default_is_the_vendor_model_and_it_needs_a_key() -> None:
+    """The default is Flux — streamed, and still a Deepgram credential.
+
+    Chosen on measurement rather than on the benchmark: the fixed window was
+    five to nine seconds of the delay and the model about four per cent of it,
+    so the transport is what mattered. Its published word error rate is worse
+    than Nova-3's, and on this path a whole sentence a second later beats half
+    a sentence eight seconds later — the recording is transcribed again
+    afterwards by two engines bought on accuracy.
+    """
+
     store = _store()
     client = TestClient(build_app(Backend(), settings_store=store))
     meeting_id = _meeting(client)
 
-    assert store.read().connectors.live_model is LiveSpeechModel.NOVA_3
+    assert store.read().connectors.live_model is LiveSpeechModel.FLUX_GENERAL_EN
     assert _lane(client, meeting_id)["live_transcription"] is False
 
     store.set_secret(SecretKey.DEEPGRAM_API_KEY, "a-key")
@@ -161,7 +171,7 @@ def test_the_choice_survives_the_round_trip_through_the_settings_api(
     """
 
     before = client.get("/api/admin/settings").json()["connectors"]
-    assert before["live_model"] == "nova-3"
+    assert before["live_model"] == "flux-general-en"
     assert before["local_asr_base_url"] is None
 
     saved = client.put(
@@ -242,3 +252,102 @@ def test_the_reason_and_the_readiness_cannot_disagree() -> None:
             f"{model} / address={address} / key={with_key} reported "
             f"{lane['live_transcription']} with reason {lane['live_transcription_reason']!r}"
         )
+
+
+def test_a_streamed_model_never_touches_the_windowed_recogniser(monkeypatch) -> None:
+    """The model decides the transport, and it is not a preference.
+
+    Flux is `/v2/listen` only: a Nova model on that endpoint connects and
+    never produces a turn, and a Flux model on the batch endpoint is refused.
+    So picking the model picks the transport, and the two must not both run —
+    a windowed request alongside a stream would bill the meeting twice and
+    interleave two transcripts of one room.
+    """
+
+    import base64
+
+    from app import composition
+    from app.modules.trigger.listener import WINDOW_BYTES
+
+    windowed: list[str] = []
+
+    def never(store, get_vocabulary, **kwargs):
+        async def recognise(session_id: str, pcm: bytes) -> str:
+            windowed.append(session_id)
+            return ""
+
+        return recognise
+
+    opened: list[str] = []
+
+    class _Lane:
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = kwargs.get("model")
+
+        async def feed(self, session_id: str, pcm: bytes) -> None:
+            opened.append(session_id)
+
+    monkeypatch.setattr(composition, "deepgram_live_recogniser", never)
+    monkeypatch.setattr(composition, "FluxUtterances", _Lane)
+
+    store = _store(live_model=LiveSpeechModel.FLUX_GENERAL_EN)
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg-key")
+    client = TestClient(build_app(Backend(), settings_store=store))
+
+    client.post("/api/sessions/meeting-1/recording")
+    sent = client.post(
+        "/api/sessions/meeting-1/audio-chunk",
+        json={
+            "sequence": 0,
+            "pcm": base64.b64encode(b"\x00\x01" * (WINDOW_BYTES // 2)).decode(),
+        },
+    )
+
+    assert sent.status_code in (200, 202), sent.text
+    assert opened == ["meeting-1"]
+    assert windowed == []
+
+
+def test_a_windowed_model_never_opens_a_stream(monkeypatch) -> None:
+    """And the other way, or the choice only works in one direction."""
+
+    import base64
+
+    from app import composition
+    from app.modules.trigger.listener import WINDOW_BYTES
+
+    windowed: list[str] = []
+    streamed: list[str] = []
+
+    def recogniser(store, get_vocabulary, **kwargs):
+        async def recognise(session_id: str, pcm: bytes) -> str:
+            windowed.append(session_id)
+            return ""
+
+        return recognise
+
+    class _Lane:
+        def __init__(self, *args, **kwargs) -> None:
+            streamed.append("opened")
+
+        async def feed(self, session_id: str, pcm: bytes) -> None:
+            streamed.append(session_id)
+
+    monkeypatch.setattr(composition, "deepgram_live_recogniser", recogniser)
+    monkeypatch.setattr(composition, "FluxUtterances", _Lane)
+
+    store = _store(live_model=LiveSpeechModel.NOVA_3)
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "dg-key")
+    client = TestClient(build_app(Backend(), settings_store=store))
+
+    client.post("/api/sessions/meeting-1/recording")
+    client.post(
+        "/api/sessions/meeting-1/audio-chunk",
+        json={
+            "sequence": 0,
+            "pcm": base64.b64encode(b"\x00\x01" * (WINDOW_BYTES // 2)).decode(),
+        },
+    )
+
+    assert windowed == ["meeting-1"]
+    assert streamed == []

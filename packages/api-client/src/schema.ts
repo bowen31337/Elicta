@@ -1783,7 +1783,7 @@ export interface components {
             record_vendors?: components["schemas"]["SpeechVendor"][];
             /**
              * @description The recogniser the live path runs on. Chosen separately from the record path's engines for the reason this class exists: the live path is bought on latency, the record path on divergence. Only Nova-3 accepts keyterms, so the engagement vocabulary stops reaching the transcriber on anything else — the operator-facing control says so rather than leaving the setting above it quietly inert.
-             * @default nova-3
+             * @default flux-general-en
              */
             live_model: components["schemas"]["LiveSpeechModel"];
             /**
@@ -2553,7 +2553,7 @@ export interface components {
          *     possible moment.
          * @enum {string}
          */
-        LiveSpeechModel: "nova-3" | "nova-2" | "enhanced" | "whisper-large-v3-turbo" | "whisper-medium" | "whisper-small" | "parakeet-tdt-0.6b-v2";
+        LiveSpeechModel: "flux-general-en" | "flux-general-multi" | "nova-3" | "nova-2" | "enhanced" | "whisper-large-v3-turbo" | "whisper-medium" | "whisper-small" | "parakeet-tdt-0.6b-v2";
         /**
          * LlmProvider
          * @description Where Claude calls are routed.

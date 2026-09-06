@@ -284,8 +284,35 @@ class LiveSpeechModel(str, Enum):
     possible moment.
     """
 
-    #: The default, and the only one the engagement vocabulary reaches:
-    #: `keyterm` is a Nova-3 parameter.
+    # --- streamed, endpointed on turns ---------------------------------
+    #
+    # The default, and the only ones here that are not buffered against a
+    # clock. Flux is `/v2/listen`, a socket rather than a request per window,
+    # and it decides where a turn ends from acoustic and semantic cues — so a
+    # sentence arrives once, whole, when the speaker finishes it, instead of
+    # in whatever pieces a fixed window happened to cut it into.
+    #
+    # Chosen as the default on measurement, not on the benchmark: the window
+    # was five to nine seconds of the delay and the model about four per cent
+    # of it. Its published word error rate is worse than Nova-3's; on this
+    # path a whole sentence a second later beats half a sentence eight
+    # seconds later, and the recording is transcribed again afterwards by two
+    # engines that are bought on accuracy.
+
+    #: English. The default.
+    FLUX_GENERAL_EN = "flux-general-en"
+    #: Ten languages, with the detected ones reported per turn — for a room
+    #: that code-switches, which this product expects (FR-2.14).
+    FLUX_GENERAL_MULTI = "flux-general-multi"
+
+    # --- one request per fixed window -----------------------------------
+    #
+    # Kept, and still the more accurate transcript of any single window. What
+    # they cannot do is decide where a sentence ends, so the window does it
+    # with a clock.
+
+    #: The only one the engagement vocabulary reaches: `keyterm` is a Nova-3
+    #: parameter.
     NOVA_3 = "nova-3"
     #: The previous generation. Kept because a deployment whose language or
     #: account is not served by Nova-3 has nowhere else to go.
@@ -331,6 +358,21 @@ LOCAL_LIVE_MODELS = frozenset(
         LiveSpeechModel.PARAKEET_TDT_0_6B_V2,
     }
 )
+
+
+#: The models driven over a socket rather than a request per window. Flux is
+#: `/v2/listen`-only: a Nova model on that endpoint connects and never
+#: produces a turn, so which transport serves which model is a fact, not a
+#: preference, and it is written down once.
+STREAMED_LIVE_MODELS = frozenset(
+    {LiveSpeechModel.FLUX_GENERAL_EN, LiveSpeechModel.FLUX_GENERAL_MULTI}
+)
+
+
+def is_streamed(model: LiveSpeechModel) -> bool:
+    """Whether this model is driven over a socket rather than by the window."""
+
+    return model in STREAMED_LIVE_MODELS
 
 
 def runs_locally(model: LiveSpeechModel) -> bool:
@@ -381,7 +423,7 @@ class ConnectorSettings(BaseModel):
         ),
     )
     live_model: LiveSpeechModel = Field(
-        default=LiveSpeechModel.NOVA_3,
+        default=LiveSpeechModel.FLUX_GENERAL_EN,
         description=(
             "The recogniser the live path runs on. Chosen separately from the "
             "record path's engines for the reason this class exists: the live "

@@ -6,6 +6,7 @@ import { SpeechPool } from './SpeechPool';
 import { ScreenEyebrow } from '../../ui/Mark';
 import {
   AUTH_MODE_SECRET,
+  isStreamed,
   runsLocally,
   takesVocabulary,
   useSettings,
@@ -874,8 +875,12 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
                 })
               }
             >
-              <optgroup label="At the vendor">
-                <option value="nova-3">Deepgram Nova-3 — most accurate</option>
+              <optgroup label="Streamed, ends on turns">
+                <option value="flux-general-en">Deepgram Flux — English, fastest</option>
+                <option value="flux-general-multi">Deepgram Flux — multilingual</option>
+              </optgroup>
+              <optgroup label="At the vendor, one fixed window at a time">
+                <option value="nova-3">Deepgram Nova-3 — most accurate per window</option>
                 <option value="nova-2">Deepgram Nova-2 — previous generation</option>
                 <option value="enhanced">Deepgram Enhanced — cheapest</option>
               </optgroup>
@@ -888,6 +893,22 @@ export function SettingsPanel({ controller }: { controller?: UseSettingsResult }
                 <option value="parakeet-tdt-0.6b-v2">Parakeet 0.6b — English only, fastest</option>
               </optgroup>
             </select>
+            {isStreamed(currentConnectors.live_model) ? (
+              <p className="settings-help">
+                Sentences arrive whole, when the speaker finishes them, instead
+                of cut wherever a four-second clock landed. This is the
+                setting that decides how long you wait for a question — the
+                model itself is a small part of it. Takes effect on the next
+                meeting, because the connection carries the whole of one.
+              </p>
+            ) : (
+              <p className="settings-caution" role="status">
+                This model is asked about one fixed slice of audio at a time,
+                so a sentence spoken across a boundary arrives as two halves
+                and you wait for the slice to fill before anything is
+                recognised.
+              </p>
+            )}
             {runsLocally(currentConnectors.live_model) ? (
               <p className="settings-help">
                 No audio leaves this machine on this setting. Elicta does not

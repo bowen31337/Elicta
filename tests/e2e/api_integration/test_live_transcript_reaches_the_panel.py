@@ -199,3 +199,72 @@ def test_every_line_carries_its_place_in_the_transcript(client: TestClient) -> N
     # The two identical lines are distinguishable, which is the whole point.
     assert heard[0]["text"] == heard[2]["text"]
     assert heard[0]["seq"] != heard[2]["seq"]
+
+
+# --- how quickly a line reaches the panel --------------------------------
+#
+# The stream used to advance only on a quarter-second timer, so every line
+# waited an average of 125ms for a loop that had nothing else to do. That is
+# the cheapest kind of delay there is on the one path whose whole argument is
+# arriving inside the conversational window — and it sat underneath a five
+# second upload chunk, which is why nobody had noticed it.
+
+
+def test_a_new_line_wakes_every_panel_watching_the_meeting(
+    client: TestClient, backend
+) -> None:
+    """The accelerator, asserted directly rather than by timing.
+
+    A test that measured how *fast* a line arrived would be a test about this
+    machine's scheduler. What matters is that the signal is sent, after the
+    line exists, to every connection watching.
+    """
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+    watchers = {asyncio.Event(), asyncio.Event()}
+    backend.live_watchers[meeting_id] = set(watchers)
+
+    client.post(
+        f"/api/meetings/{meeting_id}/live/utterance",
+        json={"text": "We run three fifty a day.", "speaker": "client"},
+    )
+
+    assert all(watcher.is_set() for watcher in watchers)
+    # And the line is already there when they wake: a stream signalled early
+    # finds nothing, clears its event and sleeps, and then waits out the full
+    # timeout for the line it was woken for — slower than not signalling.
+    assert backend.live_transcript[meeting_id][-1]["text"] == "We run three fifty a day."
+
+
+def test_another_meeting_is_not_woken(client: TestClient, backend) -> None:
+    # One panel per meeting is the ordinary case, and waking all of them would
+    # make every meeting's cost grow with every other meeting in the process.
+    import asyncio
+
+    mine = _meeting(client)
+    theirs = _meeting(client)
+    watcher = asyncio.Event()
+    backend.live_watchers[theirs] = {watcher}
+
+    client.post(
+        f"/api/meetings/{mine}/live/utterance",
+        json={"text": "Anything at all.", "speaker": "client"},
+    )
+
+    assert not watcher.is_set()
+
+
+def test_a_panel_that_disconnects_leaves_nothing_behind(
+    client: TestClient, backend
+) -> None:
+    """Left registered, every producer would go on setting an event for a
+    panel that closed hours ago — for the life of the process, once per line,
+    for every meeting anybody ever opened."""
+
+    meeting_id = _meeting(client)
+    _frames(client, meeting_id)
+    _frames(client, meeting_id)
+
+    assert backend.live_watchers.get(meeting_id) in (None, set())

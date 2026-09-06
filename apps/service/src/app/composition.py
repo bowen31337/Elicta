@@ -210,6 +210,7 @@ from app.modules.settings.models import (
     ServiceSettings,
     SettingsUpdateRequest,
     SpeechVendor,
+    is_streamed,
     runs_locally,
 )
 from app.modules.settings.probes import probe_for_vendor
@@ -231,7 +232,7 @@ from app.modules.settings.speech_credentials import SpeechCredentialPool
 from app.modules.settings.speech_resolution import resolve_speech_key
 from app.modules.settings.store import InMemorySettingsStore, SettingsStore
 from app.modules.trigger.gate import evaluate as evaluate_utterance
-from app.modules.trigger.listener import LiveUtterances
+from app.modules.trigger.listener import LiveUtterances, window_bytes_from_env
 from app.modules.trigger.models import (
     FollowOnQuestion,
     ParkedThread,
@@ -261,6 +262,7 @@ from app.orchestration.compiler import (
     submit_engagement_compile,
 )
 from app.orchestration.debrief import DebriefSinks, run_debrief_pipeline
+from app.orchestration.deepgram_flux import FluxUtterances
 from app.orchestration.engines import (
     UNCONFIGURED_MARKER,
     CompilerEngines,
@@ -569,6 +571,20 @@ class Backend:
     #: enrolled — and keeping it would leave two transcripts of one meeting
     #: disagreeing, with nothing to say which was authoritative.
     live_transcript: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    #: One event per open panel connection, per meeting, set the moment
+    #: something is produced for it.
+    #:
+    #: An **accelerator, never a correctness requirement**: every stream also
+    #: wakes on its own timeout, so a wake-up that is missed costs a quarter of
+    #: a second and nothing else. That is deliberate — a stream that only
+    #: advanced when signalled would go silent for the rest of a meeting the
+    #: first time somebody added a producer and forgot to signal it, which is
+    #: the sort of thing nobody notices until a client is talking.
+    #:
+    #: A set rather than one event per meeting, because two panels can watch
+    #: one meeting and a single shared event would let whichever consumed it
+    #: first clear it out from under the other.
+    live_watchers: dict[str, set[asyncio.Event]] = field(default_factory=dict)
     #: When each meeting last had a nudge surfaced (FR-5.8).
     last_nudge_at: dict[str, datetime] = field(default_factory=dict)
     #: Which bank candidates a meeting has already used, so the same question
@@ -1021,6 +1037,18 @@ def _section_of_nudge(backend: Backend, engagement_id: str, nudge: Any) -> str |
         if getattr(candidate, "id", None) == candidate_id:
             return getattr(candidate, "template_section", None) or None
     return None
+
+
+def _wake_watchers(backend: Backend, meeting_id: str) -> None:
+    """Tell every panel watching this meeting that there is something new.
+
+    Called after the thing exists, never before: a stream woken early finds
+    nothing, clears its event and goes back to sleep, and the item it was woken
+    for then waits out the full timeout — slower than not signalling at all.
+    """
+
+    for event in backend.live_watchers.get(meeting_id, ()):
+        event.set()
 
 
 def _end_live_sessions_of(backend: Backend, meeting_id: str) -> None:
@@ -2460,6 +2488,7 @@ def _include_operational_routers(
                 else nudge
                 for nudge in held
             ]
+            _wake_watchers(backend, meeting_id)
         return recorded
 
     app.include_router(build_nudge_disposition_router(record_disposition))
@@ -2738,6 +2767,25 @@ def _include_operational_routers(
         (architecture §10, FR-6.8).
         """
 
+        # Registered before the first frame and removed in the `finally`
+        # below, so a panel that disconnects mid-meeting does not leave an
+        # event behind for every producer to set for the rest of the process.
+        watcher = asyncio.Event()
+        backend.live_watchers.setdefault(meeting_id, set()).add(watcher)
+        try:
+            async for frame in _session_events(meeting_id, watcher):
+                yield frame
+        finally:
+            watching = backend.live_watchers.get(meeting_id)
+            if watching is not None:
+                watching.discard(watcher)
+                if not watching:
+                    del backend.live_watchers[meeting_id]
+
+    async def _session_events(meeting_id: str, watcher: asyncio.Event):
+        """The stream itself. Split out only so the registration above has a
+        `finally` that cannot be skipped by an early return."""
+
         last_lane = _lane_status(meeting_id)
         yield "lane", last_lane
 
@@ -2889,7 +2937,19 @@ def _include_operational_routers(
                 yield event
                 continue
             yield None
-            await asyncio.sleep(LIVE_POLL_SECONDS)
+            # Woken by whatever produces the next event, and on a timeout
+            # regardless. The timeout is the *ceiling* on how late a line can
+            # be, not the floor it used to be: at a quarter of a second every
+            # utterance waited an average of 125ms for a loop that had nothing
+            # else to do, on the one path whose whole argument is arriving
+            # inside the conversational window.
+            try:
+                await asyncio.wait_for(watcher.wait(), timeout=LIVE_POLL_SECONDS)
+            except TimeoutError:
+                pass
+            # Cleared after the wait rather than before it, so a signal that
+            # arrived while this loop was busy sending is still seen.
+            watcher.clear()
 
     app.include_router(_live_session_stream.build_session_stream_router(session_events))
 
@@ -2939,6 +2999,10 @@ def _include_operational_routers(
                 "at": datetime.now(UTC),
             },
         ]
+        # After the line exists, never before: a stream woken early finds
+        # nothing, clears its event and sleeps, and the line it was woken for
+        # then waits out the full timeout — slower than not signalling at all.
+        _wake_watchers(backend, meeting_id)
 
         # FR-1.6, and architecture section 3.5: the gate evaluates only
         # utterances the operator did not say. A nudge prompting the operator
@@ -2992,6 +3056,10 @@ def _include_operational_routers(
                 candidate_id=chosen.candidate_id,
             ),
         ]
+
+        # The frame this whole screen exists to deliver, so it is the one that
+        # least deserves to wait out a poll.
+        _wake_watchers(backend, meeting_id)
         backend.last_nudge_at[meeting_id] = now
         if chosen.candidate_id is not None:
             backend.surfaced_candidates[meeting_id] = {*surfaced, chosen.candidate_id}
@@ -3817,7 +3885,18 @@ def _include_operational_routers(
     live_utterances = (
         None
         if recognise is None
-        else LiveUtterances(recognise, _observe_text, identify=_identify_speaker)
+        else _live_lane_for(
+            settings_store,
+            _observe_text,
+            _identify_speaker,
+            recognise,
+            # An injected recogniser is an explicit instruction and outranks
+            # the setting. Every test that drives this lane supplies one, and
+            # so does a deployment substituting its own engine; a streaming
+            # client chosen over the top of it would ignore the seam and reach
+            # a vendor the caller had deliberately replaced.
+            injected=live_recogniser is not None,
+        )
     )
 
     async def feed_live_lane(session_id: str, pcm: bytes) -> None:
@@ -3895,6 +3974,57 @@ def _include_operational_routers(
 # the last stage that needs it finishes, no earlier (it would break the stage
 # that hasn't run) and no later (it widens the breach radius for no benefit).
 # --------------------------------------------------------------------------
+
+
+def _live_lane_for(
+    settings_store: Any,
+    observe: Any,
+    identify: Any,
+    recognise: Any,
+    *,
+    injected: bool = False,
+) -> Any:
+    """Which live lane serves: a socket, or a request per fixed window.
+
+    **The model decides the transport, and it is not a preference.** Flux is
+    `/v2/listen` only — a Nova model on that endpoint connects and never
+    produces a turn, and a Flux model on the batch endpoint is refused — so
+    picking one picks the other, and the mapping lives in
+    `settings.models.is_streamed` rather than being inferred from a name.
+
+    Chosen once, here, rather than per chunk. That is the one thing on this
+    path that cannot be read live: a socket carries a meeting, so changing the
+    model mid-recording would mean tearing down a stream and losing whatever
+    was said across the gap. It takes effect on the next meeting, and the
+    Settings screen says so.
+
+    `injected` outranks the setting, and has to. A caller that supplied its own
+    recogniser has replaced the vendor deliberately — every test that drives
+    this lane does, and so does a deployment running its own engine — and a
+    streaming client chosen over the top of it would quietly reach Deepgram
+    instead.
+    """
+
+    if (
+        not injected
+        and settings_store is not None
+        and is_streamed(settings_store.read().connectors.live_model)
+    ):
+        return FluxUtterances(
+            settings_store,
+            observe,
+            identify=identify,
+            model=settings_store.read().connectors.live_model.value,
+        )
+    return LiveUtterances(
+        recognise,
+        observe,
+        identify=identify,
+        # Read here rather than taken as the class default, so the window is
+        # tunable on a deployment without a rebuild — the right value is a
+        # judgement about a room, not a constant.
+        window_bytes=window_bytes_from_env(),
+    )
 
 
 def _install_audio_lifecycle(backend: Backend) -> AudioLifecycle:

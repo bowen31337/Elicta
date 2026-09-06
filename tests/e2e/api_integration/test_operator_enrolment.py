@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.composition import Backend, build_app
+from app.modules.trigger.listener import BYTES_PER_SECOND, WINDOW_BYTES
 from app.modules.voiceprint.embedding import SAMPLE_RATE
 
 # Two vocal tracts far enough apart to be different people. Synthesised
@@ -217,12 +218,20 @@ def _nudges_from_one_window(
         f"/api/sessions/{meeting_id}/audio-chunk",
         json={
             "sequence": 0,
-            "pcm": base64.b64encode(speech(voice, f0=126.0, seconds=4.0)).decode("ascii"),
+            # Exactly one window, derived rather than written as a number.
+            # Four seconds was one window when the window was four seconds;
+            # against a one-second window it is four, and this file counts
+            # nudges — so a hardcoded duration silently changes what is being
+            # measured every time the window is retuned.
+            "pcm": base64.b64encode(
+                speech(voice, f0=126.0, seconds=WINDOW_BYTES / BYTES_PER_SECOND)
+            ).decode("ascii"),
         },
     )
     assert posted.status_code in (200, 201, 202), posted.text
     # The lane ran at all. Without this every count below could be zero for
     # reasons that have nothing to do with who was speaking.
+    #
     assert heard == [meeting_id]
 
     # `live_events` was one of two parallel copies of this; the record it

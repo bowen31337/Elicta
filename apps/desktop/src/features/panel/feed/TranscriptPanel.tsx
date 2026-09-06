@@ -85,6 +85,19 @@ export interface TranscriptPanelProps {
    * The remedy is something the operator can actually do, so it says what.
    */
   readonly unattributedBecause?: string | null;
+  /**
+   * Why this recording is producing nothing, from the capture store, or
+   * `null` when it is producing normally.
+   *
+   * "Nothing heard yet." is a reassuring sentence: it asserts that listening
+   * is working and that nobody has spoken. When the store knows the audio is
+   * not reaching the service — the event channel refused, no way to read the
+   * samples, a microphone delivering silence — that assertion is false, and
+   * it is false on the region the operator is actually staring at while the
+   * reason sits in smaller type below. The empty state defers to the reason
+   * rather than talking over it.
+   */
+  readonly notHeardBecause?: string | null;
 }
 
 const DEFAULT_LIMIT = 120;
@@ -203,6 +216,7 @@ export function TranscriptPanel({
   model = null,
   blockedBecause = null,
   unattributedBecause = null,
+  notHeardBecause = null,
 }: TranscriptPanelProps) {
   const state = scriptState({ transcribing, receivingAudio });
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -276,7 +290,18 @@ export function TranscriptPanel({
       >
         {shown.length === 0 ? (
           state === 'live' ? (
-            <p className="script-idle t-subhead">Nothing heard yet.</p>
+            notHeardBecause === null ? (
+              <p className="script-idle t-subhead">Nothing heard yet.</p>
+            ) : (
+              // Not "Nothing heard yet." over a recording that will never
+              // hear anything. The same sentence the recording bar carries,
+              // put where the operator is looking — an empty transcript is
+              // the thing they are staring at, and the bar is smaller and
+              // below it.
+              <p className="script-idle script-idle--stuck t-subhead" role="alert">
+                {notHeardBecause}
+              </p>
+            )
           ) : state === 'idle' ? (
             // Not "nothing heard yet", which implies something is
             // listening. It named the Capture screen for as long as this

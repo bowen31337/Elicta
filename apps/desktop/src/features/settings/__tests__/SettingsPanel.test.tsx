@@ -980,14 +980,38 @@ describe('choosing what listens during the meeting', () => {
       },
     } as Partial<UseSettingsResult>);
 
-  it('offers the cloud and local models in separate groups', async () => {
+  it('groups the models by how they are driven, not just by where they run', async () => {
+    // The grouping is the explanation. Streamed versus windowed is the choice
+    // that decides how long an operator waits — the model itself was measured
+    // at about four per cent of the delay — and it is invisible from the
+    // model names alone.
     render(<SettingsPanel controller={withModel('nova-3')} />);
     await openTab('Speech');
 
     const select = screen.getByLabelText('Live transcription model');
 
-    expect(within(select).getByRole('group', { name: 'At the vendor' })).toBeInTheDocument();
+    expect(
+      within(select).getByRole('group', { name: 'Streamed, ends on turns' }),
+    ).toBeInTheDocument();
+    expect(
+      within(select).getByRole('group', { name: /one fixed window at a time/i }),
+    ).toBeInTheDocument();
     expect(within(select).getByRole('group', { name: 'On this machine' })).toBeInTheDocument();
+  });
+
+  it('warns that a windowed model waits for its slice to fill', async () => {
+    render(<SettingsPanel controller={withModel('nova-3')} />);
+    await openTab('Speech');
+
+    expect(screen.getByText(/arrives as two halves/i)).toBeInTheDocument();
+  });
+
+  it('says a streamed model ends sentences where the speaker does', async () => {
+    render(<SettingsPanel controller={withModel('flux-general-en')} />);
+    await openTab('Speech');
+
+    expect(screen.getByText(/sentences arrive whole/i)).toBeInTheDocument();
+    expect(screen.queryByText(/arrives as two halves/i)).toBeNull();
   });
 
   it('says the vocabulary is not sent on a model that cannot take it', async () => {

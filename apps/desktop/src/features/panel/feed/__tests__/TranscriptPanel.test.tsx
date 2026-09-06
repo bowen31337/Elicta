@@ -266,3 +266,50 @@ describe('why every line reads Unattributed', () => {
     expect(container.querySelector('.script-note')).toBeNull();
   });
 });
+
+describe('an empty transcript that will stay empty', () => {
+  /**
+   * "Nothing heard yet." is a reassuring sentence. It asserts that listening
+   * works and that nobody has spoken — and an operator reads it, believes the
+   * room is simply quiet, and waits. When the capture store already knows the
+   * audio is not reaching the service, that assertion is false on the one
+   * region they are actually staring at.
+   */
+  it('gives the reason instead of saying nothing has been heard yet', () => {
+    render(
+      <TranscriptPanel
+        transcript={[]}
+        transcribing
+        receivingAudio
+        notHeardBecause="The microphone is open but no audio is being read from it, so nothing is being uploaded."
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/no audio is being read/i);
+    expect(screen.queryByText('Nothing heard yet.')).toBeNull();
+  });
+
+  it('still says nothing heard yet when the recording is fine', () => {
+    // Most of a meeting is a quiet room, and a warning on every pause in the
+    // conversation is a warning nobody reads.
+    render(<TranscriptPanel transcript={[]} transcribing receivingAudio />);
+
+    expect(screen.getByText('Nothing heard yet.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says nothing of the sort once there are lines to show', () => {
+    // The empty state is gone; the recording bar carries the note from here,
+    // which is what covers a recording that breaks mid-meeting.
+    const { container } = render(
+      <TranscriptPanel
+        transcript={[said(0, 'Three fifty a day.', 0)]}
+        transcribing
+        receivingAudio
+        notHeardBecause="The microphone is open but no audio is being read from it."
+      />,
+    );
+
+    expect(container.querySelector('.script-idle--stuck')).toBeNull();
+  });
+});

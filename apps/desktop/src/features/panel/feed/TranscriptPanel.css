@@ -61,6 +61,11 @@
 }
 
 .script-idle, .script-notice { margin: 0; }
+
+/* A recording that is producing nothing, said where the empty transcript is
+   read. Orange rather than red: the audio is still being captured and is not
+   lost — what fails is the transcript — and the sentence carries the remedy. */
+.script-idle--stuck { color: var(--orange-ink); text-wrap: pretty; }
 .script-idle { color: var(--label-supporting); }
 /* A state of the tool, not a fault in the meeting — marked, but it does not
    shout. `--orange-ink` because this is text: the vivid system orange is for
