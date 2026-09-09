@@ -60,6 +60,14 @@
   text-wrap: pretty;
 }
 
+/* A line the speaker has not finished. Supporting ink rather than a badge or
+   a spinner: it settles within about a second, and anything that announced
+   itself would flash on every sentence of an hour-long meeting.
+
+   Not `opacity`, which multiplies whatever ink the text already has and drops
+   it under AA — the same trap the receded nudges hit. */
+.script-line--saying .script-said { color: var(--label-supporting); }
+
 .script-idle, .script-notice { margin: 0; }
 
 /* A recording that is producing nothing, said where the empty transcript is

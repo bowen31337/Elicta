@@ -14,13 +14,17 @@ rather than the end of the transcript.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import time
 
 import pytest
 
 from app.modules.settings.models import LiveSpeechModel, SecretKey
 from app.modules.settings.store import InMemorySettingsStore
 from app.orchestration.deepgram_flux import (
+    EOT_THRESHOLD_ENV,
+    EOT_TIMEOUT_ENV,
     FLUX_MODELS,
     DeepgramUnavailable,
     FluxUtterances,
@@ -156,7 +160,7 @@ def test_a_model_that_is_not_flux_is_refused_at_construction() -> None:
         FluxUtterances(_store(), _observe := _noop, model="nova-3")
 
 
-async def _noop(session_id: str, text: str, speaker: str | None) -> None:
+async def _noop(session_id: str, text: str, speaker: str | None, **kwargs: object) -> None:
     return None
 
 
@@ -167,7 +171,9 @@ async def _noop(session_id: str, text: str, speaker: str | None) -> None:
 async def test_a_finished_turn_reaches_the_panel() -> None:
     heard: list[tuple[str, str, str | None]] = []
 
-    async def observe(session_id: str, text: str, speaker: str | None) -> None:
+    async def observe(
+        session_id: str, text: str, speaker: str | None, **kwargs: object
+    ) -> None:
         heard.append((session_id, text, speaker))
 
     socket = _Socket([_turn("Three hundred and fifty a day.")])
@@ -319,3 +325,275 @@ def test_the_flux_model_set_matches_the_settings_enum() -> None:
 
     assert {model.value for model in STREAMED_LIVE_MODELS} == set(FLUX_MODELS)
     assert LiveSpeechModel.FLUX_GENERAL_EN.value in FLUX_MODELS
+
+
+def test_the_socket_library_is_imported_where_a_freeze_can_see_it() -> None:
+    """The shipped app was deaf for a build because of a lazy import.
+
+    PyInstaller finds a frozen build's modules by *reading the source*, so an
+    import inside a function is an import it does not see and a module it does
+    not bundle. `websockets` was imported inside `_open`, the desktop bundle
+    went out without it, and every attempt to open a socket raised
+    `ModuleNotFoundError` inside the chunk handler — which swallows failures
+    to protect the recording. Audio arrived, the lane reported itself ready,
+    and not one line was ever transcribed.
+
+    Asserted against the source text rather than by importing, because
+    importing proves only that *this* interpreter can find it, which was never
+    in doubt. What has to be true is that the import is written where a static
+    reader will find it.
+
+    This cannot see a freeze. `scripts/build-service-sidecar.sh` checks the
+    frozen binary itself, which is the other half.
+    """
+
+    import pathlib
+
+    source = pathlib.Path(__file__).with_name("deepgram_flux.py").read_text()
+    body = source[: source.index("def flux_listen_url")]
+
+    assert "from websockets" in body, "the socket library must be imported at module scope"
+
+
+def test_no_import_hides_inside_a_function_in_this_module() -> None:
+    """The general form of the rule, so the next one is caught too."""
+
+    import pathlib
+    import re
+
+    source = pathlib.Path(__file__).with_name("deepgram_flux.py").read_text()
+    hidden = [
+        line.strip()
+        for line in source.splitlines()
+        # Indented, so inside something; and an import, so invisible to a
+        # static reader walking the module's top level.
+        if re.match(r"\s+(import |from \S+ import )", line)
+    ]
+
+    assert hidden == [], f"these imports cannot be seen by a freeze: {hidden}"
+
+
+@pytest.mark.asyncio
+async def test_a_stream_whose_reader_ends_is_reopened_on_the_next_chunk() -> None:
+    """The meeting transcribed two turns and then went silent for good.
+
+    A socket the vendor closes ends the reader task. Left in place, `feed`
+    goes on sending into it perfectly happily and nobody reads a word back —
+    so audio kept arriving at the service, every part of the chain reported
+    success, and the transcript simply stopped. There is no error to see
+    because nothing failed; the stream was merely deaf.
+    """
+
+    class _EndsAfterOne(_Socket):
+        """A socket that delivers one turn and then closes, as a vendor does."""
+
+        async def __anext__(self) -> object:
+            if self._messages:
+                return self._messages.pop(0)
+            self._delivered.set()
+            raise StopAsyncIteration
+
+    heard: list[str] = []
+
+    async def observe(
+        session_id: str, text: str, speaker: str | None, **kwargs: object
+    ) -> None:
+        heard.append(text)
+
+    opened: list[_Socket] = []
+
+    async def connect(url: str, **kwargs: object):
+        opened.append(_EndsAfterOne([_turn(f"turn {len(opened) + 1}")]))
+        return opened[-1]
+
+    lane = FluxUtterances(_store(), observe, connect=connect)
+
+    await lane.feed("meeting-1", WINDOW)
+    await opened[0].drained()
+    await asyncio.sleep(0)
+
+    # The next chunk finds no stream and opens a fresh one, rather than
+    # sending into the dead one for the rest of the meeting.
+    await lane.feed("meeting-1", WINDOW)
+    await opened[1].drained()
+    await asyncio.sleep(0)
+
+    assert len(opened) == 2
+    assert heard == ["turn 1", "turn 2"]
+    await lane.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closing_a_meeting_is_not_mistaken_for_a_dead_reader() -> None:
+    """`close()` cancels the reader, which runs the same teardown. Without an
+    identity check the two race, and the loser drops a stream a later chunk
+    had legitimately opened."""
+
+    socket = _Socket()
+    connect, _ = _connector(socket)
+    lane = FluxUtterances(_store(), _noop, connect=connect)
+    await lane.feed("meeting-1", WINDOW)
+
+    await lane.close("meeting-1")
+    await asyncio.sleep(0)
+
+    assert socket.closed is True
+    assert lane._streams == {}
+
+
+# --- when a turn ends, which is the whole of the perceived delay ---------
+
+
+def test_a_turn_is_allowed_to_finish_before_it_is_called_finished() -> None:
+    """These were tuned down for speed and it was the wrong lever.
+
+    At `eot_threshold=0.6` and `eot_timeout_ms=1500` a meeting came back as a
+    column of one- and two-word lines — "two", "All", "Car", "Does", "So" —
+    because almost every pause for breath was read as somebody finishing. The
+    vendor's own words for the lower range are "faster responses, more false
+    positives", and a false positive here is a turn ending mid-sentence. It
+    costs accuracy twice: each fragment is then recognised with no context
+    from the words before it.
+
+    The speed came from interim turns instead, which put words on screen as
+    they are spoken — so there is nothing left to buy by ending a turn early,
+    and only coherence to lose.
+    """
+
+    url = flux_listen_url("flux-general-en")
+
+    assert "eot_threshold=0.7" in url
+    assert "eot_timeout_ms=5000" in url
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("0.5", "eot_threshold=0.5"),
+        ("0.9", "eot_threshold=0.9"),
+        # Below the vendor's floor and above its ceiling: clamped, never sent.
+        ("0.1", "eot_threshold=0.5"),
+        ("2", "eot_threshold=1"),
+        ("nonsense", "eot_threshold=0.7"),
+    ],
+)
+def test_the_threshold_is_tunable_and_can_never_be_out_of_range(
+    monkeypatch: pytest.MonkeyPatch, configured: str, expected: str
+) -> None:
+    """Clamped rather than passed through.
+
+    An out-of-range value is a 400 on the socket, which this lane reports as
+    the vendor being unreachable and an operator reads as a broken
+    credential — sending them to replace a key that was fine. A mistyped knob
+    should cost a slightly wrong turn boundary, never a meeting.
+    """
+
+    monkeypatch.setenv(EOT_THRESHOLD_ENV, configured)
+
+    assert expected in flux_listen_url("flux-general-en")
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("500", 500), ("60000", 60_000), ("10", 500), ("999999", 60_000), ("", 5000)],
+)
+def test_the_silence_timeout_is_tunable_within_the_vendor_range(
+    monkeypatch: pytest.MonkeyPatch, configured: str, expected: int
+) -> None:
+    monkeypatch.setenv(EOT_TIMEOUT_ENV, configured)
+
+    assert f"eot_timeout_ms={expected}" in flux_listen_url("flux-general-en")
+
+
+# --- a failure that must not make itself permanent ----------------------
+
+
+@pytest.mark.asyncio
+async def test_a_failed_open_is_not_retried_by_the_very_next_chunk() -> None:
+    """One refusal became a flood, and the flood is what kept it refused.
+
+    A chunk arrives every hundred milliseconds and the socket is opened on
+    demand, so a single failure — a throttle, a network blink, a key rotated
+    mid-meeting — meant ten connection attempts a second at the vendor for the
+    rest of the meeting. That is the shape that turns a momentary failure into
+    a permanent one.
+    """
+
+    attempts = 0
+
+    async def refuses(url: str, **kwargs: object):
+        nonlocal attempts
+        attempts += 1
+        raise ConnectionError("refused")
+
+    lane = FluxUtterances(_store(), _noop, connect=refuses)
+
+    for _ in range(20):  # two seconds of chunks
+        with contextlib.suppress(Exception):
+            await lane.feed("meeting-1", WINDOW)
+
+    assert attempts == 1, f"the vendor was asked {attempts} times for one failure"
+
+
+@pytest.mark.asyncio
+async def test_the_wait_grows_with_each_consecutive_failure() -> None:
+    """A vendor that is down stays down for minutes, not milliseconds."""
+
+    async def refuses(url: str, **kwargs: object):
+        raise ConnectionError("refused")
+
+    lane = FluxUtterances(_store(), _noop, connect=refuses)
+    waits = []
+    for _ in range(4):
+        lane._retry_after.clear()  # as if the wait had elapsed
+        with contextlib.suppress(Exception):
+            await lane.feed("meeting-1", WINDOW)
+        waits.append(round(lane._retry_after["meeting-1"] - time.monotonic()))
+
+    assert waits == sorted(waits) and waits[0] < waits[-1], waits
+    assert waits[-1] <= lane.BACKOFF_CEILING
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_recovers_once_the_vendor_does() -> None:
+    """Backing off must not become giving up: the operator is still talking,
+    and nothing else will reopen this."""
+
+    failing = True
+
+    async def sometimes(url: str, **kwargs: object):
+        if failing:
+            raise ConnectionError("refused")
+        return _Socket()
+
+    lane = FluxUtterances(_store(), _noop, connect=sometimes)
+    with contextlib.suppress(Exception):
+        await lane.feed("meeting-1", WINDOW)
+    assert lane._streams == {}
+
+    failing = False
+    lane._retry_after.clear()  # as if the wait had elapsed
+    await lane.feed("meeting-1", WINDOW)
+
+    assert "meeting-1" in lane._streams
+    # And the count is forgotten, so the next hiccup starts from the floor
+    # rather than from half a minute.
+    assert "meeting-1" not in lane._failures
+    await lane.aclose()
+
+
+@pytest.mark.asyncio
+async def test_audio_arriving_during_a_backoff_is_dropped_not_queued() -> None:
+    """There is nowhere for it to go, and holding it grows without bound in
+    the one process that must not. The recording is untouched — it is banked
+    before this lane sees a byte."""
+
+    async def refuses(url: str, **kwargs: object):
+        raise ConnectionError("refused")
+
+    lane = FluxUtterances(_store(), _noop, connect=refuses)
+    with contextlib.suppress(Exception):
+        await lane.feed("meeting-1", WINDOW)
+
+    # Returns quietly rather than raising once the backoff is in force.
+    await lane.feed("meeting-1", WINDOW)

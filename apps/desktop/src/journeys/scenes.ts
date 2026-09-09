@@ -1,3 +1,4 @@
+import type { SessionStreamUtterance } from '../features/panel/coverage/types';
 import type { PanelState } from '../features/panel/route';
 
 /**
@@ -22,8 +23,8 @@ const NOW = 1_755_600_000_000;
  * for: before it, a panel with nothing to ask looked exactly like a microphone
  * that had stopped.
  */
-const HEARD = [
-  { seq: 0, text: 'So how are arrivals booked in today?', speaker: 'operator', at: NOW - 62_000 },
+const HEARD: SessionStreamUtterance[] = [
+  { seq: 0, text: 'So how are arrivals booked in today?', speaker: 'operator', at: NOW - 62_000, final: true },
   {
     seq: 1,
     // `other`, not `client`. Live verification answers exactly three things —
@@ -34,10 +35,11 @@ const HEARD = [
     text: 'The haulier phones the gate office and someone writes it on the whiteboard.',
     speaker: 'other',
     at: NOW - 54_000,
+    final: true,
   },
   // Nobody enrolled is the ordinary deployment, so an unattributed line
   // belongs in the picture too.
-  { seq: 2, text: 'And the dashboard just has to be fast.', speaker: null, at: NOW - 4_000 },
+  { seq: 2, text: 'And the dashboard just has to be fast.', speaker: null, at: NOW - 4_000, final: true },
 ];
 
 /**
@@ -180,6 +182,7 @@ export const CODE_SWITCHED: PanelState = {
       text: '我们一年大概三百五十万单。',
       speaker: 'other',
       at: NOW - 2_000,
+      final: true,
     },
   ],
   bankQuestions: BANK,

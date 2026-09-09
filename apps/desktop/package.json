@@ -1,7 +1,7 @@
 {
   "name": "elicta-desktop",
   "private": true,
-  "version": "0.1.29",
+  "version": "0.1.37",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build",

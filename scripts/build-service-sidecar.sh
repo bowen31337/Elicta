@@ -187,6 +187,28 @@ for _ in $(seq 1 60); do
   if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/api/engagements"; then
     echo "==> the frozen service answered"
     kill "$SERVICE_PID" 2>/dev/null || true
+
+    # **Answering is the check**, and only because every import is now at the
+    # top of its module.
+    #
+    # PyInstaller finds modules by reading the source, so an import written
+    # inside a function is one it never sees and never bundles. `websockets`
+    # was imported inside `FluxUtterances._open`; the desktop app shipped
+    # without it, every socket raised `ModuleNotFoundError` inside the chunk
+    # handler — which swallows failures to protect the recording — and a
+    # meeting recorded perfectly while transcribing nothing at all. Starting
+    # up proved nothing, because nothing on the way up touched the import.
+    #
+    # Moved to module scope, it is reached by `composition`'s own import chain
+    # before the first request, so a missing module is a service that does not
+    # start and this loop never sees an answer. That is the guarantee, and it
+    # is why the import's *position* is enforced by a test
+    # (`test_deepgram_flux.py`) rather than left to taste.
+    #
+    # Grepping the archive was tried here and is not possible: a onefile build
+    # compresses its table of contents, so no module name appears in `strings`
+    # whether it is bundled or not — the check reported every module missing,
+    # including the ones plainly present.
     exit 0
   fi
 done

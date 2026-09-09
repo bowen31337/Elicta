@@ -77,6 +77,20 @@ export interface SessionStreamUtterance {
   readonly speaker: string | null;
   /** Milliseconds since the epoch, matching a nudge's `createdAt`. */
   readonly at: number | null;
+  /**
+   * Whether the speaker has finished this line.
+   *
+   * A streaming recogniser sends the words so far while somebody is still
+   * talking, and the same `seq` arrives again, longer, until they stop. That
+   * is what lets the transcript keep up with the room instead of printing
+   * each sentence whole a second after it ended.
+   *
+   * Marked rather than merged silently, because the difference matters on
+   * screen: an unfinished line may still change, and showing it as settled
+   * would be quoting somebody on words they have not said yet. Nothing
+   * downstream reasons about one — the gate only ever sees finished lines.
+   */
+  readonly final: boolean;
 }
 
 /**

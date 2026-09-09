@@ -26,7 +26,7 @@ function nudge(id: string, over: Partial<Nudge> = {}): Nudge {
 }
 
 function said(seq: number, text: string, at: number | null) {
-  return { seq, text, speaker: null, at };
+  return { seq, text, speaker: null, at, final: true };
 }
 
 describe('one question is prominent at a time', () => {

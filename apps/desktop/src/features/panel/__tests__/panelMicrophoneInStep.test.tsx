@@ -349,7 +349,7 @@ describe('what the store knows reaches the screen', () => {
     await screen.findByText('Listening…');
     source.emit(
       'utterance',
-      JSON.stringify({ seq: 0, text: 'Three fifty a day.', speaker: null, at: 1 }),
+      JSON.stringify({ seq: 0, text: 'Three fifty a day.', speaker: null, at: 1 , final: true}),
     );
     expect(await screen.findByText('Three fifty a day.')).toBeInTheDocument();
 
@@ -373,5 +373,44 @@ describe('what the store knows reaches the screen', () => {
     await waitFor(() => expect(store.refreshes()).toBeGreaterThan(0));
 
     expect(screen.queryByText(/delivering complete silence/i)).toBeNull();
+  });
+});
+
+describe('a sentence arriving as it is spoken', () => {
+  /**
+   * The whole chain, from the stream frame to the rendered line.
+   *
+   * The service held `"Hey. What's up?"` and the panel showed `"Hey, what's"`
+   * for the rest of the meeting. Every part was working; the screen kept the
+   * first version of the line and threw away every later one. Asserted here
+   * rather than only on the filing rule, because the rule was easy to state
+   * correctly and the bug was that nothing joined it to the screen.
+   */
+  it('grows on screen and then settles, as one line', async () => {
+    const source = laneSaying(true);
+    render(
+      <OperatorPanel
+        initial={MEETING}
+        createSource={() => source as never}
+        captureStore={fakeStore()}
+      />,
+    );
+    await screen.findByText('Listening…');
+
+    const say = (text: string, final: boolean) =>
+      source.emit('utterance', JSON.stringify({ seq: 0, text, speaker: null, at: 1, final }));
+
+    say('Hey', false);
+    expect(await screen.findByText('Hey')).toBeInTheDocument();
+
+    say("Hey, what's", false);
+    expect(await screen.findByText("Hey, what's")).toBeInTheDocument();
+
+    say("Hey. What's up?", true);
+    expect(await screen.findByText("Hey. What's up?")).toBeInTheDocument();
+
+    // One line, not three: the finished sentence took the fragment's place.
+    expect(screen.queryByText('Hey')).toBeNull();
+    expect(screen.queryByText("Hey, what's")).toBeNull();
   });
 });

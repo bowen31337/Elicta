@@ -111,6 +111,8 @@ const DEFAULT_LIMIT = 120;
  * model that is listening, and printing it is more use than printing nothing.
  */
 const MODEL_LABEL: Record<string, string> = {
+  'flux-general-en': 'Flux',
+  'flux-general-multi': 'Flux multilingual',
   'nova-3': 'Nova-3',
   'nova-2': 'Nova-2',
   enhanced: 'Enhanced',
@@ -316,7 +318,10 @@ export function TranscriptPanel({
         ) : (
           <ol className="script-lines">
             {shown.map((entry) => (
-              <li key={entry.seq} className="script-line">
+              <li
+                key={entry.seq}
+                className={entry.final ? 'script-line' : 'script-line script-line--saying'}
+              >
                 <span className="script-at t-caption" aria-hidden="true">
                   {elapsedStamp(entry.at, since)}
                 </span>
@@ -327,8 +332,18 @@ export function TranscriptPanel({
                       : 'script-who t-caption'
                   }
                 >
-                  {speakerLabel(entry.speaker)}
+                  {/* A line still being spoken has not been attributed yet:
+                      verification runs on the finished turn, against the
+                      audio the words came from. Naming a speaker here and
+                      changing it a second later is worse than waiting. */}
+                  {entry.final ? speakerLabel(entry.speaker) : ''}
                 </span>
+                {/* Marked while it is still being said, because the words
+                    can still change — shown as settled, this would be quoting
+                    somebody on what they have not finished saying. The mark
+                    is the ink, not an added label: a per-line badge on a
+                    transcript that is mostly settled lines is noise, and the
+                    state resolves within a second either way. */}
                 <span className="script-said t-subhead">{entry.text}</span>
               </li>
             ))}

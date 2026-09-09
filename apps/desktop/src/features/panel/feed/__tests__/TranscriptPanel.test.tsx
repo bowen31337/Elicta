@@ -4,7 +4,7 @@ import { render, screen, within } from '@testing-library/react';
 import { TranscriptPanel, scriptState } from '../TranscriptPanel';
 
 function said(seq: number, text: string, at: number | null, speaker: string | null = null) {
-  return { seq, text, speaker, at };
+  return { seq, text, speaker, at, final: true };
 }
 
 /**
@@ -148,6 +148,23 @@ describe('which recogniser is listening', () => {
     render(<TranscriptPanel transcript={[]} model="whisper-small" />);
 
     expect(screen.getByText(/whisper small · on this machine/i)).toBeInTheDocument();
+  });
+
+  it('names every model the service can choose', () => {
+    // The fallback prints the wire name, which is a reasonable last resort
+    // and a poor label: `flux-general-en` shipped to a screen for two builds
+    // because the models were added to the enum, the dropdown and the
+    // service, and not to the one map that turns them into English.
+    for (const [wire, shown] of [
+      ['flux-general-en', 'Flux'],
+      ['nova-3', 'Nova-3'],
+      ['whisper-small', 'Whisper small · on this machine'],
+      ['parakeet-tdt-0.6b-v2', 'Parakeet 0.6b · on this machine'],
+    ] as const) {
+      const { unmount } = render(<TranscriptPanel transcript={[]} model={wire} />);
+      expect(screen.getByText(shown)).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('prints a model it has never heard of rather than nothing', () => {
@@ -311,5 +328,59 @@ describe('an empty transcript that will stay empty', () => {
     );
 
     expect(container.querySelector('.script-idle--stuck')).toBeNull();
+  });
+});
+
+describe('a line the speaker has not finished', () => {
+  /**
+   * A streaming recogniser sends the words so far while somebody is still
+   * talking, and the same `seq` arrives again, longer, until they stop. That
+   * is what lets the transcript keep up with the room instead of printing
+   * each sentence whole a second after it ended.
+   *
+   * The distinction has to survive onto the screen. Shown as settled, an
+   * interim line quotes somebody on words they have not said yet.
+   */
+  const saying = (seq: number, text: string, at: number) =>
+    ({ seq, text, speaker: null, at, final: false }) as const;
+
+  it('shows the words so far, marked as still being said', () => {
+    const { container } = render(
+      <TranscriptPanel transcript={[saying(0, 'So how are arrivals', 0)]} transcribing receivingAudio />,
+    );
+
+    expect(screen.getByText('So how are arrivals')).toBeInTheDocument();
+    expect(container.querySelector('.script-line--saying')).not.toBeNull();
+  });
+
+  it('does not attribute it to anyone yet', () => {
+    // Verification runs on the finished turn, against the audio the words
+    // came from. Naming a speaker here and changing it a second later is
+    // worse than waiting.
+    render(
+      <TranscriptPanel transcript={[saying(0, 'So how are arrivals', 0)]} transcribing receivingAudio />,
+    );
+
+    expect(screen.queryByText('Unattributed')).toBeNull();
+  });
+
+  it('settles into an ordinary line when the speaker stops', () => {
+    const { container, rerender } = render(
+      <TranscriptPanel transcript={[saying(0, 'So how are', 0)]} transcribing receivingAudio />,
+    );
+    expect(container.querySelector('.script-line--saying')).not.toBeNull();
+
+    // The same `seq`, finished — one line settling, not a second line.
+    rerender(
+      <TranscriptPanel
+        transcript={[said(0, 'So how are arrivals booked in today?', 0)]}
+        transcribing
+        receivingAudio
+      />,
+    );
+
+    expect(container.querySelectorAll('.script-line')).toHaveLength(1);
+    expect(container.querySelector('.script-line--saying')).toBeNull();
+    expect(screen.getByText('So how are arrivals booked in today?')).toBeInTheDocument();
   });
 });

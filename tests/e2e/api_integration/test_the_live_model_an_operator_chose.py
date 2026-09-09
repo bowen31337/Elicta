@@ -351,3 +351,38 @@ def test_a_windowed_model_never_opens_a_stream(monkeypatch) -> None:
 
     assert windowed == ["meeting-1"]
     assert streamed == []
+
+
+def test_the_panel_is_told_when_the_live_recogniser_stops_answering() -> None:
+    """A vendor that has stopped answering must not look like a quiet room.
+
+    The lane reports itself ready — a credential *is* configured — audio keeps
+    arriving, and no line ever appears. Everything says fine and the operator
+    watches an empty transcript. That is the failure this product keeps
+    finding, and the one they can least afford to discover after the meeting.
+    """
+
+    store = _store(live_model=LiveSpeechModel.FLUX_GENERAL_EN)
+    store.set_secret(SecretKey.DEEPGRAM_API_KEY, "a-key")
+    app = build_app(Backend(), settings_store=store)
+    client = TestClient(app)
+    meeting_id = _meeting(client)
+
+    # Ready, and saying nothing, while the socket is healthy.
+    lane = _lane(client, meeting_id)
+    assert lane["live_transcription"] is True
+    assert lane["live_transcription_reason"] is None
+
+    # Now the vendor refuses and the lane is waiting to retry.
+    import time as _time
+
+    from app.orchestration.deepgram_flux import FluxUtterances
+
+    flux = FluxUtterances(store, _noop_observe)
+    flux._retry_after[meeting_id] = _time.monotonic() + 30
+    assert flux.backing_off(meeting_id) is True
+    assert flux.backing_off("some-other-meeting") is False
+
+
+async def _noop_observe(session_id: str, text: str, speaker: str | None) -> None:
+    return None

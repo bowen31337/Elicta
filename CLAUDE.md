@@ -663,6 +663,84 @@ embarrassment gates, plus signing/release workflows.
   `_wake_watchers` signals every open panel the moment a line exists, and the
   timeout only catches a missed signal — the event is an accelerator, never a
   correctness requirement.
+  **`_wake_watchers` must iterate a copy.** The set it walks is added to and
+  removed from by every stream that opens or closes, so a panel disconnecting
+  as a line is produced raises `Set changed size during iteration` — inside
+  `observe_utterance`, inside the chunk handler, which swallows it. The
+  visible symptom is a transcript that simply stops with nothing anywhere
+  saying why: the exact failure the signal was added to make *faster*.- **A stream whose reader ends must be dropped, or it goes deaf in silence.**
+  `FluxUtterances._read` said it left a failed stream "closed" for the next
+  chunk to reopen and **nothing closed it**. When the vendor closed the socket
+  — the ordinary case — the reader task ended, the entry stayed in
+  `_streams`, `feed` went on sending into it happily, and not a word came
+  back. A meeting transcribed two or three turns and then stopped for good,
+  with audio still arriving and every part of the chain reporting success. The
+  `finally` now drops it for *any* end, not only an exception, and checks
+  `stream.reader is asyncio.current_task()` so it cannot race `close()`, which
+  cancels the reader and has already taken the entry.
+- **The delay an operator feels is when Flux decides a turn ended**, not the
+  recognising, which is milliseconds. `eot_timeout_ms` defaults to **5000** at
+  the vendor: whenever confidence does not cross `eot_threshold` the sentence
+  sits unsent until five seconds of silence, and nobody in a meeting stops
+  talking for five seconds. Elicta sends the vendor's **defaults** —
+  `eot_threshold=0.7`, `eot_timeout_ms=5000` — tunable by env and **clamped
+  to the documented ranges** — an out-of-range value is a 400 on the
+  socket, which this lane reports as the vendor being unreachable and an
+  operator reads as a broken credential. They were 0.6 and 1500ms for one build, tuned
+  down for speed, and **that was the wrong lever**: a meeting came back as a
+  column of one- and two-word lines — "two", "All", "Car", "Does", "So" —
+  because almost every pause for breath was read as somebody finishing. The
+  vendor's own words for the lower range are "faster responses, more false
+  positives", and a false positive here is a turn ending mid-sentence; it also
+  costs accuracy twice, since each fragment is then recognised with no context
+  from the words before it. **The speed came from interim turns instead**, so
+  there is nothing left to buy by ending a turn early and only coherence to
+  lose. Measured after restoring them: hesitant speech with 1.8s and 1.6s
+  pauses came back as three whole clauses rather than fragments.
+- **A socket opened on demand needs a backoff, or one refusal becomes
+  permanent.** `FluxUtterances` opens its socket from `feed`, a chunk arrives
+  every 100ms, and a failed open raised into a handler that swallows it — so
+  a single throttle, network blink or rotated key meant **ten connection
+  attempts a second** at the vendor for the rest of the meeting, and the
+  retries are what kept it refused. Now: 2s doubling to 30s, reset on a
+  successful open, audio during the wait **dropped rather than queued**
+  (there is nowhere for it to go, and the recording is banked before this lane
+  sees a byte). And `backing_off()` reaches the panel's lane frame through
+  `_lane_not_answering`, because a recogniser that has stopped answering is
+  otherwise indistinguishable from a quiet room — ready credential, audio
+  arriving, no line ever appearing.
+- **The transcript renders as the room speaks, not a sentence at a time.**
+  Flux narrates a turn as it forms (`Update`) and then confirms it
+  (`EndOfTurn`); reading only the confirmation meant the screen sat blank
+  through every sentence and printed it whole about a second after it ended.
+  `turn_of` returns both, keyed on the vendor's `turn_index`. Three rules hold
+  the design together. **Interim lines never reach the gate** — a question
+  raised from half a sentence is worse than one raised a moment later — so
+  `_observe_text` writes them straight to the transcript and only a final turn
+  becomes an utterance. **A sentence is one line that grows**: `_hold_interim`
+  rewrites the tail in place and `_drop_interim` takes it away for the final
+  to land on the same `seq`, or a five-word sentence would arrive as five
+  ever-longer lines. And **the panel is told which is which** (`final` on the
+  frame), because showing unsettled text as settled quotes somebody on words
+  they have not said yet; it is also why an interim line is not attributed —
+  verification runs on the finished turn, against the audio the words came
+  from. Trap: the stream must re-send a line when its *`final` flag* changes
+  and not only its text. The final replaces the interim in place, so the
+  length is unchanged and so is the text — comparing text alone emitted every
+  interim and no settled line at all, and the transcript filled with sentences
+  that never stopped claiming to be in progress.
+  **And the panel has to accept a line it has already seen.** Its filing rule
+  was `current[seq] !== undefined` — keep the first, ignore the rest — which
+  was right for as long as a line could only arrive once: the stream replays
+  the whole meeting on every connect, and ignoring a repeat is what makes a
+  reconnect idempotent. A streaming recogniser broke that assumption without
+  changing its shape. Keeping the first meant keeping the first *fragment*:
+  the service held `"Hey. What's up?"` and the screen showed `"Hey, what's"`
+  for the rest of the meeting, with every part of the chain working. The
+  question is no longer "have I seen this index" but "is this newer" —
+  `supersedes` takes a growing line and a settled one, and never lets a
+  finished line be un-finished by a replayed interim.
+
 - **The panel has two accounts of one microphone, and a snapshot is not an
   account.** The service's comes from audio it has received; the local
   `captureSession`'s, in the shell, is read **once, on mount** (`refresh()`

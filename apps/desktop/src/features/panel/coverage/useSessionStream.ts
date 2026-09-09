@@ -78,6 +78,43 @@ export interface UseSessionStreamResult {
  * render, not "the log of updates") and forwards nudges through a callback,
  * since nudge queueing and rate-limiting belong to `panel/nudge`, not here.
  */
+/**
+ * Whether a line that has just arrived replaces the one already filed at its
+ * index.
+ *
+ * This was `current[seq] !== undefined` — keep the first, ignore the rest —
+ * and it was right for as long as a line could only arrive once. The stream
+ * replays the whole meeting on every connect, so ignoring a repeat is what
+ * makes a reconnect idempotent.
+ *
+ * A streaming recogniser broke that assumption without changing its shape. A
+ * line now arrives many times: the words so far, growing, and then the
+ * finished sentence in the same place. Keeping the first meant keeping the
+ * *first fragment* — the panel showed "Hey, what's" for the rest of the
+ * meeting while the service held "Hey. What's up?", and every part of the
+ * chain was working. The transcript was not stale, the screen was.
+ *
+ * So the question is no longer "have I seen this index" but "is this newer":
+ *
+ *  - nothing filed yet — take it;
+ *  - the same line, still being spoken — take it, it has grown;
+ *  - unfinished replaced by finished — take it, the speaker has stopped;
+ *  - already finished — keep what is there. A replay after a reconnect is
+ *    the same sentence again, and a *later* interim for a settled line is
+ *    the backlog arriving out of order, which must never un-finish it.
+ */
+export function supersedes(
+  filed: SessionStreamUtterance | undefined,
+  arriving: SessionStreamUtterance,
+): boolean {
+  if (filed === undefined) return true;
+  if (filed.final) return false;
+  // Still being spoken. Take it unless it is the very same words again,
+  // which a reconnect's replay will send and which would re-render the
+  // transcript for nothing.
+  return arriving.text !== filed.text || arriving.final;
+}
+
 export function useSessionStream(
   /**
    * The meeting to follow, or `null` before one has started. Null is a real
@@ -153,7 +190,7 @@ export function useSessionStream(
       if (parsed?.type !== 'utterance') return;
       setByIndex((current) => {
         const { seq } = parsed.utterance;
-        if (current[seq] !== undefined) return current;
+        if (!supersedes(current[seq], parsed.utterance)) return current;
         const next = current.slice();
         if (seq >= next.length) next.length = seq + 1;
         next[seq] = parsed.utterance;

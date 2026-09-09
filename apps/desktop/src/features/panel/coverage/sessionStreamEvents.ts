@@ -93,12 +93,17 @@ interface WireSessionStreamUtterance {
   text: string;
   speaker?: string | null;
   at?: number | null;
+  final?: boolean;
 }
 
 function parseSessionStreamUtterance(rawData: string): SessionStreamUtterance {
   const payload = JSON.parse(rawData) as WireSessionStreamUtterance;
   return {
     seq: payload.seq,
+    // Absent means finished. A service that predates interim lines only ever
+    // sent settled ones, and defaulting the other way would render an entire
+    // meeting as though every word might still change.
+    final: payload.final !== false,
     text: payload.text,
     // Absent and explicitly null mean the same thing and must stay that way:
     // nobody could say who spoke. Defaulting either to a name would put words

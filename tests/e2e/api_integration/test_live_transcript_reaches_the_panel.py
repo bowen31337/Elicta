@@ -268,3 +268,136 @@ def test_a_panel_that_disconnects_leaves_nothing_behind(
     _frames(client, meeting_id)
 
     assert backend.live_watchers.get(meeting_id) in (None, set())
+
+
+def test_a_panel_closing_while_a_line_arrives_does_not_stop_the_transcript(
+    client: TestClient, backend
+) -> None:
+    """The wake-up signal iterates the set of open panels, and the streams
+    themselves add to and remove from it.
+
+    Iterated directly, a panel closing at the moment a line is produced raises
+    `Set changed size during iteration` — inside `observe_utterance`, inside
+    the chunk handler, which swallows it. The visible symptom is a transcript
+    that simply stops, with nothing anywhere saying why: exactly the failure
+    the signal was added to make *faster*.
+    """
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+
+    class _Closing(asyncio.Event):
+        """A panel that disconnects the instant it is woken."""
+
+        def set(self) -> None:  # type: ignore[override]
+            backend.live_watchers[meeting_id].discard(self)
+            super().set()
+
+    backend.live_watchers[meeting_id] = {_Closing(), asyncio.Event(), _Closing()}
+
+    observed = client.post(
+        f"/api/meetings/{meeting_id}/live/utterance",
+        json={"text": "Three fifty a day.", "speaker": "client"},
+    )
+
+    assert observed.status_code == 202, observed.text
+    assert backend.live_transcript[meeting_id][-1]["text"] == "Three fifty a day."
+
+
+# --- a sentence, as it is being said -------------------------------------
+#
+# Waiting for a finished turn means nothing appears until the recogniser is
+# sure the speaker has stopped — about a second after they do, and longer if
+# they trail off. The screen sat blank through every sentence and then printed
+# it whole. Interim lines are what let it keep up with the room.
+#
+# Driven through the lane's own entry point rather than a route: interim lines
+# never travel over HTTP, they are handed straight from the socket reader, so
+# a test written against a route would be testing a fiction.
+
+
+def test_one_sentence_is_one_line_that_grows(client: TestClient, backend) -> None:
+    """Rewritten in place, not appended to.
+
+    Appended, a five-word sentence would arrive as five lines, each a longer
+    copy of the last, and an hour of meeting would be unreadable.
+    """
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+    observe = client.app.state.observe_live_text
+
+    async def spoken() -> None:
+        await observe(meeting_id, "So how are", None, turn=0, final=False)
+        await observe(meeting_id, "So how are arrivals", None, turn=0, final=False)
+        await observe(meeting_id, "So how are arrivals booked?", None, turn=0, final=True)
+
+    asyncio.run(spoken())
+
+    held = backend.live_transcript[meeting_id]
+    assert [line["text"] for line in held] == ["So how are arrivals booked?"]
+    assert held[-1].get("final", True) is True
+
+
+def test_the_next_sentence_is_a_new_line(client: TestClient, backend) -> None:
+    """Keyed on the vendor's turn index, because "the last line" is not
+    enough: a finished turn and the first update of the next arrive in quick
+    succession, and only the index says which is which."""
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+    observe = client.app.state.observe_live_text
+
+    async def spoken() -> None:
+        await observe(meeting_id, "First one.", None, turn=0, final=True)
+        await observe(meeting_id, "And the", None, turn=1, final=False)
+        await observe(meeting_id, "And the second.", None, turn=1, final=True)
+
+    asyncio.run(spoken())
+
+    assert [line["text"] for line in backend.live_transcript[meeting_id]] == [
+        "First one.",
+        "And the second.",
+    ]
+
+
+def test_an_unfinished_line_never_reaches_the_gate(client: TestClient, backend) -> None:
+    """A question raised from half a sentence is worse than one raised a
+    moment later, and interim text is by definition text that may change."""
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+    observe = client.app.state.observe_live_text
+
+    asyncio.run(observe(meeting_id, "We only get a few", None, turn=0, final=False))
+
+    assert backend.live_transcript[meeting_id][-1]["final"] is False
+    assert backend.surfaced_nudges.get(meeting_id, []) == []
+
+
+def test_a_growing_line_reaches_the_panel_on_the_same_seq(
+    client: TestClient, backend
+) -> None:
+    """The panel files a line at its index, so a line that grows must keep
+    its index — arriving under a new one, the same sentence would stack up as
+    several things somebody said."""
+
+    import asyncio
+
+    meeting_id = _meeting(client)
+    observe = client.app.state.observe_live_text
+    asyncio.run(observe(meeting_id, "So how are", None, turn=0, final=False))
+
+    growing = _utterances(client, meeting_id)
+    assert [(u["seq"], u["text"], u["final"]) for u in growing] == [(0, "So how are", False)]
+
+    asyncio.run(observe(meeting_id, "So how are arrivals booked?", None, turn=0, final=True))
+
+    settled = _utterances(client, meeting_id)
+    assert [(u["seq"], u["text"], u["final"]) for u in settled] == [
+        (0, "So how are arrivals booked?", True)
+    ]

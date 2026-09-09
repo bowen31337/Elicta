@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 
-import { useSessionStream } from '../useSessionStream';
+import { supersedes, useSessionStream } from '../useSessionStream';
 import type { SessionStreamSource, SessionStreamSourceFactory } from '../useSessionStream';
 import { parseSessionStreamEvent } from '../sessionStreamEvents';
 
@@ -56,8 +56,31 @@ describe('parsing an utterance frame', () => {
         text: 'Three fifty a day.',
         speaker: 'client',
         at: 1_700_000_003_000,
+        final: true,
       },
     });
+  });
+
+  it('treats a line with no `final` as finished', () => {
+    // A service that predates interim lines only ever sent settled ones.
+    // Defaulting the other way would render a whole meeting as though every
+    // word in it might still change.
+    const parsed = parseSessionStreamEvent('utterance', line(0, 'Yes.', null));
+
+    expect(parsed).toEqual(
+      expect.objectContaining({ utterance: expect.objectContaining({ final: true }) }),
+    );
+  });
+
+  it('carries a line that is still being spoken as unfinished', () => {
+    const parsed = parseSessionStreamEvent(
+      'utterance',
+      JSON.stringify({ seq: 0, text: 'Three fifty a', speaker: null, at: 1, final: false }),
+    );
+
+    expect(parsed).toEqual(
+      expect.objectContaining({ utterance: expect.objectContaining({ final: false }) }),
+    );
   });
 
   it('keeps an unattributed line as unattributed rather than inventing a speaker', () => {
@@ -185,5 +208,51 @@ describe('whether the room will be transcribed at all', () => {
     });
 
     expect(result.current.liveTranscription).toBe(false);
+  });
+});
+
+describe('a line that arrives more than once', () => {
+  /**
+   * The rule was "keep the first, ignore the rest", and it was right for as
+   * long as a line could only arrive once — the stream replays the whole
+   * meeting on every connect, so ignoring a repeat is what makes a reconnect
+   * idempotent.
+   *
+   * A streaming recogniser broke that without changing its shape. A line now
+   * arrives many times: the words so far, growing, then the finished sentence
+   * in the same place. Keeping the first meant keeping the first *fragment* —
+   * the panel showed "Hey, what's" for the rest of the meeting while the
+   * service held "Hey. What's up?". Nothing was broken except the screen.
+   */
+  const line = (text: string, final: boolean) =>
+    ({ seq: 0, text, speaker: null, at: 1, final }) as const;
+
+  it('takes a line where there was none', () => {
+    expect(supersedes(undefined, line('Hey', false))).toBe(true);
+  });
+
+  it('takes the longer words of a line still being spoken', () => {
+    expect(supersedes(line('Hey', false), line("Hey, what's", false))).toBe(true);
+  });
+
+  it('takes the finished sentence over the fragment it grew from', () => {
+    // The failure exactly: without this the screen keeps the fragment.
+    expect(supersedes(line("Hey, what's", false), line("Hey. What's up?", true))).toBe(true);
+  });
+
+  it('keeps a finished line when the same one is replayed', () => {
+    // Every reconnect replays the whole meeting. Re-filing each line would
+    // re-render the transcript on a schedule nobody chose.
+    expect(supersedes(line('Hey. What\'s up?', true), line('Hey. What\'s up?', true))).toBe(false);
+  });
+
+  it('never un-finishes a line that has settled', () => {
+    // A backlog arriving out of order must not turn a finished sentence back
+    // into a fragment on screen.
+    expect(supersedes(line("Hey. What's up?", true), line("Hey, what's", false))).toBe(false);
+  });
+
+  it('ignores an identical interim rather than re-rendering for nothing', () => {
+    expect(supersedes(line('Hey', false), line('Hey', false))).toBe(false);
   });
 });

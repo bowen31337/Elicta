@@ -1039,6 +1039,43 @@ def _section_of_nudge(backend: Backend, engagement_id: str, nudge: Any) -> str |
     return None
 
 
+def _hold_interim(
+    backend: Backend, meeting_id: str, text: str, turn: int | None
+) -> None:
+    """Put the words spoken so far at the end of the transcript.
+
+    Rewritten in place as the turn grows, so one sentence is one line that
+    lengthens rather than a column of ever-longer copies of itself. Keyed on
+    the vendor's `turn_index`, because "the last line" is not enough: a final
+    turn and the first update of the next one arrive in quick succession, and
+    an index is the only thing that says which is which.
+
+    Reassigned rather than appended to, like every other write to these
+    collections: a `DurableMapping` only persists through `__setitem__`.
+    """
+
+    held = list(backend.live_transcript.get(meeting_id, []))
+    line = {"text": text, "speaker": None, "at": datetime.now(UTC), "final": False, "turn": turn}
+    if held and held[-1].get("final") is False and held[-1].get("turn") == turn:
+        held[-1] = line
+    else:
+        held.append(line)
+    backend.live_transcript[meeting_id] = held
+
+
+def _drop_interim(backend: Backend, meeting_id: str, turn: int | None) -> None:
+    """Take the in-progress line away, for the finished one to take its place.
+
+    So a sentence occupies one sequence number from its first word to its
+    last. Left in place, the panel would show the half-spoken line and the
+    finished one as two separate things somebody said.
+    """
+
+    held = backend.live_transcript.get(meeting_id, [])
+    if held and held[-1].get("final") is False and held[-1].get("turn") == turn:
+        backend.live_transcript[meeting_id] = list(held[:-1])
+
+
 def _wake_watchers(backend: Backend, meeting_id: str) -> None:
     """Tell every panel watching this meeting that there is something new.
 
@@ -1047,7 +1084,14 @@ def _wake_watchers(backend: Backend, meeting_id: str) -> None:
     for then waits out the full timeout — slower than not signalling at all.
     """
 
-    for event in backend.live_watchers.get(meeting_id, ()):
+    # A *copy*, and that is the whole of this line's job. The set is mutated
+    # by every stream that opens or closes, and a panel closing while a line
+    # is produced would otherwise raise `Set changed size during iteration`
+    # here — inside `observe_utterance`, inside the chunk handler, which
+    # swallows it. The visible symptom would be a transcript that simply stops,
+    # with nothing anywhere saying why: the exact failure this signal was added
+    # to make faster.
+    for event in tuple(backend.live_watchers.get(meeting_id, ())):
         event.set()
 
 
@@ -2674,6 +2718,22 @@ def _include_operational_routers(
 
         return _live_transcription_blocker() is None
 
+    def _lane_not_answering(meeting_id: str) -> str | None:
+        """Whether the streamed recogniser is currently refusing to connect.
+
+        Only the streamed lane can answer this: the windowed one opens a
+        request per window and has nothing to be persistently wrong about
+        between them.
+        """
+
+        backing_off = getattr(live_utterances, "backing_off", None)
+        if backing_off is None or not backing_off(meeting_id):
+            return None
+        return (
+            "the live recogniser is not answering, so nothing said now is "
+            "being written down — the recording is unaffected"
+        )
+
     def _lane_status(meeting_id: str) -> dict[str, Any]:
         """What the panel needs to read its own silence correctly.
 
@@ -2702,7 +2762,15 @@ def _include_operational_routers(
             # alone says a room will not be transcribed and leaves the panel
             # to guess the remedy — which it did, wrongly, for every
             # deployment running a local model.
-            "live_transcription_reason": _live_transcription_blocker(),
+            # The settings answer first — it is the one with a remedy an
+            # operator can act on — and the runtime one only when settings
+            # have nothing to say. A recogniser that has stopped answering is
+            # otherwise indistinguishable from a quiet room: the lane reports
+            # ready because a credential is configured, audio keeps arriving,
+            # and no line ever appears.
+            "live_transcription_reason": (
+                _live_transcription_blocker() or _lane_not_answering(meeting_id)
+            ),
             # Whether a line can be attributed to anyone. A transcript where
             # every row reads "Unattributed" with nothing to explain it looks
             # broken rather than careful — and the remedy, enrolling a
@@ -2837,6 +2905,9 @@ def _include_operational_routers(
         # shared index would advance on every line spoken and skip the nudge
         # that arrived while it did.
         spoken = 0
+        # The last line as it was last sent — its text and whether it had
+        # finished — so an unchanged line is not re-sent every pass.
+        last_tail: tuple[str, bool] | None = None
         # What the meter last showed this connection. Coverage used to be a
         # single frame at stream open, which was adequate while nothing
         # server-side ever moved it — the panel kept its own count. Now that
@@ -2871,9 +2942,28 @@ def _include_operational_routers(
             # Within one poll both are already in hand, so this costs nothing
             # but ordering.
             said = backend.live_transcript.get(meeting_id, ())
-            if spoken < len(said):
-                utterance = said[spoken]
-                spoken += 1
+            # A line still being spoken is rewritten in place as it grows, so
+            # "have I sent this one" is not enough — the same index has to go
+            # again each time its text changes. Only the *last* line can be in
+            # progress, which keeps this a comparison rather than a scan of an
+            # hour's transcript on every pass.
+            # The last line can change twice over: its text grows while the
+            # speaker talks, and then its `final` flips when they stop. Both
+            # are the *same* line at the same index, so what decides whether
+            # to send it again is the pair, not either half.
+            #
+            # Comparing the text alone missed every settled line. The final
+            # turn replaces the interim one in place, so the length does not
+            # change and neither does the text — only the flag — and the
+            # transcript filled with sentences that never stopped saying they
+            # were still being spoken.
+            tail = (said[-1]["text"], said[-1].get("final", True)) if said else None
+            if spoken < len(said) or (said and tail != last_tail):
+                index = spoken if spoken < len(said) else len(said) - 1
+                utterance = said[index]
+                if spoken < len(said):
+                    spoken += 1
+                last_tail = tail
                 at = utterance.get("at")
                 yield (
                     "utterance",
@@ -2890,9 +2980,13 @@ def _include_operational_routers(
                         # about the text tells a replay from a repetition. The
                         # panel files each line at its index, which makes a
                         # replay idempotent rather than merely detectable.
-                        "seq": spoken - 1,
+                        "seq": index,
                         "text": utterance["text"],
                         "speaker": utterance.get("speaker"),
+                        # Whether this line is finished. A panel showing
+                        # interim text as though it were settled would be
+                        # quoting somebody on words they had not said yet.
+                        "final": utterance.get("final", True),
                         # Milliseconds since the epoch, matching the nudge's
                         # `created_at` beside it — the panel interleaves the
                         # two on one timeline and cannot do that across two
@@ -3837,8 +3931,40 @@ def _include_operational_routers(
     # utterances, the stream carries nudges to the panel. Nothing turned the
     # first into the second, so a real meeting recorded perfectly and left the
     # panel at its resting state from the first word to the last.
-    async def _observe_text(session_id: str, text: str, speaker: str | None) -> None:
+    async def _observe_text(
+        session_id: str,
+        text: str,
+        speaker: str | None,
+        *,
+        turn: int | None = None,
+        final: bool = True,
+    ) -> None:
+        """One line from the live lane, finished or still being spoken.
+
+        **Interim lines never reach the gate.** They go into the transcript so
+        the screen can keep up with the room, and no further: a question
+        raised from half a sentence is worse than one raised a moment later,
+        and interim text is by definition text that may still change. Only a
+        finished turn becomes an utterance anything reasons about.
+
+        A final turn *replaces* the interim line it grew from rather than
+        following it, so the panel sees one line settle rather than the same
+        sentence twice — which is also what keeps the sequence numbers stable
+        across a stream reconnect.
+        """
+
+        if not final:
+            _hold_interim(backend, session_id, text, turn)
+            _wake_watchers(backend, session_id)
+            return
+        _drop_interim(backend, session_id, turn)
         await observe_utterance(session_id, UtteranceRequest(text=text, speaker=speaker))
+
+    # Exposed so a test can drive the streamed lane's own entry point rather
+    # than a stand-in for it: interim lines never travel over HTTP — they are
+    # handed straight from the socket reader to here — so there is no route to
+    # exercise and a test written against one would be testing a fiction.
+    app.state.observe_live_text = _observe_text
 
     async def _identify_speaker(session_id: str, window: bytes) -> str | None:
         """Whose voice is in one window of the meeting (FR-1.6).
