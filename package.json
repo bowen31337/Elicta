@@ -1,7 +1,7 @@
 {
   "name": "elicta",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.37",
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=22.13"
