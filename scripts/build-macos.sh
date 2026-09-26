@@ -8,7 +8,9 @@
 # rebuild the current version rather than the next one.
 #
 # Output lands in apps/desktop/src-tauri/target/<triple>/release/bundle/
-# as both Elicta.app and a .dmg.
+# as both Elicta.app and a .dmg, and the build ends by installing that .app
+# over /Applications/Elicta.app so the copy the machine finds by name is the
+# one just built. --no-install leaves the install alone.
 
 set -euo pipefail
 
@@ -20,11 +22,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # on somebody else's Mac.
 universal=0
 keep_version=0
+install=1
 for arg in "$@"; do
   case "$arg" in
     --universal) universal=1 ;;
     --no-bump|--keep) keep_version=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --no-install) install=0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "build-macos: unknown option $arg" >&2; exit 2 ;;
   esac
 done
@@ -143,6 +147,32 @@ if [[ -n "$unresolvable" && "$rpaths" -eq 0 ]]; then
   echo "error: this bundle cannot be loaded by dyld -- it needs these with no LC_RPATH:" >&2
   echo "$unresolvable" | sed 's/^/    /' >&2
   exit 1
+fi
+
+# --- install it, so the copy found by name is the one just built ------------
+# Left to somebody remembering to open the .dmg, /Applications drifts behind
+# the build tree and nothing says so -- 0.1.0 sat there for a fortnight while
+# 0.1.37 was being built, and searching the machine for "Elicta" found the old
+# one because that is the copy in the place applications live. The same lag is
+# what let a stale install hold port 8000 and shadow an afternoon of rebuilds.
+#
+# So the build installs what it just built. A running copy is refused rather
+# than overwritten: ditto over a bundle whose executable is mapped leaves a
+# process running code that is no longer on disk, which fails later and
+# somewhere else. `lsregister -f` is what makes the new version visible
+# immediately instead of whenever the machine next rescans /Applications.
+if (( install )); then
+  installed="/Applications/Elicta.app"
+  if pgrep -f "$installed/Contents/MacOS/" >/dev/null 2>&1; then
+    echo "!! $installed is running, so it was not replaced. Quit it and run:"
+    echo "       ditto \"$app\" \"$installed\""
+  else
+    rm -rf "$installed"
+    ditto "$app" "$installed"
+    lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    [[ -x "$lsreg" ]] && "$lsreg" -f "$installed"
+    echo "==> installed $installed"
+  fi
 fi
 
 echo

@@ -18,10 +18,21 @@
 # set the freezer verifies the environment against, and the freeze script
 # itself. Change either and the build silently ships the previous service.
 #
+# And a deleted `.dmg` stays mounted. Deleting the image file above does not
+# eject what was mounted from it, and nothing unregisters what was on the
+# volume either -- so a hundred and five `Elicta.app` registrations had piled
+# up, one per image ever opened, every one of them 0.1.0, with four of those
+# volumes still mounted from a file that no longer existed. That is the list
+# the machine consults to answer "which one is Elicta", so searching for the
+# app by name found a version nobody could rebuild ahead of the one built
+# minutes ago.
+#
 # What this removes and what it only reports is the whole design. Build outputs
 # are regenerable and go without asking. An install in /Applications is
 # somebody's property and a running process is somebody's session; both are
-# named, with the command to deal with them, and left alone unless asked.
+# named, with the command to deal with them, and left alone unless asked. A
+# mount sits on that line and is split by whether its image survives: an
+# orphan is garbage and goes, a live one may be in use and is named.
 #
 #   scripts/prune-stale-builds.sh                    # prune outputs, report the rest
 #   scripts/prune-stale-builds.sh --stop-running     # also stop foreign services
@@ -40,7 +51,7 @@ for arg in "$@"; do
     --stop-running) STOP_RUNNING=1 ;;
     --remove-installed) REMOVE_INSTALLED=1 ;;
     --dry-run) DRY_RUN=1 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     *) echo "prune: unknown option $arg" >&2; exit 2 ;;
   esac
 done
@@ -127,6 +138,93 @@ else
       *) remove "$artifact" ;;
     esac
   done
+fi
+
+# --- volumes still mounted from images that are gone ------------------------
+# The section above deletes a superseded `.dmg` and macOS keeps anything
+# mounted from it mounted, so every build that opened one left a volume behind
+# serving an `Elicta.app` from a version nobody can rebuild. Four were mounted
+# here, all 0.1.0, all backed by an image this script had already deleted --
+# and they are indistinguishable from the real thing to anything that finds an
+# app by name.
+#
+# Ejected without being asked only when the backing image is gone: such a
+# mount can never be remounted, nothing can meaningfully be reading it, and it
+# is not a decision anybody made. A mount whose `.dmg` is still on disk may be
+# one somebody opened a moment ago to drag the app across, so it is named with
+# the command rather than pulled out from under them. Only volumes that
+# actually contain an `Elicta.app` are considered at all.
+echo "==> mounted disk images"
+mounted=0
+while IFS=$'\t' read -r image mount; do
+  [ -z "$mount" ] && continue
+  [ -d "$mount/Elicta.app" ] || continue
+  mounted=$((mounted + 1))
+  if [ -n "$image" ] && [ -f "$image" ]; then
+    note "still mounted: $mount (from $image)"
+    note "  eject it with: hdiutil detach \"$mount\""
+  elif [ "$DRY_RUN" = "1" ]; then
+    echo "    would eject: $mount (its image is gone)"
+    pruned=$((pruned + 1))
+  elif hdiutil detach "$mount" >/dev/null 2>&1; then
+    echo "    ejected: $mount (its image is gone)"
+    pruned=$((pruned + 1))
+  else
+    note "could not eject $mount -- something is using it"
+    note "  force it with: hdiutil detach \"$mount\" -force"
+  fi
+done < <(hdiutil info 2>/dev/null | python3 -c '
+import sys
+# hdiutil prints one block per attached image: an "image-path" line, then a
+# device line per partition whose third tab-separated field is the mount
+# point. Blocks are separated by a rule, which is where the path resets --
+# without that a partition with no image of its own inherits the previous
+# block'"'"'s, and the wrong volume gets ejected.
+image = ""
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if line.startswith("====="):
+        image = ""
+    elif line.startswith("image-path"):
+        image = line.split(":", 1)[1].strip()
+    elif line.startswith("/dev/"):
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[2].startswith("/Volumes/"):
+            print("%s\t%s" % (image, parts[2]))
+')
+[ "$mounted" = "0" ] && echo "    none"
+
+# --- registrations for copies that are no longer there ----------------------
+# Ejecting a volume does not unregister what was on it. LaunchServices keys a
+# registration by volume UUID and keeps it against the volume coming back, so
+# a hundred and five `Elicta.app` registrations had accumulated -- one per
+# `.dmg` ever mounted -- and every one of them was 0.1.0. That is what decides
+# which copy the machine considers "Elicta" when somebody searches for it, so
+# the newest build was buried under a hundred dead ones.
+#
+# `-gc` does not collect them and `-kill` was removed in macOS 26; `-u` on the
+# individual path is what is left. Only paths that do not exist are dropped,
+# so this can never unregister a copy somebody has.
+echo "==> stale app registrations"
+lsreg=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+if [ ! -x "$lsreg" ]; then
+  echo "    lsregister not present; nothing to do"
+else
+  stale=0
+  while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    [ -e "$path" ] && continue
+    stale=$((stale + 1))
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "    would unregister: $path"
+    else
+      "$lsreg" -u "$path" 2>/dev/null
+      echo "    unregistered: $path"
+    fi
+    pruned=$((pruned + 1))
+  done < <("$lsreg" -dump 2>/dev/null |
+             sed -n 's/^path: *\(.*Elicta\.app\) (0x[0-9a-f]*)$/\1/p' | sort -u)
+  [ "$stale" = "0" ] && echo "    none"
 fi
 
 # --- a service on the port that is not this build's -------------------------

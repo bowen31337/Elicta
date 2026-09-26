@@ -80,6 +80,7 @@ macOS desktop bundle (`.app` + `.dmg`) — **build locally, not in CI**:
 ```bash
 ./scripts/build-macos.sh              # host arch only; what you want for testing
 ./scripts/build-macos.sh --universal  # arm64 + x86_64, as shipped
+./scripts/build-macos.sh --no-install # build without replacing /Applications/Elicta.app
 ```
 **The bundle carries the service.** Somebody who opens the `.dmg` has no
 Python, so `service_main.py` is frozen by `scripts/build-service-sidecar.sh`
@@ -117,6 +118,34 @@ afternoon of rebuilds: its service held port 8000, the shell adopts whatever
 is already answering, and a panel built minutes ago ran against an API from
 two days earlier. The shell refuses a service it cannot identify as its own
 now (`GET /api/service/identity`), but refusing is not clearing.
+
+**Deleting a `.dmg` does not unmount it, and unmounting it does not unregister
+what was on it.** Both compound silently. Four volumes were mounted here from
+`Elicta_0.1.0_aarch64.dmg` — a file the pruner had already deleted — each
+serving an `Elicta.app` that nothing could rebuild; and LaunchServices held
+**105** `Elicta.app` registrations, one per image ever opened, every one of
+them 0.1.0. That list is what the machine answers "which one is Elicta" from,
+so searching for the app by name reached a fortnight-old version ahead of the
+one built minutes earlier. The pruner now ejects a mount **whose backing image
+is gone** (an orphan can never be remounted and nobody chose it) and only
+*reports* one whose `.dmg` is still on disk, since that may be open in front of
+somebody dragging the app across; and it unregisters any `Elicta.app` path that
+no longer exists. Two traps: `lsregister -gc` does **not** collect these —
+registrations are keyed by volume UUID and held against the volume returning —
+and `-kill` was removed in macOS 26, so `-u` on the individual path is the
+whole mechanism. `.metadata_never_index` is **not** honoured on macOS 26
+either; a probe file inside a marked directory still gets indexed, so it is not
+a way to keep the build tree out of search.
+
+**And `build-macos.sh` installs what it built**, over `/Applications/Elicta.app`,
+unless given `--no-install`. Left to somebody remembering to open the `.dmg`,
+the install drifts behind the build tree with nothing saying so — which is both
+how 0.1.0 stayed the copy the machine offered while 0.1.37 was being built, and
+how a stale install came to hold port 8000. A **running** copy is refused rather
+than overwritten: `ditto` over a bundle whose executable is mapped leaves a
+process running code that is no longer on disk. Note this is a replacement, not
+the removal the pruner still keeps behind a flag — upgrading somebody's install
+is not deleting it.
 
 There is no universal2 route: pydantic-core, cryptography, asyncpg, jiter,
 rpds-py and cffi publish one wheel per architecture and none for universal2, so

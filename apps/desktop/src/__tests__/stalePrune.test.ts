@@ -80,3 +80,76 @@ describe('a build clears what it makes stale', () => {
     expect(pruner).toMatch(/--remove-installed|--force/);
   });
 });
+
+describe('a deleted disk image does not stay mounted', () => {
+  // Deleting a superseded `.dmg` does not eject what was mounted from it, and
+  // macOS keeps such a mount alive indefinitely. Every build that opened one
+  // left a volume behind serving an `Elicta.app` from a version nobody could
+  // rebuild: four were mounted at once here, all 0.1.0, all backed by an image
+  // the pruner had already deleted. Nothing announced them — a mounted volume
+  // is indistinguishable from the real thing to anything that finds an app by
+  // name.
+  const pruner = read(PRUNE);
+
+  it('ejects a mount whose backing image is gone', () => {
+    // Bound to the branch that runs it, not to the word: `hdiutil detach` also
+    // appears in the sentence that *reports* a live mount, so matching the
+    // bare command passed with the eject deleted.
+    expect(pruner).toMatch(/elif hdiutil detach "\$mount"/);
+  });
+
+  it('leaves a mount alone while its image is still on disk', () => {
+    // That one may be open in front of somebody dragging the app across, so
+    // it is named with the command rather than pulled out from under them.
+    // The guard is the test of the image file, and losing it would turn a
+    // report into an eject.
+    expect(pruner).toMatch(/-f "\$image"/);
+  });
+});
+
+describe('what the machine thinks is Elicta is what was last built', () => {
+  // Ejecting a volume does not unregister what was on it: LaunchServices keys
+  // a registration by volume UUID and holds it against the volume returning.
+  // A hundred and five `Elicta.app` registrations had accumulated that way,
+  // one per image ever opened, every one of them 0.1.0 — and that list is
+  // what decides which copy the machine answers with when somebody searches
+  // for the app, so the newest build sat under a hundred dead ones.
+  const pruner = read(PRUNE);
+  const build = read(BUILD);
+
+  it('unregisters copies that are no longer on disk', () => {
+    // The call, not the path to the binary — naming the tool is not using it.
+    expect(pruner).toMatch(/"\$lsreg" -u "\$path"/);
+  });
+
+  it('unregisters only what is actually gone', () => {
+    // The guard that keeps this from ever dropping a copy somebody has. `-gc`
+    // does not collect these and `-kill` was removed in macOS 26, so `-u` on
+    // the individual path is the whole mechanism — and it is as safe as this
+    // check.
+    expect(pruner).toMatch(/\[ -e "\$path" \] && continue/);
+  });
+
+  it('installs what it just built', () => {
+    // Left to somebody remembering to open the `.dmg`, `/Applications` drifts
+    // behind the build tree with nothing saying so — 0.1.0 sat there for a
+    // fortnight while 0.1.37 was being built, and the machine went on offering
+    // the old one, because that is the copy in the place applications live.
+    expect(build).toMatch(/ditto "\$app" "\$installed"/);
+  });
+
+  it('refuses to overwrite a copy that is running', () => {
+    // `ditto` over a bundle whose executable is mapped leaves a process
+    // running code that is no longer on disk, which fails later and somewhere
+    // else. Refusing and saying so is the smaller problem.
+    expect(build).toMatch(/pgrep -f "\$installed/);
+  });
+
+  it('can be told not to', () => {
+    // Installing is the default because a build nobody can find is the
+    // failure being fixed, but a build is not always an install.
+    // The arm that reads it. The flag is named in the header too, and a
+    // documented flag that no `case` accepts is an error, not an option.
+    expect(build).toMatch(/--no-install\) install=0/);
+  });
+});
